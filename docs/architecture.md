@@ -1,13 +1,40 @@
 # Arquitetura
 
-Este documento é um índice curto — a fonte de verdade é [`../app_plan.md`](../app_plan.md).
+Este diretório contém apenas notas curtas de navegação. A fonte de verdade é o conjunto **SDD (Spec-Driven Development)** abaixo.
 
-- **§3** Arquitetura da solução (diagrama + camadas do backend)
-- **§4** Fluxo completo de uma mensagem com foto
-- **§6** Modelagem de banco de dados
-- **§8** Contrato de integração com Anthropic (schema + prompt v2)
-- **§16** Segurança (checklist)
+## Fluxo SDD
 
-## Fases de implementação
+O projeto segue Spec-Driven Development. A ordem é: **Constituição → Spec → Plan → Tasks → Código**. Alterar código sem passar antes pelos artefatos correspondentes viola o processo.
 
-Ver §18 do plano. A Fase 0 (fundação) entrega apenas o esqueleto executável: FastAPI com `/health`, Next.js com página placeholder, Postgres e MinIO subindo via `docker-compose.local.yml`.
+```
+.specify/
+  memory/
+    constitution.md          # princípios inegociáveis (Art. I-X)
+
+specs/
+  001-mvp-registro-diario/
+    spec.md                  # O QUÊ (SP-01..SP-113, invariantes)
+    plan.md                  # COMO (mapeia SPs, ordem, gates)
+    tasks.md                 # tarefas atômicas T-XXX por fase
+    research.md              # ADRs (10 decisões arquiteturais)
+
+app_plan.md                  # design técnico canônico (referenciado por plan.md)
+```
+
+## Índice rápido
+
+- **Princípios que não posso violar:** [`../.specify/memory/constitution.md`](../.specify/memory/constitution.md).
+- **O que o sistema faz (WHAT):** [`../specs/001-mvp-registro-diario/spec.md`](../specs/001-mvp-registro-diario/spec.md).
+- **Como implementar (HOW):** [`../specs/001-mvp-registro-diario/plan.md`](../specs/001-mvp-registro-diario/plan.md) + [`../app_plan.md`](../app_plan.md).
+- **O que fazer agora:** [`../specs/001-mvp-registro-diario/tasks.md`](../specs/001-mvp-registro-diario/tasks.md).
+- **Por que fizemos assim:** [`../specs/001-mvp-registro-diario/research.md`](../specs/001-mvp-registro-diario/research.md).
+
+## Regras de ouro do SDD neste projeto
+
+1. **Nova feature começa pela `spec.md`.** PR isolado, título `spec:`. Nunca implemente sem SP-XX registrado.
+2. **`plan.md` só mapeia SPs para arquivos e ordem.** Não invente comportamento aqui — se for novo comportamento, é `spec.md`.
+3. **`tasks.md` é executável.** Uma tarefa = 1 PR ≤ 1 dia = commits fechando um ou mais T-XXX.
+4. **Emenda constitucional é rara.** Requer PR próprio com prefixo `constitution:`, incremento de versão, cool-off 24h.
+5. **ADR novo sempre que trade-off relevante:** append em `research.md`, nunca reescreva ADR aprovado (use `superseded by`).
+
+Detalhes do processo: [`../specs/001-mvp-registro-diario/plan.md`](../specs/001-mvp-registro-diario/plan.md) §6.
