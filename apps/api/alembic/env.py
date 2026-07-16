@@ -8,10 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.db.base import Base
-
-# Importe módulos de models aqui à medida que forem criados nas próximas fases,
-# para que o autogenerate os enxergue. Ex.:
-# from app.models import users  # noqa: F401
+from app.models import RefreshToken, User  # noqa: F401  (registrar tabelas)
 
 config = context.config
 if config.config_file_name is not None:
