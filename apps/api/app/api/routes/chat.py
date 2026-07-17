@@ -1,13 +1,20 @@
-"""POST /chat/messages e GET /chat/messages (SP-10, SP-11, SP-12, SP-92)."""
+"""POST /chat/messages e GET /chat/messages (SP-10, SP-11, SP-12, SP-13, SP-14, SP-92)."""
 
 from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_session, get_storage_dep
+from app.api.deps import (
+    get_anthropic_client_dep,
+    get_current_user,
+    get_session,
+    get_session_factory_dep,
+    get_storage_dep,
+)
+from app.integrations.anthropic.client import AnthropicClient
 from app.integrations.storage.minio import MinioStorage
 from app.models import User
 from app.schemas.chat import (
@@ -18,6 +25,7 @@ from app.schemas.chat import (
     PostMessageResponse,
 )
 from app.services.chat import ChatService
+from app.services.message_processor import run_processor_in_background
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -29,12 +37,27 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 )
 async def post_message(
     payload: PostMessageRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    anthropic_client: AnthropicClient = Depends(get_anthropic_client_dep),
+    storage: MinioStorage = Depends(get_storage_dep),
+    session_factory=Depends(get_session_factory_dep),
 ) -> PostMessageResponse:
     service = ChatService(session)
     message = await service.post_user_message(
         user=current_user, text=payload.text, media_ids=payload.media_ids
+    )
+    # BackgroundTasks rodam ANTES do cleanup da dep `get_session`; comitamos
+    # explicitamente aqui para que o worker (com sua própria sessão) enxergue
+    # a mensagem.
+    await session.commit()
+    background_tasks.add_task(
+        run_processor_in_background,
+        message.id,
+        session_factory=session_factory,
+        anthropic_client=anthropic_client,
+        storage=storage,
     )
     return PostMessageResponse(message_id=message.id, status="processing")
 

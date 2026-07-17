@@ -64,18 +64,20 @@ Status: **done** (branch `feat/fase-2-messages-media`). 36 testes verdes (SP-10,
 
 ---
 
-## Fase 3 — Integração Anthropic
+## Fase 3 — Integração Anthropic ✅
 
 Meta: LLM interpreta mensagens, devolve JSON validado por Pydantic, sem persistir registros nutricionais ainda (LabelCatalogService/MealService vêm na Fase 4).
 
-- [ ] **T-301** — `app/integrations/anthropic/client.py`: wrapper da SDK oficial com timeout 60s, retries 2 em 5xx/429, download de mídia do MinIO e conversão base64. (M) — Const. Art. II.
-- [ ] **T-302** — `app/integrations/anthropic/prompts/system_v2.md` + `app/schemas/llm.py` (`LLMEnvelope`, `FoodItemIn`, `WaterIn`, `BeverageIn`, `ActivityIn`, `CorrectionIn`, `DeletionIn`, `NutritionLabelIn`). Prompt caching ativo. (M) — Const. §7. Ver `app_plan.md` §8.
-- [ ] **T-303** — Chamada com `tool_use` obrigatório e retry semântico (2 tentativas com feedback do erro Pydantic). (M) — Const. §7. `blocked_by: T-301, T-302`.
-- [ ] **T-304** — `IntentDispatcher` esqueleto: recebe `LLMEnvelope`, roteia para services por `intent`. Fase 3 conecta apenas `clarify` e `unknown` (responde ao chat), `log_food` etc. levantam `NotImplementedError`. (S) — SP-13, SP-14.
-- [ ] **T-305** — `BackgroundTasks.process_user_message`: baixa mídia, chama Anthropic, valida, dispatcher, cria `messages(role='assistant')` com `narrative`. Grava `raw_llm_response`, tokens. (M) — cobre SP-13, SP-14. `blocked_by: T-303, T-304`.
-- [ ] **T-306** — Testes com fixtures de resposta Anthropic (não chama API real). SP-13, SP-14, INV-9. (M) — gate.
+Status: **done** (branch `feat/fase-3-anthropic-integration`). 51 testes verdes (15 novos de LLM cobrindo SP-13, SP-14, INV-9); lint verde.
 
-**Gate Fase 3:** LLM responde no chat com clarify/unknown; sem persistir registros; fluxo de retry semântico coberto.
+- [x] **T-301** — `app/integrations/anthropic/client.py`: `AsyncAnthropic` com timeout 60s, `max_retries=2` (delega retries 5xx/429 pro SDK), extract `tool_use` block. `MinioStorage.get_object` adicionado para download da mídia; base64 feito no cliente. Const. Art. II.
+- [x] **T-302** — `app/schemas/llm.py` com `LLMEnvelope` (`extra=forbid`) + `FoodItemIn`, `WaterIn`, `BeverageIn`, `ActivityIn`, `CorrectionIn`, `DeletionIn`, `NutritionLabelIn` (com validator do `per_serving`). Prompt `system_v2.md` (18 regras) + `tool_schema.py`. `cache_control: ephemeral` no system + tool para prompt caching.
+- [x] **T-303** — `tool_choice={"type":"tool","name":"record_intent"}` força o uso. Retry semântico: no `ValidationError`, envia `assistant` (response) + `user` com o erro Pydantic para até 2 tentativas antes de virar `validation_exhausted`. INV-9: bloco não-`tool_use` → `no_tool_use` (também é erro).
+- [x] **T-304** — `app/services/intent_dispatcher.py`: `clarify`/`unknown` → `DispatchResult` com content. `log_food`/`log_water`/... → `IntentNotImplemented(intent)`. Enum desconhecido cai em `unknown`.
+- [x] **T-305** — `MessageProcessor` + `run_processor_in_background`. Injeção do `session_factory` como dep FastAPI (evita reutilizar `SessionLocal` do módulo em testes com loops diferentes). Handler comita **antes** de agendar a task (BackgroundTasks rodam antes do cleanup da dep de sessão). Persiste `raw_llm_response` completo + tokens + `llm_intent`/`llm_model`/`llm_prompt_version`.
+- [x] **T-306** — `tests/test_llm_flow.py`: 15 casos com `FakeAnthropicClient` injetado. Cobre SP-13 (clarify com pergunta amigável, não cria negócio), SP-14 (timeout, 500, 429, `no_tool_use`, `validation_exhausted` → assistant "não consegui" + `raw_llm_response.error` preservado), intents estruturados → `NotImplemented` amigável, mídia é baixada e forwardada em base64, fluxo end-to-end via `GET /chat/messages`. `no_queued_result` é sentinela para testes que não exercem LLM (não polui `test_chat.py`).
+
+**Gate Fase 3 — cumprido:** LLM responde no chat com clarify/unknown; sem persistir registros; fluxo de retry semântico e fallback de erro cobertos.
 
 ---
 

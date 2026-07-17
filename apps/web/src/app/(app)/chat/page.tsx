@@ -36,11 +36,26 @@ async function uploadMedia(file: File): Promise<string | null> {
   return body.id;
 }
 
+function TypingIndicator() {
+  return (
+    <div
+      aria-live="polite"
+      aria-label="Assistente digitando"
+      className="mr-auto flex max-w-[80%] items-center gap-1 rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800"
+    >
+      <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s]" />
+      <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s]" />
+      <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400" />
+    </div>
+  );
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  const [awaitingAssistant, setAwaitingAssistant] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -62,7 +77,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, awaitingAssistant]);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -70,11 +85,13 @@ export default function ChatPage() {
       pollRef.current = null;
     }
     pollStartRef.current = null;
+    setAwaitingAssistant(false);
   }, []);
 
   const startPolling = useCallback(() => {
     if (pollRef.current) return;
     pollStartRef.current = Date.now();
+    setAwaitingAssistant(true);
     pollRef.current = setInterval(async () => {
       const anchor = lastIdRef.current;
       const query = anchor ? `?after=${encodeURIComponent(anchor)}` : '';
@@ -167,6 +184,7 @@ export default function ChatPage() {
             )}
           </div>
         ))}
+        {awaitingAssistant && <TypingIndicator />}
         <div ref={bottomRef} />
       </div>
 
