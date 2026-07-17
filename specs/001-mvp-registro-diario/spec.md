@@ -98,6 +98,21 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 **SP-14** (`must`) — Timeout ou erro da LLM.
 - >60s ou erro após 2 retries → assistente responde "Não consegui interpretar; pode reformular?" e grava `messages.raw_llm_response.error`. **Nada** persistido.
 
+**SP-15** (`may`) — Envio por tecla Enter.
+- **Given** o usuário está com foco na textarea do chat.
+- **When** aperta `Enter` sem `Shift`.
+- **Then** a mensagem é enviada — mesmo caminho do clique em "Enviar" (SP-10/SP-11).
+- `Shift+Enter` **MUST** inserir quebra de linha em vez de enviar.
+- Textarea vazia e sem mídia anexada → a tecla é ignorada (sem envio, sem erro).
+- Enquanto uma requisição de envio anterior está em curso, a tecla é ignorada para evitar duplo envio.
+
+**SP-16** (`may`) — Captura direta pela câmera em mobile.
+- **Given** o usuário acessa `/chat` em um dispositivo com câmera (celular ou tablet).
+- **When** aciona o seletor de arquivos para anexar imagem.
+- **Then** o sistema operacional oferece "Tirar foto" além de "Escolher da galeria" — habilitado via atributo `capture="environment"` no `<input type="file">` (câmera traseira preferida por padrão para foto de prato/rótulo).
+- Em desktop, o comportamento continua sendo o seletor de arquivo padrão (o `capture` é ignorado pelo navegador). Nenhuma requisição de permissão é feita se o usuário não abrir o seletor.
+- A imagem capturada segue o mesmo fluxo do SP-11 (validação de MIME/tamanho, decode probe, MinIO).
+
 ### 3.3 Registro de alimentos
 
 **SP-20** (`must`) — Texto com quantidades explícitas.
@@ -360,4 +375,5 @@ Registrado aqui para não voltar como dúvida durante execução.
 
 ## Histórico de alterações
 
+- **2026-07-16** — v1.1. Adicionados SP-15 (envio por Enter) e SP-16 (captura direta pela câmera em mobile) como `may` (pós-MVP). Melhorias de UX no chat que não bloqueiam o MVP; entram no backlog para depois da Fase 9.
 - **2026-07-15** — v1.0. Spec inicial extraída de `docs/specs.md`; alinhada com `constitution.md` v1.0.0 e `app_plan.md` 20 seções.
