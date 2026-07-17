@@ -113,6 +113,31 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 - Em desktop, o comportamento continua sendo o seletor de arquivo padrão (o `capture` é ignorado pelo navegador). Nenhuma requisição de permissão é feita se o usuário não abrir o seletor.
 - A imagem capturada segue o mesmo fluxo do SP-11 (validação de MIME/tamanho, decode probe, MinIO).
 
+**SP-17** (`may`) — Limite client-side de 4 imagens por mensagem, com feedback por nome de arquivo.
+- **Given** o usuário seleciona (ou solta) N arquivos no seletor/dropzone do chat.
+- **When** N > 4.
+- **Then** a UI **MUST** aceitar apenas os 4 primeiros (por ordem de seleção) **e** exibir uma mensagem listando o **nome de cada arquivo rejeitado** com o motivo (ex.: *"5 arquivos selecionados. `foto5.png` não foi anexada — limite de 4 por mensagem."*).
+- Se por algum motivo (ex.: bypass programático) mais de 4 `media_ids` chegarem no `POST /chat/messages`, o backend continua rejeitando com 422 (comportamento atual do SP-11); a UI **MUST** exibir na mensagem de erro o nome de cada arquivo excedente com base no cálculo local (não depende do backend nomear).
+- A contagem inclui arquivos já pré-anexados em uma mensagem ainda não enviada (o usuário não consegue passar de 4 anexos no compositor).
+
+**SP-18** (`may`) — Mensagens de erro amigáveis para rejeições de upload de mídia.
+- **Given** o usuário anexa um arquivo que o backend rejeita em `POST /media`.
+- **When** o erro é `file_too_large` (> 8MB, SP-11) **ou** `invalid_image` (decode probe falha, Const. §22) **ou** `unsupported_media_type`.
+- **Then** a UI **MUST** exibir uma mensagem contextual em pt-BR **citando o nome do arquivo** e o motivo em linguagem natural. Exemplos:
+  - `file_too_large` → *"`selfie_grande.jpg` é maior que 8 MB e não pode ser enviada. Reduza a qualidade ou tire outra."*
+  - `invalid_image` → *"`documento.png` não parece ser uma imagem válida."*
+  - `unsupported_media_type` → *"Formato de `arquivo.gif` não suportado. Envie JPEG, PNG ou WEBP."*
+- Cada arquivo rejeitado gera uma linha própria na mensagem de erro; envios em lote não são abortados por falha de um único arquivo (os demais válidos são anexados normalmente).
+- O compositor não fecha nem perde o texto digitado ao mostrar o erro.
+
+**SP-19** (`may`) — Drag-and-drop na área de anexo do chat.
+- **Given** o usuário arrasta um ou mais arquivos sobre o compositor do chat.
+- **When** solta os arquivos.
+- **Then** a UI **MUST** adicioná-los ao anexo da mensagem em preparo, aplicando as mesmas regras do input file (allowlist de MIME, SP-17 para o cap de 4, SP-18 para erros).
+- **MUST** haver feedback visual enquanto o arquivo é arrastado por cima da área (ex.: borda tracejada, mudança de cor de fundo). Ao sair ou soltar, o feedback é removido.
+- Se algum arquivo arrastado for de um tipo não suportado, a UI aplica a mesma mensagem do SP-18.
+- Em desktop, drag-and-drop convive com o botão de seleção; em mobile, o comportamento padrão do sistema (touch) prevalece — o drop é opcional e não obrigatório.
+
 ### 3.3 Registro de alimentos
 
 **SP-20** (`must`) — Texto com quantidades explícitas.
@@ -375,5 +400,6 @@ Registrado aqui para não voltar como dúvida durante execução.
 
 ## Histórico de alterações
 
+- **2026-07-16** — v1.2. Adicionados SP-17 (limite client-side de 4 imagens com feedback por nome), SP-18 (mensagens de erro amigáveis para rejeições de upload citando o nome do arquivo) e SP-19 (drag-and-drop na área de anexo do chat) como `may`. Todos entram no mesmo backlog de UX do chat pós-MVP.
 - **2026-07-16** — v1.1. Adicionados SP-15 (envio por Enter) e SP-16 (captura direta pela câmera em mobile) como `may` (pós-MVP). Melhorias de UX no chat que não bloqueiam o MVP; entram no backlog para depois da Fase 9.
 - **2026-07-15** — v1.0. Spec inicial extraída de `docs/specs.md`; alinhada com `constitution.md` v1.0.0 e `app_plan.md` 20 seções.
