@@ -8,7 +8,14 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.models import RefreshToken, User  # noqa: F401  (registrar tabelas)
+from app.models import (  # noqa: F401  (registrar tabelas)
+    DayLog,
+    Media,
+    Message,
+    MessageMedia,
+    RefreshToken,
+    User,
+)
 
 config = context.config
 if config.config_file_name is not None:

@@ -46,19 +46,21 @@ Status: **done** (branch `feat/fase-1-auth-bootstrap`). 18 testes verdes (SP-01.
 
 ---
 
-## Fase 2 — Mensagens e upload de mídia
+## Fase 2 — Mensagens e upload de mídia ✅
 
 Meta: usuário envia mensagem por chat com texto e/ou fotos; backend persiste sem chamar LLM ainda (mock).
 
-- [ ] **T-201** — Migration para `day_logs`, `messages`, `media`, `message_media`. (S) — Arquivos: `alembic/versions/0002_*.py`, models correspondentes.
-- [ ] **T-202** — `app/integrations/storage/minio.py`: cliente boto3 com endpoint MinIO, PUT via `storage_key = users/{uid}/media/{yyyy}/{mm}/{uuid}.{ext}`, URL assinada de download. (M) — pré-requisito para SP-11.
-- [ ] **T-203** — `POST /media` endpoint: valida MIME server-side, size ≤ 8MB, Pillow decode probe, upload MinIO, insere linha em `media`. (M) — SP-11 (parte). `blocked_by: T-201, T-202`. Const. §22.
-- [ ] **T-204** — `app/services/chat.py` + repositório de mensagens. Cria `messages` + `message_media`, garante `day_logs` para timezone do usuário (SP-92). (M) — SP-10, SP-11, SP-12, SP-92.
-- [ ] **T-205** — `POST /chat/messages` + `GET /chat/messages?after=<id>&limit=`. (M) — SP-10 (retorno 202), SP-12 paginação. `blocked_by: T-204`.
-- [ ] **T-206** — Página `/chat` no frontend: lista mensagens, drop de imagens (react-dropzone), envio via mutation, polling a cada 1.5s por assistant response (com cap 30s). (L) — SP-10, SP-11, SP-14 (parte). `blocked_by: T-205`.
-- [ ] **T-207** — Testes: SP-10, SP-11, SP-12, SP-92. (M) — gate.
+Status: **done** (branch `feat/fase-2-messages-media`). 36 testes verdes (SP-10, SP-11, SP-12, SP-92 + SP-01..06 da Fase 1); lint verde.
 
-**Gate Fase 2:** mensagens persistem, mídia sobe pro MinIO com URL assinada, chat funcional sem LLM. Const. §21-22 verificadas.
+- [x] **T-201** — Migration `0002_chat_and_media.py`: `day_logs` (UNIQUE user_id+log_date, trigger `set_updated_at`), `messages` (GIN em `raw_llm_response`, `(user_id, created_at DESC)`), `media` (UNIQUE `storage_key`), `message_media` n:n. Models correspondentes.
+- [x] **T-202** — `integrations/storage/minio.py`: boto3 S3v4, `put_object` e `presigned_get_url` em thread pool (`asyncio.to_thread`), `make_storage_key(uid, ext)` gera `users/{uid}/media/{yyyy}/{mm}/{uuid}.{ext}`. `S3_PUBLIC_BASE_URL` opcional troca host da URL assinada em prod (MinIO interno + Nginx público).
+- [x] **T-203** — `POST /media` (multipart): allowlist `image/jpeg|png|webp`, size ≤ 8MB, decode probe com Pillow (rejeita corpo não-imagem via `verify()`), SHA-256, persiste com `status='uploaded'`, `width`/`height`. Const. §22.
+- [x] **T-204** — `DayLogRepository.get_or_create` idempotente com `INSERT ... ON CONFLICT DO NOTHING`. `ChatService.post_user_message` valida ownership dos `media_ids` (Const. §21) e usa `ZoneInfo(user.timezone)` para SP-92. `list_messages` paginada por `after`/`before` com âncoras que respeitam a ordem cronológica.
+- [x] **T-205** — `POST /chat/messages` → 202 `{message_id, status:"processing"}`; `GET /chat/messages?after=<id>&before=<id>&limit=<n>` com URLs assinadas na resposta.
+- [x] **T-206** — Página `/chat` no frontend: lista mensagens (auto-scroll), textarea + input file (accept `image/*`, cap 4 arquivos), upload em paralelo → POST mensagem, **polling `after=<lastId>` a cada 1.5s com cap 30s** (para quando a assistant response chegar na Fase 3).
+- [x] **T-207** — 18 novos testes de integração (`test_media.py` + `test_chat.py`): upload happy path (PNG/JPEG), MIME não suportado, imagem falsa, arquivo grande, auth requerida; envio 202, empty message rejeitada, link com 2 mídias, limite de 4, isolamento cross-user (Const. §21), listagem cronológica, `after`, `before`, URLs de mídia; SP-92 cria e reutiliza `day_log` da data local do usuário. `FakeStorage` em memória substitui MinIO via `dependency_overrides`.
+
+**Gate Fase 2 — cumprido:** mensagens persistem, mídia sobe pro MinIO com URL assinada, chat funcional sem LLM. Const. §21-22 verificadas.
 
 ---
 
