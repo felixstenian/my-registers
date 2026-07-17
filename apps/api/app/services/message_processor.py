@@ -27,14 +27,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.integrations.anthropic.client import AnthropicClient, LLMCallResult
+from app.integrations.nutrition.local_tbca import LocalTBCACatalog
 from app.integrations.storage.minio import MinioStorage
-from app.models import Media, Message, MessageMedia
+from app.models import Media, Message, MessageMedia, User
 from app.repositories.message import MessageRepository
+from app.services.daily_recompute import DailyRecomputeService, RecomputeResult
 from app.services.intent_dispatcher import (
     DispatchResult,
     IntentDispatcher,
     IntentNotImplemented,
 )
+from app.services.meal import MealResult, MealService
 
 logger = logging.getLogger("app.message_processor")
 
@@ -91,6 +94,11 @@ class MessageProcessor:
         if result.error is not None or result.envelope is None:
             return await self._record_error(user_message, result)
 
+        # SP-20..SP-26: `log_food` cai fora do dispatcher genérico — precisa
+        # persistir food_records/food_items e disparar o recompute.
+        if result.envelope.intent == "log_food":
+            return await self._handle_log_food(user_message, result)
+
         try:
             dispatch = self.dispatcher.dispatch(result.envelope)
         except IntentNotImplemented as exc:
@@ -101,6 +109,60 @@ class MessageProcessor:
             return await self._record_not_implemented(user_message, result, exc.intent)
 
         return await self._record_success(user_message, result, dispatch)
+
+    async def _handle_log_food(
+        self, user_message: Message, result: LLMCallResult
+    ) -> Message:
+        envelope = result.envelope
+        if envelope is None or not envelope.food_items:
+            return await self._record_error(user_message, result)
+        if user_message.day_log_id is None:
+            logger.warning(
+                "log_food_missing_day_log",
+                extra={"event": "message_processor", "message_id": str(user_message.id)},
+            )
+            return await self._record_error(user_message, result)
+
+        user = await self.session.get(User, user_message.user_id)
+        if user is None:
+            return await self._record_error(user_message, result)
+
+        catalog = LocalTBCACatalog(self.session)
+        meal_service = MealService(self.session, catalog)
+        recompute_service = DailyRecomputeService(self.session)
+
+        meal = await meal_service.create_from_llm(
+            user=user,
+            day_log_id=user_message.day_log_id,
+            message_id=user_message.id,
+            envelope=envelope,
+        )
+        recompute = await recompute_service.recompute(user_message.day_log_id)
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "meal": {
+                "food_record_id": str(meal.food_record.id),
+                "item_ids": [str(i.id) for i in meal.items],
+                "warnings": meal.warnings,
+            },
+            "snapshot_version": recompute.snapshot.version,
+        }
+
+        content = _compose_meal_summary(meal, recompute)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="log_food",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
 
     async def _load_media(
         self, message_id: uuid.UUID
@@ -184,6 +246,54 @@ class MessageProcessor:
             tokens_input=result.tokens_input,
             tokens_output=result.tokens_output,
         )
+
+
+_DISCLAIMER = (
+    "As estimativas nutricionais são aproximações e não substituem "
+    "acompanhamento médico ou nutricional."
+)
+
+
+def _compose_meal_summary(meal: MealResult, recompute: RecomputeResult) -> str:
+    lines: list[str] = ["Registrei:"]
+    for item in meal.items:
+        amount = _amount_label(item.grams, item.ml, item.quantity, item.unit)
+        marks: list[str] = []
+        if item.is_estimate:
+            marks.append("estimativa")
+        if item.needs_confirmation:
+            marks.append("confirmar")
+        marks_str = f" ({', '.join(marks)})" if marks else ""
+        lines.append(f"- {item.detected_name}{f' — {amount}' if amount else ''}{marks_str}")
+
+    snap = recompute.snapshot
+    totals = (
+        f"Total do dia: {int(snap.kcal_in)} kcal · "
+        f"P {int(snap.protein_g)}g · C {int(snap.carbs_g)}g · G {int(snap.fat_g)}g."
+    )
+    lines.append("")
+    lines.append(totals)
+
+    warnings = meal.warnings
+    to_confirm = [w for w in warnings if w["code"] in ("low_confidence_item", "no_catalog_hit")]
+    if to_confirm:
+        names = ", ".join(
+            {w.get("detected_name", w.get("item_id", "item")) for w in to_confirm}
+        )
+        lines.append(f"Confirma esses itens? {names}")
+
+    lines.append(_DISCLAIMER)
+    return "\n".join(lines)
+
+
+def _amount_label(grams, ml, quantity, unit) -> str:
+    if grams is not None and grams > 0:
+        return f"{int(grams)}g"
+    if ml is not None and ml > 0:
+        return f"{int(ml)}ml"
+    if quantity is not None and unit:
+        return f"{quantity} {unit}"
+    return ""
 
 
 def _pack_raw(result: LLMCallResult) -> dict[str, Any]:

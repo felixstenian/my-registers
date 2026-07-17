@@ -81,17 +81,19 @@ Status: **done** (branch `feat/fase-3-anthropic-integration`). 51 testes verdes 
 
 ---
 
-## Fase 4 — Registro de alimentos
+## Fase 4 — Registro de alimentos ✅
 
 Meta: `log_food` cria registros nutricionais com cálculos determinísticos do backend.
 
-- [ ] **T-401** — Migration `food_records`, `food_items`, `nutrient_facts`, `daily_snapshots`, `audit_events`. (M) — Arquivos: `alembic/versions/0003_*.py`.
-- [ ] **T-402** — `app/integrations/nutrition/catalog.py` (protocol) + `LocalTBCACatalog` + normalização de nome. (M) — SP-35 (parcial).
-- [ ] **T-403** — CSV seed TBCA (~50-100 itens iniciais) + `app.cli seed-nutrition`. (M) — pré-requisito para SP-20.
-- [ ] **T-404** — `app/services/nutrition_calculator.py`: computa kcal/macros/micros por item deterministicamente. (S) — INV-1. Cobertura mínima 90%. `blocked_by: T-402`.
-- [ ] **T-405** — `app/services/meal.py`: `MealService.create_from_llm(envelope, message_id)`. Cria `food_records`+`food_items`, chama calculator, grava `audit_events`. (M) — SP-20, SP-23 (parte), SP-24. `blocked_by: T-404`.
-- [ ] **T-406** — `app/services/daily_recompute.py`: recompute from-scratch, escreve `daily_snapshots` incrementando `version`. (M) — INV-4, SP-90 (parte). `blocked_by: T-401`.
-- [ ] **T-407** — Ligar dispatcher: `log_food` → `MealService`. Após: sempre recompute. (S) — `blocked_by: T-405, T-406`.
+Status: **done** (branch `feat/fase-4-food-registry`). 79 testes verdes (28 novos cobrindo SP-20..SP-26 + INV-1 + INV-4 + INV-10); lint verde.
+
+- [x] **T-401** — Migration `0003_food_catalog_snapshots.py`: `food_records` (FK RESTRICT em day_log_id), `food_items` (macros/micros materializados), `nutrient_facts` (aliases GIN + canonical_name index), `daily_snapshots` (UNIQUE day_log_id + version), `audit_events` (JSONB before/after, GIN opcional futuro). Triggers `set_updated_at` reutilizados.
+- [x] **T-402** — `integrations/nutrition/`: `NutritionCatalog` Protocol + `LocalTBCACatalog` com precedência (marca exata > TBCA > label_ocr > manual > verified_by_user > mais recente). `normalize_name` remove acentos + slug + singulariza plurais BR simples.
+- [x] **T-403** — `seed_tbca.csv` com 31 alimentos BR (arroz, feijão preto/carioca, frango peito/coxa, ovo, pão francês/integral, banana, maçã, laranja, mamão, batata, mandioca, tomate, alface, brócolis, queijo, iogurte, carne, salmão, azeite/óleo…). CLI `python -m app.cli seed-nutrition` idempotente.
+- [x] **T-404** — `services/nutrition_calculator.py`: `compute(hit, grams, ml)` puro. `per_100g` × grams/100; `per_100ml` × ml/100; sem hit → zeros com `reasons`. Cobertura 100% via `test_nutrition_calculator.py` (10 casos unit).
+- [x] **T-405** — `MealService.create_from_llm`: uma `food_record` por envelope; para cada `FoodItemIn` lookup no catálogo, cálculo determinístico, persist `food_items` com materialização. Flag `needs_confirmation=True` se `confidence<0.5` ou sem catálogo. Grava `audit_events(actor='llm', action='create', after={meal_slot, occurred_at, item_ids})`.
+- [x] **T-406** — `DailyRecomputeService.recompute(day_log_id)`: SUM sobre `food_items` vivos + JOIN em `food_records` vivos. Upsert em `daily_snapshots` por UNIQUE(day_log_id) com `version = c.version + 1` em conflito. `execution_options(populate_existing=True)` no RETURNING para forçar refresh do identity map (senão a 2ª recompute do mesmo dia devolve o snapshot cacheado da 1ª). Warnings agregam itens sem catálogo + `needs_confirmation`.
+- [x] **T-407** — `MessageProcessor._handle_log_food` chama `MealService` → `DailyRecompute` → cria assistant message com resumo factual dos itens + totais + aviso legal (Const. Art. VII §26 antecipado). `IntentDispatcher` deixa de listar `log_food` como estruturado. Fluxo end-to-end coberto em `test_log_food_flow.py`.
 - [ ] **T-408** — `GET /days/today`, `GET /days/{date}` (só leitura no MVP). (S) — SP-90, SP-91. `blocked_by: T-406`.
 - [ ] **T-409** — Frontend `DayTable`: renderiza totals + records. Fetch em polling e após confirmação do assistente. (M) — SP-90 UI. `blocked_by: T-408`.
 - [ ] **T-410** — Testes: SP-20 a SP-26, INV-1, SP-90, SP-91, SP-92 (foco em timezone). (M) — gate.

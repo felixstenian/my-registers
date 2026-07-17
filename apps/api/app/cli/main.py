@@ -63,6 +63,32 @@ def bootstrap() -> None:
     typer.echo(f"[bootstrap] {action} user_id={user_id}")
 
 
+async def _seed_nutrition() -> tuple[int, int]:
+    from app.integrations.nutrition.seed import seed_from_csv
+
+    async with SessionLocal() as session:
+        result = await seed_from_csv(session)
+        await session.commit()
+        return result.inserted, result.updated
+
+
+@app.command("seed-nutrition")
+def seed_nutrition() -> None:
+    """Popula/atualiza o catálogo `nutrient_facts` a partir de `seed_tbca.csv`.
+
+    Idempotente: rodar duas vezes deixa o banco no mesmo estado da segunda
+    execução do CSV. Não toca em rótulos criados por OCR ou entradas manuais.
+    """
+    settings = get_settings()
+    configure_logging(level=settings.log_level, fmt=settings.log_format)
+    inserted, updated = asyncio.run(_seed_nutrition())
+    logger.info(
+        "seed_nutrition_done",
+        extra={"event": "cli_seed_nutrition", "inserted": inserted, "updated": updated},
+    )
+    typer.echo(f"[seed-nutrition] inserted={inserted} updated={updated}")
+
+
 @app.command()
 def version() -> None:
     typer.echo("my-registers-api 0.0.0")
