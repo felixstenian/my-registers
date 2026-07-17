@@ -138,6 +138,37 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 - Se algum arquivo arrastado for de um tipo não suportado, a UI aplica a mesma mensagem do SP-18.
 - Em desktop, drag-and-drop convive com o botão de seleção; em mobile, o comportamento padrão do sistema (touch) prevalece — o drop é opcional e não obrigatório.
 
+**SP-115** (`may`) — Balão de `log_food` com cards estruturados no chat.
+- **Given** `intent=log_food` foi processado com sucesso (SP-20) e a assistant message correspondente vai renderizar.
+- **Then** o balão **MUST NOT** ser apenas texto corrido; deve renderizar cada `food_items` como um **card estruturado**, com:
+  - Nome do alimento em destaque tipográfico.
+  - Quantidade formatada (`150g` / `250ml` / `1 concha`).
+  - Kcal + macros em linha compacta (`186 kcal · P 4.6g · C 38.7g · G 1.5g · Fibra 2.4g`).
+  - Badges/ícones para `is_estimate=true` e `needs_confirmation=true` — visualmente distintos entre si (a estimativa é "quantidade aproximada", a confirmação é "precisa de sua validação").
+- Um "footer" do balão **MUST** exibir os totais do dia (kcal_in + macros agregados) tipograficamente separado dos itens individuais.
+- O aviso legal (Const. Art. VII §26) continua ao final do balão, em fonte reduzida mas ainda legível (não pode virar tooltip).
+- Em telas pequenas, os cards podem virar linhas verticais empilhadas; a distinção item vs total precisa se manter.
+
+**SP-116** (`may`) — Barra fixa de totais do dia na página do chat.
+- **Given** o usuário está autenticado em `/chat`.
+- **Then** um componente fixo (abaixo do header, acima da lista de mensagens) **MUST** exibir sempre:
+  - `kcal_in` acumulado do dia, com destaque tipográfico.
+  - Macros agregados (P/C/G/fibra em g).
+  - `water_ml` e `other_liquids_ml` (a partir da Fase 5).
+  - Contador de warnings do snapshot (ex.: "2 itens precisam de confirmação") clicável — abre painel/modal com a lista.
+- Consulta `GET /days/today` (SP-90) no primeiro render e **MUST** revalidar sempre que uma assistant message nova for detectada pelo polling do chat (mesmo signal já usado).
+- Em telas pequenas (mobile), colapsa em uma única linha rolável horizontalmente, mantendo `kcal_in` sempre visível.
+- Se ainda não houver registros no dia, exibe estado vazio explicativo (ex.: "Nenhum registro hoje — mande sua primeira mensagem").
+
+**SP-117** (`may`) — Highlight e confirmação inline de itens pendentes.
+- Estende SP-24 (que já pede "destaque na tabela" para `needs_confirmation=true`) fixando **como** o destaque acontece e **o fluxo de confirmação**.
+- **Given** um `food_items` tem `needs_confirmation=true` (por SP-24 confidence baixa ou SP-23 sem catálogo).
+- **Then** na barra de totais (SP-116) e no card do chat (SP-115), o item **MUST** aparecer visualmente marcado (ex.: borda amarela + ícone ⚠️ padronizado com o resto da UI).
+- **When** o usuário clica em "Confirmar" no card do item.
+- **Then** abre um modal com os campos editáveis pré-preenchidos (`grams`, `kcal`, macros principais, `catalog_ref_id` se identificável). Ao submeter, dispara `PATCH /records/food-items/{id}` (endpoint da Fase 6, spec §3.8 correção). Ao sucesso, o snapshot é recomputado no backend (INV-4) e a UI revalida a barra de totais.
+- Se o usuário fechar o modal sem submeter, o item permanece com o destaque até ele confirmar ou descartar.
+- Botão adicional "Descartar" no modal dispara `DELETE /records/food-items/{id}` (soft delete, SP-80/SP-81).
+
 ### 3.3 Registro de alimentos
 
 **SP-20** (`must`) — Texto com quantidades explícitas.
@@ -400,6 +431,7 @@ Registrado aqui para não voltar como dúvida durante execução.
 
 ## Histórico de alterações
 
+- **2026-07-17** — v1.3. Adicionados SP-115 (balão de `log_food` com cards estruturados no chat), SP-116 (barra fixa de totais do dia) e SP-117 (highlight + fluxo de confirmação inline dos itens pendentes, estende SP-24) como `may`. Formalizam o `DayTable` mencionado no `app_plan.md` §11 e o "destaque na tabela" da SP-24.
 - **2026-07-16** — v1.2. Adicionados SP-17 (limite client-side de 4 imagens com feedback por nome), SP-18 (mensagens de erro amigáveis para rejeições de upload citando o nome do arquivo) e SP-19 (drag-and-drop na área de anexo do chat) como `may`. Todos entram no mesmo backlog de UX do chat pós-MVP.
 - **2026-07-16** — v1.1. Adicionados SP-15 (envio por Enter) e SP-16 (captura direta pela câmera em mobile) como `may` (pós-MVP). Melhorias de UX no chat que não bloqueiam o MVP; entram no backlog para depois da Fase 9.
 - **2026-07-15** — v1.0. Spec inicial extraída de `docs/specs.md`; alinhada com `constitution.md` v1.0.0 e `app_plan.md` 20 seções.
