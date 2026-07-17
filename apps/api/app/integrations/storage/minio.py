@@ -71,6 +71,12 @@ class MinioStorage:
             ContentType=content_type,
         )
 
+    async def get_object(self, key: str) -> bytes:
+        response = await asyncio.to_thread(
+            self._client.get_object, Bucket=self.bucket, Key=key
+        )
+        return await asyncio.to_thread(response["Body"].read)
+
     async def presigned_get_url(self, key: str, *, expires_in: int = 3600) -> str:
         url: str = await asyncio.to_thread(
             self._client.generate_presigned_url,
