@@ -1,4 +1,4 @@
-"""Dependências FastAPI reutilizáveis para autenticação e sessão."""
+"""Dependências FastAPI reutilizáveis para autenticação, sessão e storage."""
 
 from __future__ import annotations
 
@@ -11,11 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import UnauthorizedError
 from app.core.security import decode_access_token
 from app.db.session import SessionLocal
+from app.integrations.storage.minio import MinioStorage, get_storage
 from app.models import User
 from app.repositories.user import UserRepository
 
 ACCESS_COOKIE = "access_token"
 REFRESH_COOKIE = "refresh_token"
+
+
+def get_storage_dep() -> MinioStorage:
+    return get_storage()
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

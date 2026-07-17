@@ -92,7 +92,10 @@ async def db_session(test_engine) -> AsyncIterator:
 
     async with test_engine.begin() as conn:
         await conn.execute(
-            text("TRUNCATE refresh_tokens, users RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE message_media, messages, media, day_logs, "
+                "refresh_tokens, users RESTART IDENTITY CASCADE"
+            )
         )
     Session = async_sessionmaker(test_engine, expire_on_commit=False, class_=AsyncSession)
     async with Session() as session:
@@ -108,12 +111,32 @@ def _reset_rate_limiters() -> Iterator[None]:
     reset_login_limiters()
 
 
+class FakeStorage:
+    """MinIO em memória: guarda bytes por key e devolve URL falsa. Isolar
+    testes de rede/S3 real."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, tuple[bytes, str]] = {}
+
+    async def put_object(self, *, key: str, body: bytes, content_type: str) -> None:
+        self.objects[key] = (body, content_type)
+
+    async def presigned_get_url(self, key: str, *, expires_in: int = 3600) -> str:
+        return f"https://fake-minio.test/{key}?sig=stub"
+
+
+@pytest.fixture()
+def fake_storage() -> FakeStorage:
+    return FakeStorage()
+
+
 @pytest_asyncio.fixture()
-async def client(db_session, test_engine) -> AsyncIterator:
+async def client(db_session, test_engine, fake_storage) -> AsyncIterator:
     from httpx import ASGITransport, AsyncClient
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from app.api.deps import get_session as get_session_dep
+    from app.api.deps import get_storage_dep
     from app.main import app
 
     Session = async_sessionmaker(test_engine, expire_on_commit=False, class_=AsyncSession)
@@ -128,6 +151,7 @@ async def client(db_session, test_engine) -> AsyncIterator:
                 raise
 
     app.dependency_overrides[get_session_dep] = _override_session
+    app.dependency_overrides[get_storage_dep] = lambda: fake_storage
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
