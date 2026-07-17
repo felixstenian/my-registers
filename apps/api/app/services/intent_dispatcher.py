@@ -13,11 +13,17 @@ from dataclasses import dataclass
 
 from app.schemas.llm import LLMEnvelope
 
+# Fallbacks são mensagens DIRIGIDAS AO USUÁRIO (2ª pessoa). Nunca cair no
+# `user_text_summary` como conteúdo do assistant — esse campo é resumo em 3ª
+# pessoa para log/auditoria interna, não fala com o usuário.
 _FALLBACK_UNKNOWN = (
     "Consegui receber sua mensagem, mas não deu para saber o que você "
     "quer registrar. Pode reformular?"
 )
-_FALLBACK_CLARIFY = "Pode me dar mais detalhes?"
+_FALLBACK_CLARIFY = (
+    "Pode me contar mais? Você comeu algo, bebeu, treinou, "
+    "ou é só um comentário sobre o dia?"
+)
 
 _STRUCTURED_INTENTS = {
     "log_food",
@@ -51,20 +57,19 @@ class IntentDispatcher:
 
     def dispatch(self, envelope: LLMEnvelope) -> DispatchResult:
         if envelope.intent == "clarify":
-            content = (
-                envelope.clarification_question
-                or envelope.user_text_summary
-                or _FALLBACK_CLARIFY
-            )
+            # Só usamos o campo user-facing (2ª pessoa). Se a LLM esqueceu de
+            # preencher `clarification_question`, entregamos o fallback padrão
+            # em vez de vazar o `user_text_summary` (que é 3ª pessoa e soa
+            # estranho para o usuário — SP-13 UX).
+            content = envelope.clarification_question or _FALLBACK_CLARIFY
             return DispatchResult(
                 content=content,
                 llm_intent=envelope.intent,
                 llm_confidence=envelope.confidence,
             )
         if envelope.intent == "unknown":
-            content = envelope.user_text_summary or _FALLBACK_UNKNOWN
             return DispatchResult(
-                content=content,
+                content=_FALLBACK_UNKNOWN,
                 llm_intent=envelope.intent,
                 llm_confidence=envelope.confidence,
             )
@@ -72,7 +77,7 @@ class IntentDispatcher:
             raise IntentNotImplemented(envelope.intent)
         # intent válido do schema mas fora dos conjuntos conhecidos: trata como unknown
         return DispatchResult(
-            content=envelope.user_text_summary or _FALLBACK_UNKNOWN,
+            content=_FALLBACK_UNKNOWN,
             llm_intent="unknown",
             llm_confidence=envelope.confidence,
         )

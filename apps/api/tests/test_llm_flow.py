@@ -99,6 +99,77 @@ async def test_clarify_does_not_create_business_records(
     assert resp.status_code == 202
 
 
+async def test_clarify_without_question_uses_fallback_not_summary(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """UX: se a LLM esquecer o `clarification_question`, o assistant devolve
+    o fallback em 2ª pessoa — NUNCA vaza o `user_text_summary` (que é 3ª pessoa,
+    tom de log interno). Regressão do feedback SP-13.
+    """
+    await _login(client)
+    envelope = make_envelope(
+        intent="clarify",
+        confidence=0.5,
+        user_text_summary=(
+            "Usuário comentou que o dia foi puxado, sem indicar "
+            "registro específico de alimento, bebida ou atividade."
+        ),
+        needs_clarification=True,
+        clarification_question=None,
+    )
+    fake_anthropic.queue(make_llm_result(envelope))
+
+    resp = await client.post(
+        "/chat/messages", json={"text": "hoje foi puxado"}
+    )
+    assert resp.status_code == 202
+
+    assistant = next(
+        m
+        for m in list((await db_session.execute(select(Message))).scalars())
+        if m.role == "assistant"
+    )
+    # Não deve conter o summary em 3ª pessoa ("Usuário...")
+    assert "Usuário comentou" not in assistant.content
+    # Deve ser o fallback em 2ª pessoa, com pergunta amigável
+    assert "Você" in assistant.content
+    assert assistant.content.endswith("?")
+
+
+async def test_unknown_intent_uses_fallback_not_summary(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """Mesma regra do clarify: unknown nunca vaza `user_text_summary` para o chat."""
+    await _login(client)
+    envelope = make_envelope(
+        intent="unknown",
+        confidence=0.3,
+        user_text_summary="Usuário mandou uma mensagem fora do escopo.",
+        needs_clarification=False,
+        clarification_question=None,
+    )
+    fake_anthropic.queue(make_llm_result(envelope))
+    await client.post("/chat/messages", json={"text": "kkk"})
+
+    assistant = next(
+        m
+        for m in list((await db_session.execute(select(Message))).scalars())
+        if m.role == "assistant"
+    )
+    assert "Usuário mandou" not in assistant.content
+    assert "reformular" in assistant.content.lower()
+
+
 # ---------------------------------------------------------------------------
 # SP-14 — Timeout ou erro da LLM
 # ---------------------------------------------------------------------------
