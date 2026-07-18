@@ -504,9 +504,14 @@ def _compose_activity_summary(
         "vigorous": "intensa",
         "unknown": "sem intensidade informada",
     }.get(record.intensity, record.intensity)
+    source_hint = (
+        " (informado pelo dispositivo)"
+        if record.calc_method == "user_manual"
+        else ""
+    )
     lines = [
         f"Registrei {duration} min de {record.detected_name}"
-        f" ({intensity_label}) — {kcal} kcal gastos.",
+        f" ({intensity_label}) — {kcal} kcal gastos{source_hint}.",
     ]
     if any(w["code"].startswith("missing_") for w in activity.warnings):
         lines.append(

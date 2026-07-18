@@ -72,6 +72,10 @@ class ActivityIn(_StrictBase):
     distance_km: float | None = None
     intensity: Literal["light", "moderate", "vigorous", "unknown"] = "unknown"
     confidence: float = Confidence
+    # Quando o usuário anexa print de smartwatch/app com kcal já calculado,
+    # a LLM extrai esse número aqui. Se presente, é fonte de verdade
+    # (`calc_method='user_manual'`) — sobrescreve o cálculo MET × weight.
+    kcal_burned_reported: float | None = Field(default=None, ge=0, le=10000)
 
 
 class CorrectionIn(_StrictBase):

@@ -100,6 +100,17 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
                     "enum": ["light", "moderate", "vigorous", "unknown"],
                 },
                 "confidence": {"type": "number"},
+                "kcal_burned_reported": {
+                    "type": ["number", "null"],
+                    "minimum": 0,
+                    "maximum": 10000,
+                    "description": (
+                        "Quando a mensagem/foto trouxer o valor total de calorias "
+                        "já calculado pelo dispositivo (smartwatch, esteira, app de "
+                        "corrida), leia esse número aqui em vez de deixar o backend "
+                        "recalcular por MET. Só preencha se estiver visível/dito."
+                    ),
+                },
             },
         },
         "correction": {

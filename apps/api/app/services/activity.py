@@ -1,8 +1,14 @@
 """ActivityService — persiste activity_records com kcal_burned determinístico.
 
-SP-60..64. Se `users.weight_kg` está null, lança `WeightRequired` — o
-processor traduz para uma clarify amigável pedindo o peso, sem persistir
-nada (SP-61).
+SP-60..64.
+
+- Se `users.weight_kg` está null e o envelope NÃO trouxe
+  `kcal_burned_reported`, lança `WeightRequired` (SP-61) — sem peso não
+  dá para calcular por MET.
+- Se o envelope trouxer `kcal_burned_reported` (LLM extraiu de print de
+  smartwatch/app), esse valor é fonte de verdade: `calc_method='user_manual'`
+  (Const. Art. III §10 — recompute mantém o valor materializado, sem
+  refazer MET). Aqui não precisa de peso — o dispositivo já resolveu.
 """
 
 from __future__ import annotations
@@ -56,10 +62,14 @@ class ActivityService:
                 "envelope missing activity block",
                 code="invalid_activity_envelope",
             )
-        if user.weight_kg is None:
-            raise WeightRequired()
 
         entry = envelope.activity
+        has_reported_kcal = entry.kcal_burned_reported is not None
+
+        # SP-61 só se aplica quando NÃO há kcal reportado do dispositivo.
+        if not has_reported_kcal and user.weight_kg is None:
+            raise WeightRequired()
+
         duration_dec = Decimal(str(entry.duration_minutes))
 
         # SP-63: sem duration mas com distance → estimar por velocidade média.
@@ -76,12 +86,27 @@ class ActivityService:
         if entry.activity_type == "strength" and entry.intensity == "unknown":
             intensity_for_calc = "moderate"
 
-        computation = ActivityCalculator.compute(
-            activity_type=entry.activity_type,
-            intensity=intensity_for_calc,
-            duration_minutes=duration_dec,
-            weight_kg=Decimal(str(user.weight_kg)),
-        )
+        if has_reported_kcal:
+            # Valor autoritativo do dispositivo/foto. Mantemos `met_value` do
+            # lookup como contexto para auditoria (se houver match), mas o
+            # kcal_burned vem intacto do reportado.
+            kcal_burned = Decimal(str(entry.kcal_burned_reported))
+            met_value = ActivityCalculator.lookup_met(
+                entry.activity_type, intensity_for_calc
+            )
+            calc_method = "user_manual"
+            computation_reasons: list[str] = []
+        else:
+            computation = ActivityCalculator.compute(
+                activity_type=entry.activity_type,
+                intensity=intensity_for_calc,
+                duration_minutes=duration_dec,
+                weight_kg=Decimal(str(user.weight_kg)),
+            )
+            kcal_burned = computation.kcal_burned
+            met_value = computation.met_value
+            calc_method = computation.calc_method
+            computation_reasons = computation.reasons
 
         confidence = Decimal(str(entry.confidence))
         occurred = occurred_at or envelope.occurred_at_hint or datetime.now(UTC)
@@ -101,9 +126,9 @@ class ActivityService:
                 else None
             ),
             intensity=entry.intensity,
-            met_value=computation.met_value,
-            kcal_burned=computation.kcal_burned,
-            calc_method=computation.calc_method,
+            met_value=met_value,
+            kcal_burned=kcal_burned,
+            calc_method=calc_method,
             confidence=confidence,
         )
 
@@ -116,7 +141,7 @@ class ActivityService:
                     "confidence": float(confidence),
                 }
             )
-        for reason in computation.reasons:
+        for reason in computation_reasons:
             warnings.append(
                 {"code": reason, "record_id": str(record.id)}
             )
@@ -131,7 +156,8 @@ class ActivityService:
             after={
                 "activity_type": entry.activity_type,
                 "duration_minutes": float(duration_dec),
-                "kcal_burned": float(computation.kcal_burned),
+                "kcal_burned": float(kcal_burned),
+                "calc_method": calc_method,
                 "occurred_at": occurred.isoformat(),
             },
         )
