@@ -549,7 +549,7 @@ _FIELD_LABELS = {
 
 def _compose_profile_summary(profile: ProfileUpdateResult) -> str:
     parts: list[str] = []
-    for field, (before, after) in profile.changed_fields.items():
+    for field, (_before, after) in profile.changed_fields.items():
         label = _FIELD_LABELS.get(field, field)
         if field == "weight_kg":
             parts.append(f"{label} atualizado para {after} kg")
