@@ -23,6 +23,14 @@ Regras absolutas:
      `intent=log_beverage`, campo `beverage`, `beverage_kind='other'`.
    - Alimentos sólidos ou semisólidos → `intent=log_food`, `food_items`.
    - Exercícios → `intent=log_activity`, campo `activity`.
+6a. Para `intent=log_activity`, `activity.activity_type` DEVE ser um destes
+    valores canônicos (em inglês, snake_case): `cardio_run` (corrida/running),
+    `cardio_walk` (caminhada/walking), `bike` (bicicleta/ciclismo), `swim`
+    (natação), `strength` (musculação/força/academia), `yoga`, `cardio`
+    (elíptico/HIIT/aeróbica genérica). Se o exercício não encaixar em nenhum,
+    escolha o mais próximo (ex.: "corrida no parque" → `cardio_run`;
+    "aula de spinning" → `cardio`). NUNCA envie o nome livre em pt-BR como
+    `activity_type` — use `detected_name` para a descrição original do usuário.
 7. Se o usuário disser "corrija", "ajuste", "na verdade", "mude", use
    `intent=correct_record` com `correction.target_hint` descrevendo em linguagem
    natural o item afetado (o backend fará o matching contra registros do dia).

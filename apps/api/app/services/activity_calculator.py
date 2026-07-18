@@ -60,6 +60,81 @@ _SPEED_KMH: dict[str, Decimal] = {
     "cardio": Decimal("7.0"),
 }
 
+# Aliases pt-BR/EN → tipos canônicos do _MET_TABLE. A LLM (mesmo com o prompt
+# atualizado) escorrega em "corrida", "run", "running", etc.; normalizar aqui
+# evita cair silenciosamente em `unknown_activity_or_intensity`.
+_ACTIVITY_TYPE_ALIASES: dict[str, str] = {
+    # corrida
+    "corrida": "cardio_run",
+    "correr": "cardio_run",
+    "corri": "cardio_run",
+    "run": "cardio_run",
+    "running": "cardio_run",
+    "jog": "cardio_run",
+    "jogging": "cardio_run",
+    "trote": "cardio_run",
+    # caminhada
+    "caminhada": "cardio_walk",
+    "caminhar": "cardio_walk",
+    "walk": "cardio_walk",
+    "walking": "cardio_walk",
+    "andar": "cardio_walk",
+    # bike
+    "bicicleta": "bike",
+    "ciclismo": "bike",
+    "pedalar": "bike",
+    "pedalada": "bike",
+    "biking": "bike",
+    "cycling": "bike",
+    # natação
+    "natacao": "swim",
+    "nadar": "swim",
+    "nado": "swim",
+    "swimming": "swim",
+    # musculação
+    "musculacao": "strength",
+    "musculação": "strength",
+    "peso": "strength",
+    "pesos": "strength",
+    "academia": "strength",
+    "forca": "strength",
+    "strength_training": "strength",
+    "resistance": "strength",
+    "resistencia": "strength",
+    # yoga
+    "ioga": "yoga",
+    # cardio genérico
+    "eliptico": "cardio",
+    "esteira": "cardio",
+    "escalada": "cardio",
+    "hiit": "cardio",
+    "aerobico": "cardio",
+    "aerobica": "cardio",
+    "spinning": "cardio",
+    "cross_training": "cardio",
+    "funcional": "cardio",
+}
+
+
+def _canonicalize_activity_type(raw: str) -> str:
+    """Aceita `activity_type` livre e devolve o valor canônico se possível.
+
+    Normalização inclui: lowercase, `_` no lugar de espaço/hífen e remoção
+    de acentos comuns. Se não bater com nenhum alias, retorna o valor
+    original (o service ainda pode tentar lookup direto no _MET_TABLE).
+    """
+    if not raw:
+        return raw
+    import unicodedata
+
+    lowered = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    stripped = "".join(
+        ch
+        for ch in unicodedata.normalize("NFKD", lowered)
+        if not unicodedata.combining(ch)
+    )
+    return _ACTIVITY_TYPE_ALIASES.get(stripped, stripped)
+
 
 @dataclass(slots=True)
 class ActivityComputation:
@@ -71,15 +146,21 @@ class ActivityComputation:
 
 class ActivityCalculator:
     @staticmethod
+    def canonicalize(activity_type: str) -> str:
+        return _canonicalize_activity_type(activity_type)
+
+    @staticmethod
     def lookup_met(activity_type: str, intensity: str) -> Decimal | None:
-        return _MET_TABLE.get((activity_type, intensity))
+        canonical = _canonicalize_activity_type(activity_type)
+        return _MET_TABLE.get((canonical, intensity))
 
     @staticmethod
     def estimate_duration_from_distance(
         activity_type: str, distance_km: Decimal
     ) -> Decimal | None:
         """SP-63: sem duração mas com distância → estimar por velocidade média."""
-        speed = _SPEED_KMH.get(activity_type)
+        canonical = _canonicalize_activity_type(activity_type)
+        speed = _SPEED_KMH.get(canonical)
         if speed is None or speed <= 0:
             return None
         return (distance_km / speed) * Decimal("60")
