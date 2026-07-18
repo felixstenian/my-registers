@@ -67,8 +67,9 @@ async def test_activity_service_persists_kcal_when_pt_br_type(
     """End-to-end no service: LLM manda activity_type='corrida', service
     persiste kcal correto (não zero)."""
     admin_user.weight_kg = Decimal("65")
-    from app.repositories.day_log import DayLogRepository
     from datetime import UTC, datetime
+
+    from app.repositories.day_log import DayLogRepository
 
     dl = await DayLogRepository(db_session).get_or_create(
         user_id=admin_user.id, log_date=datetime.now(UTC).date()
