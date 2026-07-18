@@ -8,7 +8,7 @@ carregam payload; para `clarify`/`unknown`/`query_day`/etc, os campos ficam
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -24,9 +24,12 @@ Intent = Literal[
     "query_day",
     "close_day",
     "weekly_summary",
+    "set_profile",
     "clarify",
     "unknown",
 ]
+
+Sex = Literal["m", "f", "o", "n"]
 
 MealSlot = Literal["breakfast", "lunch", "snack", "dinner", "other", "unspecified"]
 
@@ -69,6 +72,10 @@ class ActivityIn(_StrictBase):
     distance_km: float | None = None
     intensity: Literal["light", "moderate", "vigorous", "unknown"] = "unknown"
     confidence: float = Confidence
+    # Quando o usuário anexa print de smartwatch/app com kcal já calculado,
+    # a LLM extrai esse número aqui. Se presente, é fonte de verdade
+    # (`calc_method='user_manual'`) — sobrescreve o cálculo MET × weight.
+    kcal_burned_reported: float | None = Field(default=None, ge=0, le=10000)
 
 
 class CorrectionIn(_StrictBase):
@@ -123,6 +130,20 @@ class NutritionLabelIn(_StrictBase):
         return self
 
 
+class ProfileUpdateIn(_StrictBase):
+    """Atualização de perfil por chat (SP-61 e futuros).
+
+    Pelo menos um campo precisa estar preenchido — validado no service, não
+    no Pydantic, para que a LLM possa mandar um envelope vazio de forma
+    controlada e o backend sinalize `nothing_to_update`.
+    """
+
+    weight_kg: float | None = Field(default=None, gt=0, le=500)
+    height_cm: float | None = Field(default=None, gt=0, le=300)
+    birthdate: date | None = None
+    sex: Sex | None = None
+
+
 class LLMEnvelope(_StrictBase):
     intent: Intent
     confidence: float = Confidence
@@ -138,3 +159,4 @@ class LLMEnvelope(_StrictBase):
     correction: CorrectionIn | None = None
     deletion: DeletionIn | None = None
     nutrition_label: NutritionLabelIn | None = None
+    profile_update: ProfileUpdateIn | None = None

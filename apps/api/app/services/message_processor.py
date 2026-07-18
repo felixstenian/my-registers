@@ -26,18 +26,23 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.exceptions import ValidationAppError
 from app.integrations.anthropic.client import AnthropicClient, LLMCallResult
 from app.integrations.nutrition.local_tbca import LocalTBCACatalog
 from app.integrations.storage.minio import MinioStorage
 from app.models import Media, Message, MessageMedia, User
 from app.repositories.message import MessageRepository
+from app.services.activity import ActivityResult, ActivityService, WeightRequired
+from app.services.beverage import BeverageResult, BeverageService
 from app.services.daily_recompute import DailyRecomputeService, RecomputeResult
+from app.services.hydration import HydrationResult, HydrationService
 from app.services.intent_dispatcher import (
     DispatchResult,
     IntentDispatcher,
     IntentNotImplemented,
 )
 from app.services.meal import MealResult, MealService
+from app.services.profile import ProfileService, ProfileUpdateResult
 
 logger = logging.getLogger("app.message_processor")
 
@@ -94,10 +99,22 @@ class MessageProcessor:
         if result.error is not None or result.envelope is None:
             return await self._record_error(user_message, result)
 
-        # SP-20..SP-26: `log_food` cai fora do dispatcher genérico — precisa
-        # persistir food_records/food_items e disparar o recompute.
-        if result.envelope.intent == "log_food":
-            return await self._handle_log_food(user_message, result)
+        # set_profile (SP-61 fechamento): atualiza users.weight_kg/etc via chat.
+        # Não precisa de day_log_id e não dispara recompute (perfil não afeta
+        # snapshot; activity_records guardam met/kcal_burned no momento).
+        if result.envelope.intent == "set_profile":
+            return await self._handle_set_profile(user_message, result)
+
+        # Intents com persistência custom + recompute:
+        # SP-20..26 log_food; SP-40..42 log_water; SP-50..52 log_beverage;
+        # SP-60..64 log_activity. Todos exigem day_log_id + user.
+        if result.envelope.intent in {
+            "log_food",
+            "log_water",
+            "log_beverage",
+            "log_activity",
+        }:
+            return await self._handle_registration(user_message, result)
 
         try:
             dispatch = self.dispatcher.dispatch(result.envelope)
@@ -110,15 +127,15 @@ class MessageProcessor:
 
         return await self._record_success(user_message, result, dispatch)
 
-    async def _handle_log_food(
+    async def _handle_registration(
         self, user_message: Message, result: LLMCallResult
     ) -> Message:
         envelope = result.envelope
-        if envelope is None or not envelope.food_items:
+        if envelope is None:
             return await self._record_error(user_message, result)
         if user_message.day_log_id is None:
             logger.warning(
-                "log_food_missing_day_log",
+                "registration_missing_day_log",
                 extra={"event": "message_processor", "message_id": str(user_message.id)},
             )
             return await self._record_error(user_message, result)
@@ -128,37 +145,176 @@ class MessageProcessor:
             return await self._record_error(user_message, result)
 
         catalog = LocalTBCACatalog(self.session)
-        meal_service = MealService(self.session, catalog)
         recompute_service = DailyRecomputeService(self.session)
 
-        meal = await meal_service.create_from_llm(
-            user=user,
-            day_log_id=user_message.day_log_id,
-            message_id=user_message.id,
-            envelope=envelope,
-        )
-        recompute = await recompute_service.recompute(user_message.day_log_id)
+        dispatch_meta: dict[str, Any] = {}
+        content: str
+        try:
+            if envelope.intent == "log_food":
+                if not envelope.food_items:
+                    return await self._record_error(user_message, result)
+                meal = await MealService(self.session, catalog).create_from_llm(
+                    user=user,
+                    day_log_id=user_message.day_log_id,
+                    message_id=user_message.id,
+                    envelope=envelope,
+                )
+                recompute = await recompute_service.recompute(user_message.day_log_id)
+                dispatch_meta["meal"] = {
+                    "food_record_id": str(meal.food_record.id),
+                    "item_ids": [str(i.id) for i in meal.items],
+                    "warnings": meal.warnings,
+                }
+                content = _compose_meal_summary(meal, recompute)
+            elif envelope.intent == "log_water":
+                if envelope.water is None:
+                    return await self._record_error(user_message, result)
+                hydration = await HydrationService(self.session).create_from_llm(
+                    user=user,
+                    day_log_id=user_message.day_log_id,
+                    message_id=user_message.id,
+                    envelope=envelope,
+                )
+                recompute = await recompute_service.recompute(user_message.day_log_id)
+                dispatch_meta["water"] = {"record_id": str(hydration.record.id)}
+                content = _compose_water_summary(hydration, recompute)
+            elif envelope.intent == "log_beverage":
+                if envelope.beverage is None:
+                    return await self._record_error(user_message, result)
+                beverage = await BeverageService(self.session, catalog).create_from_llm(
+                    user=user,
+                    day_log_id=user_message.day_log_id,
+                    message_id=user_message.id,
+                    envelope=envelope,
+                )
+                recompute = await recompute_service.recompute(user_message.day_log_id)
+                dispatch_meta["beverage"] = {
+                    "record_id": str(beverage.record.id),
+                    "warnings": beverage.warnings,
+                }
+                content = _compose_beverage_summary(beverage, recompute)
+            elif envelope.intent == "log_activity":
+                if envelope.activity is None:
+                    return await self._record_error(user_message, result)
+                try:
+                    activity = await ActivityService(self.session).create_from_llm(
+                        user=user,
+                        day_log_id=user_message.day_log_id,
+                        message_id=user_message.id,
+                        envelope=envelope,
+                    )
+                except WeightRequired:
+                    # SP-61: sem weight_kg → não persiste; clarify amigável.
+                    return await self._record_clarify(
+                        user_message,
+                        result,
+                        "Antes de calcular as calorias gastas, me diga seu peso "
+                        "atual em kg. Você pode dizer, por exemplo, \"peso 78 kg\".",
+                        code="weight_kg_required",
+                    )
+                recompute = await recompute_service.recompute(user_message.day_log_id)
+                dispatch_meta["activity"] = {
+                    "record_id": str(activity.record.id),
+                    "warnings": activity.warnings,
+                }
+                content = _compose_activity_summary(activity, recompute)
+            else:  # pragma: no cover — guarded by the branch above
+                return await self._record_error(user_message, result)
+        except ValidationAppError as exc:
+            # SP-41 / INV-2: rejeições semânticas (ex.: log_water com bebida
+            # calórica) viram clarify em vez de erro genérico.
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
 
         raw = _pack_raw(result)
         raw["dispatch"] = {
-            "meal": {
-                "food_record_id": str(meal.food_record.id),
-                "item_ids": [str(i.id) for i in meal.items],
-                "warnings": meal.warnings,
-            },
+            **dispatch_meta,
             "snapshot_version": recompute.snapshot.version,
         }
-
-        content = _compose_meal_summary(meal, recompute)
         return await self.messages.create(
             user_id=user_message.user_id,
             day_log_id=user_message.day_log_id,
             role="assistant",
             content=content,
-            llm_intent="log_food",
+            llm_intent=envelope.intent,
             llm_model=result.model,
             llm_prompt_version=result.prompt_version,
             llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_set_profile(
+        self, user_message: Message, result: LLMCallResult
+    ) -> Message:
+        envelope = result.envelope
+        if envelope is None or envelope.profile_update is None:
+            return await self._record_error(user_message, result)
+
+        user = await self.session.get(User, user_message.user_id)
+        if user is None:
+            return await self._record_error(user_message, result)
+
+        try:
+            profile = await ProfileService(self.session).update_from_llm(
+                user=user, envelope=envelope, message_id=user_message.id
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "profile": {
+                "changed": {
+                    k: {"before": v[0], "after": v[1]}
+                    for k, v in profile.changed_fields.items()
+                }
+            }
+        }
+        content = _compose_profile_summary(profile)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="set_profile",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _record_clarify(
+        self,
+        user_message: Message,
+        result: LLMCallResult,
+        content: str,
+        *,
+        code: str,
+    ) -> Message:
+        raw = _pack_raw(result)
+        raw["dispatch"] = {"clarify_reason": code}
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="clarify",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=result.envelope.confidence if result.envelope else None,
             raw_llm_response=raw,
             tokens_input=result.tokens_input,
             tokens_output=result.tokens_output,
@@ -294,6 +450,127 @@ def _amount_label(grams, ml, quantity, unit) -> str:
     if quantity is not None and unit:
         return f"{quantity} {unit}"
     return ""
+
+
+def _totals_line(snap) -> str:
+    return (
+        f"Total do dia: {int(snap.kcal_in)} kcal in · "
+        f"{int(snap.kcal_out)} kcal out · saldo {int(snap.kcal_balance)} kcal · "
+        f"água {int(snap.water_ml)} ml · outros líquidos {int(snap.other_liquids_ml)} ml."
+    )
+
+
+def _compose_water_summary(
+    hydration: HydrationResult, recompute: RecomputeResult
+) -> str:
+    lines = [f"Registrei {hydration.record.volume_ml} ml de água.", ""]
+    lines.append(_totals_line(recompute.snapshot))
+    lines.append(_DISCLAIMER)
+    return "\n".join(lines)
+
+
+def _compose_beverage_summary(
+    beverage: BeverageResult, recompute: RecomputeResult
+) -> str:
+    record = beverage.record
+    lines = [
+        f"Registrei {record.volume_ml} ml de {record.detected_name}"
+        f" ({int(record.kcal or 0)} kcal).",
+    ]
+    to_confirm = [
+        w for w in beverage.warnings
+        if w["code"] in ("no_catalog_hit", "low_confidence_item")
+    ]
+    if to_confirm:
+        names = ", ".join(
+            {w.get("detected_name", record.detected_name) for w in to_confirm}
+        )
+        lines.append(f"Confirma esses itens? {names}")
+    lines.append("")
+    lines.append(_totals_line(recompute.snapshot))
+    lines.append(_DISCLAIMER)
+    return "\n".join(lines)
+
+
+def _compose_activity_summary(
+    activity: ActivityResult, recompute: RecomputeResult
+) -> str:
+    record = activity.record
+    duration = int(record.duration_minutes)
+    kcal = int(record.kcal_burned)
+    intensity_label = {
+        "light": "leve",
+        "moderate": "moderada",
+        "vigorous": "intensa",
+        "unknown": "sem intensidade informada",
+    }.get(record.intensity, record.intensity)
+    source_hint = (
+        " (informado pelo dispositivo)"
+        if record.calc_method == "user_manual"
+        else ""
+    )
+    lines = [
+        f"Registrei {duration} min de {record.detected_name}"
+        f" ({intensity_label}) — {kcal} kcal gastos{source_hint}.",
+    ]
+    if any(w["code"].startswith("missing_") for w in activity.warnings):
+        lines.append(
+            "Alguns dados ficaram estimados; confirma se está certo?"
+        )
+    lines.append("")
+    lines.append(_totals_line(recompute.snapshot))
+    lines.append(_DISCLAIMER)
+    return "\n".join(lines)
+
+
+_CLARIFY_TEMPLATES = {
+    "water_intent_rejected": (
+        "Isso soou como uma bebida com calorias, não água pura. "
+        "Pode confirmar se foi café, leite, suco ou similar?"
+    ),
+    "weight_kg_required": (
+        "Antes de calcular as calorias gastas, preciso do seu peso atual em kg."
+    ),
+    "profile_no_change": (
+        "Recebi seus dados, mas eles já estão iguais aos que tenho. "
+        "Se quiser mudar algo, me passe o valor novo."
+    ),
+}
+
+
+def _clarify_from_validation(exc: ValidationAppError) -> str:
+    return _CLARIFY_TEMPLATES.get(
+        exc.code, "Pode reformular sua mensagem com mais detalhes?"
+    )
+
+
+_FIELD_LABELS = {
+    "weight_kg": "peso",
+    "height_cm": "altura",
+    "birthdate": "data de nascimento",
+    "sex": "sexo",
+}
+
+
+def _compose_profile_summary(profile: ProfileUpdateResult) -> str:
+    parts: list[str] = []
+    for field, (_before, after) in profile.changed_fields.items():
+        label = _FIELD_LABELS.get(field, field)
+        if field == "weight_kg":
+            parts.append(f"{label} atualizado para {after} kg")
+        elif field == "height_cm":
+            parts.append(f"{label} atualizada para {after} cm")
+        else:
+            parts.append(f"{label} atualizado para {after}")
+    joined = "; ".join(parts)
+    if "weight_kg" in profile.changed_fields:
+        follow_up = (
+            " Agora posso calcular kcal gastos — reenvie a atividade "
+            "que você tinha tentado registrar."
+        )
+    else:
+        follow_up = ""
+    return f"Perfil {joined}.{follow_up}"
 
 
 def _pack_raw(result: LLMCallResult) -> dict[str, Any]:
