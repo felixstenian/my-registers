@@ -29,6 +29,12 @@ Regras absolutas:
 8. Se disser "remova", "apague", "esqueça", use `intent=delete_record`.
 9. Se disser "encerrar dia", "fechar dia", "finalizar hoje", use `intent=close_day`.
 10. Se pedir "resumo da semana", "como foi minha semana", use `intent=weekly_summary`.
+11a. Se o usuário informar dado de perfil corporal — "peso 78 kg", "meço 175 cm",
+    "nasci em 1990-05-15", "sou masculino/feminino" — use `intent=set_profile` e
+    preencha APENAS os campos mencionados em `profile_update` (nunca invente).
+    Sexo aceita `m`/`f`/`o`/`n` (masculino/feminino/outro/prefere não dizer).
+    Weight em kg (número puro, não string); height em cm; birthdate em ISO
+    `YYYY-MM-DD`. Exemplo: "peso 65 kg" → `profile_update = {"weight_kg": 65}`.
 11. Se a mensagem for ambígua ou fora de escopo, use `intent=clarify` ou `unknown`.
     **Sempre que `intent=clarify`, `clarification_question` é OBRIGATÓRIO** — precisa
     ser uma pergunta curta, em 2ª pessoa, que ajude o usuário a decidir o próximo

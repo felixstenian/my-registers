@@ -42,6 +42,7 @@ from app.services.intent_dispatcher import (
     IntentNotImplemented,
 )
 from app.services.meal import MealResult, MealService
+from app.services.profile import ProfileService, ProfileUpdateResult
 
 logger = logging.getLogger("app.message_processor")
 
@@ -97,6 +98,12 @@ class MessageProcessor:
 
         if result.error is not None or result.envelope is None:
             return await self._record_error(user_message, result)
+
+        # set_profile (SP-61 fechamento): atualiza users.weight_kg/etc via chat.
+        # Não precisa de day_log_id e não dispara recompute (perfil não afeta
+        # snapshot; activity_records guardam met/kcal_burned no momento).
+        if result.envelope.intent == "set_profile":
+            return await self._handle_set_profile(user_message, result)
 
         # Intents com persistência custom + recompute:
         # SP-20..26 log_food; SP-40..42 log_water; SP-50..52 log_beverage;
@@ -234,6 +241,53 @@ class MessageProcessor:
             role="assistant",
             content=content,
             llm_intent=envelope.intent,
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_set_profile(
+        self, user_message: Message, result: LLMCallResult
+    ) -> Message:
+        envelope = result.envelope
+        if envelope is None or envelope.profile_update is None:
+            return await self._record_error(user_message, result)
+
+        user = await self.session.get(User, user_message.user_id)
+        if user is None:
+            return await self._record_error(user_message, result)
+
+        try:
+            profile = await ProfileService(self.session).update_from_llm(
+                user=user, envelope=envelope, message_id=user_message.id
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "profile": {
+                "changed": {
+                    k: {"before": v[0], "after": v[1]}
+                    for k, v in profile.changed_fields.items()
+                }
+            }
+        }
+        content = _compose_profile_summary(profile)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="set_profile",
             llm_model=result.model,
             llm_prompt_version=result.prompt_version,
             llm_confidence=envelope.confidence,
@@ -472,6 +526,10 @@ _CLARIFY_TEMPLATES = {
     "weight_kg_required": (
         "Antes de calcular as calorias gastas, preciso do seu peso atual em kg."
     ),
+    "profile_no_change": (
+        "Recebi seus dados, mas eles já estão iguais aos que tenho. "
+        "Se quiser mudar algo, me passe o valor novo."
+    ),
 }
 
 
@@ -479,6 +537,35 @@ def _clarify_from_validation(exc: ValidationAppError) -> str:
     return _CLARIFY_TEMPLATES.get(
         exc.code, "Pode reformular sua mensagem com mais detalhes?"
     )
+
+
+_FIELD_LABELS = {
+    "weight_kg": "peso",
+    "height_cm": "altura",
+    "birthdate": "data de nascimento",
+    "sex": "sexo",
+}
+
+
+def _compose_profile_summary(profile: ProfileUpdateResult) -> str:
+    parts: list[str] = []
+    for field, (before, after) in profile.changed_fields.items():
+        label = _FIELD_LABELS.get(field, field)
+        if field == "weight_kg":
+            parts.append(f"{label} atualizado para {after} kg")
+        elif field == "height_cm":
+            parts.append(f"{label} atualizada para {after} cm")
+        else:
+            parts.append(f"{label} atualizado para {after}")
+    joined = "; ".join(parts)
+    if "weight_kg" in profile.changed_fields:
+        follow_up = (
+            " Agora posso calcular kcal gastos — reenvie a atividade "
+            "que você tinha tentado registrar."
+        )
+    else:
+        follow_up = ""
+    return f"Perfil {joined}.{follow_up}"
 
 
 def _pack_raw(result: LLMCallResult) -> dict[str, Any]:
