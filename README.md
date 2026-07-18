@@ -1,16 +1,6 @@
 # my-registers
 
-Aplicação web privada de registro diário de alimentação, hidratação e atividade física por chat com IA (Anthropic Claude multimodal).
-
-Este projeto segue **Spec-Driven Development**. Antes de escrever código, consulte na ordem:
-
-1. [`.specify/memory/constitution.md`](./.specify/memory/constitution.md) — princípios inegociáveis.
-2. [`specs/001-mvp-registro-diario/spec.md`](./specs/001-mvp-registro-diario/spec.md) — o quê (SP-01..SP-113 + invariantes).
-3. [`specs/001-mvp-registro-diario/plan.md`](./specs/001-mvp-registro-diario/plan.md) — como (mapeia SPs para arquivos, gates, ordem).
-4. [`specs/001-mvp-registro-diario/tasks.md`](./specs/001-mvp-registro-diario/tasks.md) — tarefas atômicas T-XXX por fase.
-5. [`specs/001-mvp-registro-diario/research.md`](./specs/001-mvp-registro-diario/research.md) — ADRs.
-
-Design técnico canônico completo em [`app_plan.md`](./app_plan.md). Navegação curta em [`docs/architecture.md`](./docs/architecture.md).
+Aplicação web privada de registro diário de alimentação, hidratação e atividade física por chat com IA (Anthropic Claude multimodal). Plano técnico completo em [`app_plan.md`](./app_plan.md).
 
 ## Stack
 
@@ -23,15 +13,12 @@ Design técnico canônico completo em [`app_plan.md`](./app_plan.md). Navegaçã
 ## Estrutura
 
 ```
-.specify/memory/      # constituição
-specs/                # spec-kit por feature (spec.md, plan.md, tasks.md, research.md)
 apps/
-  api/                # FastAPI
-  web/                # Next.js
-infra/                # Nginx, Certbot (produção)
-scripts/              # Backups, bootstrap
-docs/                 # navegação curta
-app_plan.md           # design técnico canônico
+  api/    # FastAPI
+  web/    # Next.js
+infra/    # Nginx, Certbot (produção)
+scripts/  # Backups, bootstrap
+docs/     # Documentação
 ```
 
 ## Desenvolvimento local
@@ -95,6 +82,4 @@ pnpm compose:up
 
 ## Roadmap
 
-Fases de execução em [`specs/001-mvp-registro-diario/tasks.md`](./specs/001-mvp-registro-diario/tasks.md). Contexto de cada fase em [`app_plan.md`](./app_plan.md) §18.
-
-**Estado atual:** Fase 0 concluída (commit `87b8382`). Próxima: Fase 1 (autenticação + bootstrap admin).
+Ver §18 de [`app_plan.md`](./app_plan.md).
