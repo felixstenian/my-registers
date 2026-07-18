@@ -25,17 +25,17 @@ _FALLBACK_CLARIFY = (
     "ou é só um comentário sobre o dia?"
 )
 
+# Intents que o MessageProcessor trata diretamente (persistência custom):
+# - log_food (Fase 4), log_water/log_beverage/log_activity (Fase 5).
+# Não devem passar pelo dispatcher; se chegarem aqui é bug e cai como unknown.
+# Intents que ainda dependem de fase futura ficam aqui:
 _STRUCTURED_INTENTS = {
-    "log_food",
-    "log_nutrition_label",
-    "log_water",
-    "log_beverage",
-    "log_activity",
-    "correct_record",
-    "delete_record",
-    "query_day",
-    "close_day",
-    "weekly_summary",
+    "log_nutrition_label",  # Fase 4.b
+    "correct_record",  # Fase 6
+    "delete_record",  # Fase 6
+    "query_day",  # Fase 7
+    "close_day",  # Fase 7
+    "weekly_summary",  # Fase 8
 }
 
 

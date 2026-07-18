@@ -118,20 +118,22 @@ Meta: cadastrar produtos via foto de rótulo; opcionalmente registrar consumo na
 
 ---
 
-## Fase 5 — Hidratação e atividades
+## Fase 5 — Hidratação e atividades ✅
 
 Meta: registrar água, outros líquidos e atividades; snapshot inclui todos.
 
-- [ ] **T-501** — Migration `water_records`, `beverage_records`, `activity_records`. (S)
-- [ ] **T-502** — `HydrationService.create_from_llm` + validação anti-dupla-contagem (rejeita `log_water` com `kcal>0`). (M) — SP-40, SP-41, SP-42, INV-2. `blocked_by: T-501`.
-- [ ] **T-503** — `BeverageService.create_from_llm` reusando `NutritionCalculator` para macros do catálogo. (M) — SP-50, SP-51, SP-52, INV-3. `blocked_by: T-501, T-404`.
-- [ ] **T-504** — Tabela seed de METs por `activity_type`/`intensity` + `ActivityCalculator.compute(activity, user)`. (M) — SP-60, SP-62, SP-63, SP-64.
-- [ ] **T-505** — `ActivityService.create_from_llm`. Se `users.weight_kg` for null, retorna intent de esclarecimento sem persistir. (M) — SP-61. `blocked_by: T-504`.
-- [ ] **T-506** — Estender `DailyRecomputeService` para incluir água, líquidos, kcal_out. (S) — SP-90. `blocked_by: T-406, T-502, T-503, T-505`.
-- [ ] **T-507** — Ligar dispatcher: `log_water`, `log_beverage`, `log_activity`. (S)
-- [ ] **T-508** — Testes: SP-40 a SP-64, INV-2, INV-3. (M) — gate.
+Status: **done** (branch `feat/fase-5-hydration-beverage-activity`). 108 testes verdes (29 novos cobrindo SP-40..42, SP-50..52, SP-60..64, INV-2, INV-3); lint verde.
 
-**Gate Fase 5:** os três novos tipos de registro funcionam; snapshot completo. Const. Art. IV verificada por teste.
+- [x] **T-501** — Migration `0004_hydration_beverage_activity.py`: `water_records` (schema **sem** kcal/macros — INV-2 estrutural), `beverage_records` (macros/micros materializados + FK opcional para nutrient_facts), `activity_records` (met_value, kcal_burned, calc_method). Triggers `set_updated_at` reutilizados.
+- [x] **T-502** — `HydrationService.create_from_llm` — cria `water_records`. Análise defensiva do `user_text_summary` (com acentos removidos) contra café/leite/suco/refrigerante/álcool → `ValidationAppError(water_intent_rejected)`; MessageProcessor traduz em clarify (SP-41).
+- [x] **T-503** — `BeverageService.create_from_llm` — `LocalTBCACatalog` + `NutritionCalculator` (per_100ml). Materializa kcal/macros/micros. `needs_confirmation` idem MealService. Adicionadas 4 bebidas ao `seed_tbca.csv` (café coado, leite integral, suco de laranja, refrigerante cola).
+- [x] **T-504** — `ActivityCalculator` — tabela MET × intensidade para 7 tipos comuns (cardio_run/walk, bike, swim, strength, yoga, cardio genérico). `estimate_duration_from_distance` para SP-63. 11 casos unit cobrem SP-60/SP-64/SP-63.
+- [x] **T-505** — `ActivityService.create_from_llm` — chama calculator; `WeightRequired` levantado se `users.weight_kg` null (SP-61). SP-62: strength com `unknown` intensity usa MET moderate no cálculo mas grava `unknown` no registro. SP-63: sem duration + com distance → estima por velocidade média.
+- [x] **T-506** — `DailyRecomputeService` estende para agregar `water_ml` (WaterRecord), `other_liquids_ml` + kcal_in + macros (BeverageRecord), `kcal_out` (ActivityRecord). `kcal_balance = kcal_in - kcal_out`. Warnings agregam entidades por tabela (`entity` field). INV-2/INV-3 garantidos: água nunca em kcal_in, bebida calórica nunca em water_ml.
+- [x] **T-507** — `MessageProcessor._handle_registration` unifica log_food/log_water/log_beverage/log_activity. `IntentDispatcher` deixa de listar os quatro como estruturados. `ValidationAppError`/`WeightRequired` viram assistant clarify amigáveis.
+- [x] **T-508** — Testes: `test_activity_calculator.py` (11 unit), `test_hydration_beverage_activity.py` (10 integração), `test_log_liquids_activity_flow.py` (6 end-to-end incluindo mix de 4 registros num dia com kcal_in + kcal_out + water_ml + other_liquids_ml corretos).
+
+**Gate Fase 5 — cumprido:** os três novos tipos de registro funcionam; snapshot completo. Const. Art. IV verificada por teste (INV-2/INV-3).
 
 ---
 
