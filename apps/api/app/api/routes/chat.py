@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -64,6 +64,7 @@ async def post_message(
 
 @router.get("/messages", response_model=MessagesListResponse)
 async def list_messages(
+    response: Response,
     after: uuid.UUID | None = Query(default=None),
     before: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
@@ -71,6 +72,10 @@ async def list_messages(
     session: AsyncSession = Depends(get_session),
     storage: MinioStorage = Depends(get_storage_dep),
 ) -> MessagesListResponse:
+    # Chat depende de poll da mesma URL; sem `Cache-Control` explícito, alguns
+    # browsers aplicam heurística de freshness e servem a resposta vazia do
+    # cache até o cap do poll expirar (bug reportado em 2026-07-19).
+    response.headers["Cache-Control"] = "no-store"
     service = ChatService(session)
     items = await service.list_messages(
         user=current_user, after_id=after, before_id=before, limit=limit

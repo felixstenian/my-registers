@@ -44,6 +44,7 @@ logger = logging.getLogger("app.anthropic")
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "system_v2.md"
 _NARRATIVE_PROMPT_PATH = Path(__file__).parent / "prompts" / "narrative_v1.md"
+_WEEKLY_NARRATIVE_PROMPT_PATH = Path(__file__).parent / "prompts" / "weekly_narrative_v1.md"
 
 # Compressão de imagem — limite conservador para preservar OCR de rótulo.
 _IMAGE_MAX_SIDE = 1024
@@ -62,6 +63,11 @@ def _load_system_prompt() -> str:
 @lru_cache
 def _load_narrative_prompt() -> str:
     return _NARRATIVE_PROMPT_PATH.read_text(encoding="utf-8")
+
+
+@lru_cache
+def _load_weekly_narrative_prompt() -> str:
+    return _WEEKLY_NARRATIVE_PROMPT_PATH.read_text(encoding="utf-8")
 
 
 @dataclass(slots=True)
@@ -330,6 +336,93 @@ class AnthropicClient:
         )
 
     NARRATIVE_PROMPT_VERSION = "narrative_v1"
+    WEEKLY_NARRATIVE_PROMPT_VERSION = "weekly_narrative_v1"
+
+    async def call_weekly_narrative(self, totals_payload: dict[str, Any]) -> NarrativeResult:
+        """Narrativa semanal (SP-111 / T-802).
+
+        Segunda chamada, sem tool_use, temperature=0.3, roteia sempre pro
+        `self.model` principal. Payload contém window_start/end + totals +
+        averages + warning_codes; nunca listas cruas de registros.
+        """
+        if not self._configured or self._client is None:
+            return NarrativeResult(
+                text=None,
+                tokens_input=0,
+                tokens_output=0,
+                model=self.model,
+                prompt_version=self.WEEKLY_NARRATIVE_PROMPT_VERSION,
+                error="anthropic_not_configured",
+            )
+
+        import json
+
+        user_text = (
+            "Resumo agregado da semana (backend calculou tudo; use exatos):\n"
+            f"{json.dumps(totals_payload, ensure_ascii=False)}"
+        )
+
+        try:
+            response = await self._client.messages.create(
+                model=self.model,
+                max_tokens=500,
+                temperature=0.3,
+                system=[
+                    {
+                        "type": "text",
+                        "text": _load_weekly_narrative_prompt(),
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": user_text}],
+                    }
+                ],
+            )
+        except anthropic.APITimeoutError:
+            return NarrativeResult(
+                text=None,
+                tokens_input=0,
+                tokens_output=0,
+                model=self.model,
+                prompt_version=self.WEEKLY_NARRATIVE_PROMPT_VERSION,
+                error="anthropic_timeout",
+            )
+        except anthropic.APIError as exc:
+            logger.warning(
+                "anthropic_weekly_narrative_error",
+                extra={"event": "anthropic_error", "err": type(exc).__name__},
+            )
+            return NarrativeResult(
+                text=None,
+                tokens_input=0,
+                tokens_output=0,
+                model=self.model,
+                prompt_version=self.WEEKLY_NARRATIVE_PROMPT_VERSION,
+                error="anthropic_error",
+            )
+
+        usage = getattr(response, "usage", None)
+        tokens_input = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
+        tokens_output = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
+
+        text_blocks = [
+            getattr(block, "text", "")
+            for block in getattr(response, "content", [])
+            if getattr(block, "type", None) == "text"
+        ]
+        joined = "\n".join(t for t in text_blocks if t).strip()
+
+        return NarrativeResult(
+            text=joined or None,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            model=self.model,
+            prompt_version=self.WEEKLY_NARRATIVE_PROMPT_VERSION,
+            error=None if joined else "empty_narrative",
+        )
 
     async def call_narrative(
         self,

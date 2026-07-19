@@ -21,7 +21,9 @@ type Message = {
 
 const MAX_FILES = 4;
 const POLL_INTERVAL_MS = 1500;
-const POLL_CAP_MS = 30_000;
+// Sonnet com imagem + retry semântico pode passar dos 30s. 60s cobre
+// >99% dos casos e ainda dá timeout gracioso.
+const POLL_CAP_MS = 60_000;
 
 async function uploadMedia(file: File): Promise<string | null> {
   const form = new FormData();
@@ -79,13 +81,18 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, awaitingAssistant]);
 
-  const stopPolling = useCallback(() => {
+  const stopPolling = useCallback((reason?: 'timeout') => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
     pollStartRef.current = null;
     setAwaitingAssistant(false);
+    if (reason === 'timeout') {
+      setError(
+        'A resposta demorou mais do que o esperado. Ela ainda pode chegar — atualize a tela em alguns segundos.',
+      );
+    }
   }, []);
 
   const startPolling = useCallback(() => {
@@ -108,7 +115,7 @@ export default function ChatPage() {
         }
       }
       if (pollStartRef.current && Date.now() - pollStartRef.current > POLL_CAP_MS) {
-        stopPolling();
+        stopPolling('timeout');
         return true;
       }
       return false;

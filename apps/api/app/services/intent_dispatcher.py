@@ -30,7 +30,6 @@ _FALLBACK_CLARIFY = (
 # Intents que ainda dependem de fase futura ficam aqui:
 _STRUCTURED_INTENTS = {
     "log_nutrition_label",  # Fase 4.b
-    "weekly_summary",  # Fase 8
 }
 
 
