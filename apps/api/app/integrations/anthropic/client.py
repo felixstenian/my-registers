@@ -5,22 +5,34 @@ e Const. §19 (segredos nunca em log). Referências:
 - Estratégia: `app_plan.md` §8.1
 - Schema tool: `app_plan.md` §8.2 e `tool_schema.py`
 - Prompt de sistema: `prompts/system_v2.md`
+- Plano de otimização: `docs/token-optimization-plan.md`
 
-O SDK oficial já implementa retries em 5xx/429 (`max_retries=2`, backoff
-exponencial); nós tratamos manualmente retry SEMÂNTICO: se o `input` da tool
-falhar na validação Pydantic, mandamos o `ValidationError` de volta como
-`role=user` numa nova chamada (até 2 tentativas).
+Otimizações ativas (Tier 1 do plano):
+1. **Log de cache** — cada call loga `cache_creation` e `cache_read`
+   input_tokens do `response.usage`, permitindo medir hit rate.
+2. **Compressão de imagem** — Pillow redimensiona longest-side ≤ 1024px e
+   reencoda como JPEG q=75 antes do base64. Reduz 5-15× o tamanho.
+3. **Roteamento por complexidade** — texto puro sem foto usa o
+   `fallback_model` (Haiku, ~4× mais barato que Sonnet); qualquer imagem
+   usa o `model` principal (Sonnet, melhor visão).
+4. **1 retry semântico** (default) em vez de 2 — a Fase 5 mostrou que o
+   segundo retry raramente resolve, prompt já é estrito o suficiente.
+
+SDK oficial já implementa retries HTTP em 5xx/429 (`max_retries=2`,
+backoff exponencial); nós só tratamos retry SEMÂNTICO (Pydantic).
 """
 
 from __future__ import annotations
 
 import base64
+import io
 import logging
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 import anthropic
@@ -31,6 +43,14 @@ from app.schemas.llm import LLMEnvelope
 logger = logging.getLogger("app.anthropic")
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "system_v2.md"
+
+# Compressão de imagem — limite conservador para preservar OCR de rótulo.
+_IMAGE_MAX_SIDE = 1024
+_IMAGE_JPEG_QUALITY = 75
+
+# Cap client-side para o "texto puro é curto" heurístico do roteamento.
+# Mensagens longas ainda podem se beneficiar do Sonnet.
+_HAIKU_TEXT_MAX_CHARS = 500
 
 
 @lru_cache
@@ -63,6 +83,7 @@ class AnthropicClient:
         *,
         api_key: str,
         model: str,
+        fallback_model: str | None = None,
         max_tokens: int = 1024,
         temperature: float = 0.1,
         timeout_seconds: float = 60.0,
@@ -82,6 +103,7 @@ class AnthropicClient:
             else None
         )
         self.model = model
+        self.fallback_model = fallback_model or model
         self.max_tokens = max_tokens
         self.temperature = temperature
 
@@ -89,12 +111,30 @@ class AnthropicClient:
     def is_configured(self) -> bool:
         return self._configured
 
+    def _pick_model(
+        self, *, has_images: bool, user_text: str | None
+    ) -> str:
+        """Roteamento por complexidade (Tier 1.3 do plano):
+
+        - Qualquer foto → `model` principal (multimodal precisa de Sonnet).
+        - Sem foto + texto curto → `fallback_model` (Haiku, ~4× mais barato).
+        - Sem foto + texto longo (>500 chars) → `model` principal (extração
+          longa pede mais robustez).
+        """
+        if has_images:
+            return self.model
+        if user_text is None:
+            return self.fallback_model
+        if len(user_text) > _HAIKU_TEXT_MAX_CHARS:
+            return self.model
+        return self.fallback_model
+
     async def call_record_intent(
         self,
         *,
         user_text: str | None,
         images: list[tuple[str, bytes]] | None = None,
-        max_semantic_retries: int = 2,
+        max_semantic_retries: int = 1,
     ) -> LLMCallResult:
         images = images or []
         if not self._configured or self._client is None:
@@ -108,6 +148,9 @@ class AnthropicClient:
                 error="anthropic_not_configured",
             )
 
+        chosen_model = self._pick_model(
+            has_images=bool(images), user_text=user_text
+        )
         base_user_content = self._build_user_content(user_text, images)
         conversation: list[dict[str, Any]] = [
             {"role": "user", "content": base_user_content}
@@ -121,7 +164,7 @@ class AnthropicClient:
         for attempt in range(max_semantic_retries + 1):
             try:
                 response = await self._client.messages.create(
-                    model=self.model,
+                    model=chosen_model,
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
                     system=[
@@ -146,7 +189,7 @@ class AnthropicClient:
                     raw_tool_input=None,
                     tokens_input=tokens_in_total,
                     tokens_output=tokens_out_total,
-                    model=self.model,
+                    model=chosen_model,
                     prompt_version=self.PROMPT_VERSION,
                     error="anthropic_timeout",
                 )
@@ -160,7 +203,7 @@ class AnthropicClient:
                     raw_tool_input=None,
                     tokens_input=tokens_in_total,
                     tokens_output=tokens_out_total,
-                    model=self.model,
+                    model=chosen_model,
                     prompt_version=self.PROMPT_VERSION,
                     error=f"anthropic_status_{exc.status_code}",
                 )
@@ -174,15 +217,37 @@ class AnthropicClient:
                     raw_tool_input=None,
                     tokens_input=tokens_in_total,
                     tokens_output=tokens_out_total,
-                    model=self.model,
+                    model=chosen_model,
                     prompt_version=self.PROMPT_VERSION,
                     error="anthropic_error",
                 )
 
             usage = getattr(response, "usage", None)
             if usage is not None:
-                tokens_in_total += int(getattr(usage, "input_tokens", 0) or 0)
-                tokens_out_total += int(getattr(usage, "output_tokens", 0) or 0)
+                input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+                cache_creation = int(
+                    getattr(usage, "cache_creation_input_tokens", 0) or 0
+                )
+                cache_read = int(
+                    getattr(usage, "cache_read_input_tokens", 0) or 0
+                )
+                tokens_in_total += input_tokens
+                tokens_out_total += output_tokens
+                # Log estruturado — Tier 1.1 do plano de otimização.
+                logger.info(
+                    "anthropic_usage",
+                    extra={
+                        "event": "anthropic_usage",
+                        "model": chosen_model,
+                        "attempt": attempt,
+                        "images": len(images),
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cache_creation_input_tokens": cache_creation,
+                        "cache_read_input_tokens": cache_read,
+                    },
+                )
 
             tool_input = _extract_tool_input(response)
             if tool_input is None:
@@ -192,7 +257,7 @@ class AnthropicClient:
                     raw_tool_input=None,
                     tokens_input=tokens_in_total,
                     tokens_output=tokens_out_total,
-                    model=self.model,
+                    model=chosen_model,
                     prompt_version=self.PROMPT_VERSION,
                     error="no_tool_use",
                 )
@@ -207,7 +272,7 @@ class AnthropicClient:
                         raw_tool_input=tool_input,
                         tokens_input=tokens_in_total,
                         tokens_output=tokens_out_total,
-                        model=self.model,
+                        model=chosen_model,
                         prompt_version=self.PROMPT_VERSION,
                         error="validation_exhausted",
                         validation_errors=last_validation_errors,
@@ -238,7 +303,7 @@ class AnthropicClient:
                 raw_tool_input=tool_input,
                 tokens_input=tokens_in_total,
                 tokens_output=tokens_out_total,
-                model=self.model,
+                model=chosen_model,
                 prompt_version=self.PROMPT_VERSION,
             )
 
@@ -248,7 +313,7 @@ class AnthropicClient:
             raw_tool_input=None,
             tokens_input=tokens_in_total,
             tokens_output=tokens_out_total,
-            model=self.model,
+            model=chosen_model,
             prompt_version=self.PROMPT_VERSION,
             error="validation_exhausted",
             validation_errors=last_validation_errors,
@@ -260,13 +325,14 @@ class AnthropicClient:
     ) -> list[dict[str, Any]]:
         content: list[dict[str, Any]] = []
         for content_type, data in images:
+            compressed_data, out_media_type = _compress_image(data, content_type)
             content.append(
                 {
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": content_type,
-                        "data": base64.b64encode(data).decode("ascii"),
+                        "media_type": out_media_type,
+                        "data": base64.b64encode(compressed_data).decode("ascii"),
                     },
                 }
             )
@@ -277,6 +343,45 @@ class AnthropicClient:
             # como `clarify`/`unknown` pelo modelo.
             content.append({"type": "text", "text": "(mensagem vazia)"})
         return content
+
+
+def _compress_image(data: bytes, content_type: str) -> tuple[bytes, str]:
+    """Redimensiona longest-side ≤ 1024px + JPEG q=75.
+
+    Reduz drasticamente o token count (imagens grandes hoje custam 5-11K
+    input tokens; após compressão fica em 500-1500). Se algo falhar,
+    devolve os bytes originais e o content_type original — melhor mandar
+    grande do que não mandar.
+    """
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            width, height = img.size
+            needs_resize = max(width, height) > _IMAGE_MAX_SIDE
+            already_jpeg = content_type == "image/jpeg"
+            if not needs_resize and already_jpeg:
+                return data, content_type
+            img.load()
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            if needs_resize:
+                img.thumbnail((_IMAGE_MAX_SIDE, _IMAGE_MAX_SIDE))
+            buf = io.BytesIO()
+            img.save(
+                buf,
+                format="JPEG",
+                quality=_IMAGE_JPEG_QUALITY,
+                optimize=True,
+            )
+            return buf.getvalue(), "image/jpeg"
+    except (UnidentifiedImageError, OSError) as exc:
+        logger.warning(
+            "image_compression_failed",
+            extra={
+                "event": "anthropic_image_compression",
+                "err": type(exc).__name__,
+            },
+        )
+        return data, content_type
 
 
 def _extract_tool_input(response: Any) -> dict[str, Any] | None:
@@ -297,6 +402,7 @@ def get_anthropic_client() -> AnthropicClient:
     return AnthropicClient(
         api_key=s.anthropic_api_key,
         model=s.anthropic_model,
+        fallback_model=s.anthropic_fallback_model,
         max_tokens=s.anthropic_max_tokens,
         temperature=s.anthropic_temperature,
     )
