@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,51 +27,31 @@ class DailySnapshot(UUIDPrimaryKeyMixin, Base):
         unique=True,
         nullable=False,
     )
-    kcal_in: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
-    kcal_out: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
+    kcal_in: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
+    kcal_out: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
     kcal_balance: Mapped[Decimal] = mapped_column(
         Numeric(10, 2), nullable=False, server_default="0"
     )
-    protein_g: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
-    carbs_g: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
-    fat_g: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
-    fiber_g: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
-    sodium_mg: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
-    calcium_mg: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
-    iron_mg: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
+    protein_g: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
+    carbs_g: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
+    fat_g: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
+    fiber_g: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
+    sodium_mg: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
+    calcium_mg: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
+    iron_mg: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
     potassium_mg: Mapped[Decimal] = mapped_column(
         Numeric(10, 2), nullable=False, server_default="0"
     )
-    water_ml: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
-    )
-    other_liquids_ml: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
-    )
+    water_ml: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    other_liquids_ml: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     warnings: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, server_default="[]"
     )
-    version: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="1"
-    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # SP-103: narrative preenchida no fechamento do dia. Sempre `None` em
+    # dias abertos (Const. Art. III §10 — recompute overwrite pode reescrever;
+    # ao fechar, o service congela a narrative junto com o snapshot final).
+    narrative: Mapped[str | None] = mapped_column(Text, nullable=True)

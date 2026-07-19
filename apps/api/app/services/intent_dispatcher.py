@@ -21,8 +21,7 @@ _FALLBACK_UNKNOWN = (
     "quer registrar. Pode reformular?"
 )
 _FALLBACK_CLARIFY = (
-    "Pode me contar mais? Você comeu algo, bebeu, treinou, "
-    "ou é só um comentário sobre o dia?"
+    "Pode me contar mais? Você comeu algo, bebeu, treinou, ou é só um comentário sobre o dia?"
 )
 
 # Intents que o MessageProcessor trata diretamente (persistência custom):
@@ -31,8 +30,6 @@ _FALLBACK_CLARIFY = (
 # Intents que ainda dependem de fase futura ficam aqui:
 _STRUCTURED_INTENTS = {
     "log_nutrition_label",  # Fase 4.b
-    "query_day",  # Fase 7
-    "close_day",  # Fase 7
     "weekly_summary",  # Fase 8
 }
 

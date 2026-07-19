@@ -43,6 +43,7 @@ from app.schemas.llm import LLMEnvelope
 logger = logging.getLogger("app.anthropic")
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "system_v2.md"
+_NARRATIVE_PROMPT_PATH = Path(__file__).parent / "prompts" / "narrative_v1.md"
 
 # Compressão de imagem — limite conservador para preservar OCR de rótulo.
 _IMAGE_MAX_SIDE = 1024
@@ -58,6 +59,11 @@ def _load_system_prompt() -> str:
     return _PROMPT_PATH.read_text(encoding="utf-8")
 
 
+@lru_cache
+def _load_narrative_prompt() -> str:
+    return _NARRATIVE_PROMPT_PATH.read_text(encoding="utf-8")
+
+
 @dataclass(slots=True)
 class LLMCallResult:
     envelope: LLMEnvelope | None
@@ -68,6 +74,22 @@ class LLMCallResult:
     prompt_version: str
     error: str | None = None
     validation_errors: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class NarrativeResult:
+    """Retorno de `call_narrative` (SP-103 / SP-104).
+
+    `text` já vem sem o disclaimer; caller (DayCloseService) concatena
+    depois para garantir sempre presente (Const. §26).
+    """
+
+    text: str | None
+    tokens_input: int
+    tokens_output: int
+    model: str
+    prompt_version: str
+    error: str | None = None
 
 
 class AnthropicClient:
@@ -111,9 +133,7 @@ class AnthropicClient:
     def is_configured(self) -> bool:
         return self._configured
 
-    def _pick_model(
-        self, *, has_images: bool, user_text: str | None
-    ) -> str:
+    def _pick_model(self, *, has_images: bool, user_text: str | None) -> str:
         """Roteamento por complexidade (Tier 1.3 do plano):
 
         - Qualquer foto → `model` principal (multimodal precisa de Sonnet).
@@ -148,13 +168,9 @@ class AnthropicClient:
                 error="anthropic_not_configured",
             )
 
-        chosen_model = self._pick_model(
-            has_images=bool(images), user_text=user_text
-        )
+        chosen_model = self._pick_model(has_images=bool(images), user_text=user_text)
         base_user_content = self._build_user_content(user_text, images)
-        conversation: list[dict[str, Any]] = [
-            {"role": "user", "content": base_user_content}
-        ]
+        conversation: list[dict[str, Any]] = [{"role": "user", "content": base_user_content}]
 
         tokens_in_total = 0
         tokens_out_total = 0
@@ -226,12 +242,8 @@ class AnthropicClient:
             if usage is not None:
                 input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
                 output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
-                cache_creation = int(
-                    getattr(usage, "cache_creation_input_tokens", 0) or 0
-                )
-                cache_read = int(
-                    getattr(usage, "cache_read_input_tokens", 0) or 0
-                )
+                cache_creation = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+                cache_read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
                 tokens_in_total += input_tokens
                 tokens_out_total += output_tokens
                 # Log estruturado — Tier 1.1 do plano de otimização.
@@ -277,9 +289,7 @@ class AnthropicClient:
                         error="validation_exhausted",
                         validation_errors=last_validation_errors,
                     )
-                conversation.append(
-                    {"role": "assistant", "content": response.content}
-                )
+                conversation.append({"role": "assistant", "content": response.content})
                 conversation.append(
                     {
                         "role": "user",
@@ -317,6 +327,102 @@ class AnthropicClient:
             prompt_version=self.PROMPT_VERSION,
             error="validation_exhausted",
             validation_errors=last_validation_errors,
+        )
+
+    NARRATIVE_PROMPT_VERSION = "narrative_v1"
+
+    async def call_narrative(
+        self,
+        *,
+        totals_payload: dict[str, Any],
+    ) -> NarrativeResult:
+        """Segunda chamada (SP-103 / T-702): narrativa em pt-BR baseada em
+        totais **já calculados**. Sem tool_use, temperature=0.3.
+
+        Sempre roteia para o Sonnet (`self.model`) — texto criativo curto
+        precisa da qualidade estilística; o payload é pequeno o suficiente
+        para não valer a pena Haiku.
+        """
+        if not self._configured or self._client is None:
+            return NarrativeResult(
+                text=None,
+                tokens_input=0,
+                tokens_output=0,
+                model=self.model,
+                prompt_version=self.NARRATIVE_PROMPT_VERSION,
+                error="anthropic_not_configured",
+            )
+
+        # Compact single-block user message — o schema é pequeno e serve
+        # como contexto suficiente. Payload em JSON serializado (o modelo
+        # é ótimo em ler estrutura JSON).
+        import json
+
+        user_text = (
+            "Totais do dia (calculados pelo backend, use exatos):\n"
+            f"{json.dumps(totals_payload, ensure_ascii=False)}"
+        )
+
+        try:
+            response = await self._client.messages.create(
+                model=self.model,
+                max_tokens=400,
+                temperature=0.3,
+                system=[
+                    {
+                        "type": "text",
+                        "text": _load_narrative_prompt(),
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": user_text}],
+                    }
+                ],
+            )
+        except anthropic.APITimeoutError:
+            return NarrativeResult(
+                text=None,
+                tokens_input=0,
+                tokens_output=0,
+                model=self.model,
+                prompt_version=self.NARRATIVE_PROMPT_VERSION,
+                error="anthropic_timeout",
+            )
+        except anthropic.APIError as exc:
+            logger.warning(
+                "anthropic_narrative_error",
+                extra={"event": "anthropic_error", "err": type(exc).__name__},
+            )
+            return NarrativeResult(
+                text=None,
+                tokens_input=0,
+                tokens_output=0,
+                model=self.model,
+                prompt_version=self.NARRATIVE_PROMPT_VERSION,
+                error="anthropic_error",
+            )
+
+        usage = getattr(response, "usage", None)
+        tokens_input = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
+        tokens_output = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
+
+        text_blocks = [
+            getattr(block, "text", "")
+            for block in getattr(response, "content", [])
+            if getattr(block, "type", None) == "text"
+        ]
+        joined = "\n".join(t for t in text_blocks if t).strip()
+
+        return NarrativeResult(
+            text=joined or None,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            model=self.model,
+            prompt_version=self.NARRATIVE_PROMPT_VERSION,
+            error=None if joined else "empty_narrative",
         )
 
     @staticmethod
