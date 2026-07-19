@@ -199,6 +199,21 @@ Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 
 ---
 
+## Bloco 1 — Composer/envio (chat quality-of-life) ✅
+
+Meta: melhorar UX do compositor de mensagens no `/chat`. Todas SPs `may` (pós-MVP), zero impacto no backend.
+
+- [x] **T-B101** — SP-15: `Enter` envia, `Shift+Enter` quebra linha, tecla é ignorada durante envio em curso ou compositor vazio. Considera composição IME (`event.nativeEvent.isComposing`).
+- [x] **T-B102** — SP-16: `capture="environment"` no `<input type="file">` para sugerir câmera traseira no mobile (ignorado em desktop, comportamento continua sendo file picker).
+- [x] **T-B103** — SP-17: cap client-side de 4 anexos com feedback por nome. `mergeFiles(incoming, mode)` — `replace` para o input file, `append` para drop. Nomes excedentes listados em bloco de erro amigável.
+- [x] **T-B104** — SP-18: erros por-arquivo (`file_too_large`, `invalid_image`, `unsupported_media_type`, `empty_upload`) traduzidos para pt-BR com o nome do arquivo. Batch de upload não aborta por causa de um item — anexos válidos continuam. Compositor não perde o texto digitado.
+- [x] **T-B105** — SP-19: drag-and-drop com feedback visual (borda tracejada + fundo), contador de dragenter/leave para evitar flicker. Aplica mesmas regras de MIME/cap.
+- [x] **T-B106** — Lista de chips por arquivo com botão remover (`×`) e reset do `input.value` após seleção para permitir re-selecionar o mesmo arquivo.
+
+**Gate Bloco 1 — cumprido:** `pnpm typecheck` verde; smoke manual (Felix) das cinco SPs.
+
+---
+
 ## Backlog (pós-MVP, `may`)
 
 - **B-01** — Persistência agregada de `sugars_g`, `added_sugars_g`, `saturated_fat_g`, `trans_fat_g`.
