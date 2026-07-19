@@ -216,9 +216,20 @@ class AnthropicClient:
                     error="anthropic_timeout",
                 )
             except anthropic.APIStatusError as exc:
+                # Captura body do erro (4xx sem body é raro, mas guardamos best-effort).
+                body_msg: str | None
+                try:
+                    body_msg = str(getattr(exc, "message", None) or exc.response.text)
+                except Exception:  # noqa: BLE001
+                    body_msg = None
                 logger.warning(
                     "anthropic_api_status",
-                    extra={"event": "anthropic_error", "status_code": exc.status_code},
+                    extra={
+                        "event": "anthropic_error",
+                        "status_code": exc.status_code,
+                        "model": chosen_model,
+                        "body": body_msg,
+                    },
                 )
                 return LLMCallResult(
                     envelope=None,
