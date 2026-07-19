@@ -34,11 +34,6 @@ from app.models import Media, Message, MessageMedia, User
 from app.repositories.message import MessageRepository
 from app.services.activity import ActivityResult, ActivityService, WeightRequired
 from app.services.beverage import BeverageResult, BeverageService
-from app.services.confirmation import (
-    ConfirmationResult,
-    ConfirmationService,
-    NoPendingConfirmation,
-)
 from app.services.correction import (
     CorrectionResult,
     CorrectionService,
@@ -135,11 +130,6 @@ class MessageProcessor:
         # SP-70..74 correções, SP-80..82 remoções.
         if result.envelope.intent in {"correct_record", "delete_record"}:
             return await self._handle_correction_or_deletion(user_message, result)
-
-        # SP-24 (chat) confirmação: remove `needs_confirmation` de food_items/
-        # beverage_records pendentes; não recomputa (macros não mudam).
-        if result.envelope.intent == "confirm_items":
-            return await self._handle_confirmation(user_message, result)
 
         # SP-100..104 encerramento do dia por chat.
         if result.envelope.intent == "close_day":
@@ -410,79 +400,6 @@ class MessageProcessor:
             role="assistant",
             content=content,
             llm_intent=envelope.intent,
-            llm_model=result.model,
-            llm_prompt_version=result.prompt_version,
-            llm_confidence=envelope.confidence,
-            raw_llm_response=raw,
-            tokens_input=result.tokens_input,
-            tokens_output=result.tokens_output,
-        )
-
-    async def _handle_confirmation(self, user_message: Message, result: LLMCallResult) -> Message:
-        envelope = result.envelope
-        if envelope is None:
-            return await self._record_error(user_message, result)
-        if user_message.day_log_id is None:
-            return await self._record_error(user_message, result)
-
-        user = await self.session.get(User, user_message.user_id)
-        if user is None:
-            return await self._record_error(user_message, result)
-
-        try:
-            outcome = await ConfirmationService(self.session).apply_from_llm(
-                user=user,
-                day_log_id=user_message.day_log_id,
-                message_id=user_message.id,
-                envelope=envelope,
-            )
-        except DayClosedError:
-            return await self._record_clarify(
-                user_message,
-                result,
-                "Esse dia já foi encerrado — não dá para confirmar registros dele.",
-                code="conflict_closed_day",
-            )
-        except NoPendingConfirmation:
-            return await self._record_clarify(
-                user_message,
-                result,
-                (
-                    "Não achei nenhum item pendente de confirmação no dia de hoje. "
-                    "Se quiser registrar algo novo, me conta o que foi."
-                ),
-                code="no_pending_confirmation",
-            )
-
-        if not outcome.confirmed:
-            # scope=specific mas nenhum hint bateu: pede clarify.
-            hints = ", ".join(outcome.unmatched_hints) or "os itens que você citou"
-            return await self._record_clarify(
-                user_message,
-                result,
-                (
-                    f'Não achei "{hints}" entre os itens pendentes. '
-                    "Você pode me dizer qual da lista quer confirmar, ou "
-                    'responder "confirmo tudo" para confirmar todos de uma vez.'
-                ),
-                code="confirmation_no_match",
-            )
-
-        raw = _pack_raw(result)
-        raw["dispatch"] = {
-            "action": "confirm_items",
-            "confirmed": [
-                {"kind": c.kind.value, "entity_id": str(c.entity_id)} for c in outcome.confirmed
-            ],
-            "unmatched_hints": outcome.unmatched_hints,
-        }
-        content = _compose_confirmation_summary(outcome)
-        return await self.messages.create(
-            user_id=user_message.user_id,
-            day_log_id=user_message.day_log_id,
-            role="assistant",
-            content=content,
-            llm_intent="confirm_items",
             llm_model=result.model,
             llm_prompt_version=result.prompt_version,
             llm_confidence=envelope.confidence,
@@ -845,24 +762,6 @@ def _compose_activity_summary(activity: ActivityResult, recompute: RecomputeResu
         lines.append("Alguns dados ficaram estimados; confirma se está certo?")
     lines.append("")
     lines.append(_totals_line(recompute.snapshot))
-    lines.append(_DISCLAIMER)
-    return "\n".join(lines)
-
-
-def _compose_confirmation_summary(outcome: ConfirmationResult) -> str:
-    names = [c.detected_name for c in outcome.confirmed]
-    if len(names) == 1:
-        head = f'Confirmei "{names[0]}".'
-    else:
-        listing = ", ".join(names[:-1]) + f" e {names[-1]}"
-        head = f"Confirmei {len(names)} itens: {listing}."
-    lines = [head]
-    if outcome.unmatched_hints:
-        misses = ", ".join(outcome.unmatched_hints)
-        lines.append(
-            f"Não achei os seguintes na sua lista: {misses}. "
-            "Se ainda precisam de confirmação, me diga como estão registrados."
-        )
     lines.append(_DISCLAIMER)
     return "\n".join(lines)
 

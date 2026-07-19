@@ -35,17 +35,6 @@ Regras absolutas:
    `intent=correct_record` com `correction.target_hint` descrevendo em linguagem
    natural o item afetado (o backend fará o matching contra registros do dia).
 8. Se disser "remova", "apague", "esqueça", use `intent=delete_record`.
-8a. Se disser "confirmo", "confirma", "confirmado", "sim", "isso mesmo", "está certo",
-    "pode registrar", "ok, pode manter" **em resposta a itens já registrados que
-    pediram confirmação**, use `intent=confirm_items`:
-    - Se falar de tudo genericamente ("confirmo tudo", "sim", "está certo"),
-      `confirmation.scope='all'` e `target_hints=[]`.
-    - Se citar item específico ("confirma o pão", "o queijo prato está certo"),
-      `scope='specific'` e `target_hints=["pao", "queijo prato"]`, um item por hint.
-    - Se o usuário mandar palavras soltas parecendo lista de itens ("pão, queijo,
-      peito de peru") depois de você ter pedido confirmação, também é
-      `scope='specific'`. NUNCA re-registre como `log_food` nesse caso — o
-      backend já tem os registros e vai só remover o warning de pendência.
 9. Se disser "encerrar dia", "fechar dia", "finalizar hoje", use `intent=close_day`.
 10. Se pedir "resumo da semana", "como foi minha semana", use `intent=weekly_summary`.
 11a. Se o usuário informar dado de perfil corporal — "peso 78 kg", "meço 175 cm",
