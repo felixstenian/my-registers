@@ -35,6 +35,11 @@ const MAX_FILES = 4;
 // Deve refletir o allowlist do backend (`MediaService.upload`).
 const ACCEPT_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 const ACCEPT_ATTR = 'image/png,image/jpeg,image/webp';
+// SP-18: cap de 8 MB por arquivo (idêntico ao backend). Bloqueamos no
+// anexo para dar feedback imediato — o backend também rejeita, mas
+// dependendo do proxy do Next.js, arquivos gigantes podem falhar antes
+// mesmo do backend responder um JSON de erro.
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const POLL_INTERVAL_MS = 1500;
 // Sonnet com imagem + retry semântico pode passar dos 30s. 60s cobre
 // >99% dos casos e ainda dá timeout gracioso.
@@ -192,17 +197,24 @@ export default function ChatPage() {
       const errs: string[] = [];
       const allowed: File[] = [];
       const rejectedByMime: File[] = [];
+      const rejectedBySize: File[] = [];
       for (const file of incoming) {
         if (!ACCEPT_MIME.includes(file.type)) {
           rejectedByMime.push(file);
           continue;
         }
+        // SP-18: cap de 8 MB — mesma linha amigável do backend.
+        if (file.size > MAX_FILE_BYTES) {
+          rejectedBySize.push(file);
+          continue;
+        }
         allowed.push(file);
       }
       for (const file of rejectedByMime) {
-        errs.push(
-          UPLOAD_REASONS.unsupported_media_type(file.name),
-        );
+        errs.push(UPLOAD_REASONS.unsupported_media_type(file.name));
+      }
+      for (const file of rejectedBySize) {
+        errs.push(UPLOAD_REASONS.file_too_large(file.name));
       }
 
       const base = mode === 'append' ? files : [];
