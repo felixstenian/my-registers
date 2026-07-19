@@ -169,6 +169,32 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 - Se o usuário fechar o modal sem submeter, o item permanece com o destaque até ele confirmar ou descartar.
 - Botão adicional "Descartar" no modal dispara `DELETE /records/food-items/{id}` (soft delete, SP-80/SP-81).
 
+**SP-118** (`may`) — Formato tabular padronizado da assistant message após qualquer registro.
+- Substitui o texto solto atual dos `_compose_*_summary` do `MessageProcessor` por **duas tabelas** dirigidas ao usuário.
+- **Given** qualquer intent de registro (`log_food`, `log_water`, `log_beverage`, `log_activity`) foi processado com sucesso.
+- **Then** a assistant message **MUST** conter, nesta ordem:
+  1. **Cabeçalho curto** identificando o que foi registrado (ex.: "Registrei o almoço.", "Registrei 500 ml de água.", "Registrei 40 min de corrida.").
+  2. **Tabela "Total da refeição/registro"** com título contextual em pt-BR:
+     - `log_food` → *"Total da refeição — {meal_slot_pt_br}"* (Café da manhã / Almoço / Lanche / Jantar / Refeição). **MUST** conter as linhas `Calorias`, `Proteínas`, `Carboidratos`, `Gorduras`, `Fibras` somadas apenas dos `food_items` recém-criados nesta mensagem.
+     - `log_beverage` → *"Total da bebida — {detected_name}"*. Mesmas 5 linhas nutricionais + linha `Volume` (ml).
+     - `log_water` → *"Total do registro"* com uma única linha `Água` = X ml (sem macros — INV-2 estrutural).
+     - `log_activity` → *"Total do exercício — {detected_name}"* com linhas `Duração` (min) e `Calorias gastas` (kcal).
+  3. **Tabela "Total acumulado — {DD/MM/YYYY}"** com a data local do usuário no cabeçalho e **MUST** conter, nesta ordem:
+     - `Calorias Consumidas` (kcal_in do snapshot)
+     - `Calorias Gastas` (kcal_out — só aparece se > 0)
+     - `Saldo Calórico` (kcal_balance — só aparece se `kcal_out > 0`)
+     - `Proteínas` / `Carboidratos` / `Gorduras` / `Fibras` (g)
+     - `Água Pura` (ml, do `water_ml`)
+     - `Líquidos Totais` (ml, `water_ml + other_liquids_ml`) — asterisco no rótulo (`*`) se `other_liquids_ml > 0`, com nota abaixo da tabela: *"* inclui café, leite, sucos e outras bebidas calóricas."*
+- **Formatação e conteúdo:**
+  - Tabelas em **markdown** (renderizáveis pela UI do chat) com colunas `Nutriente|Indicador` × `Total`.
+  - Números com separador decimal **vírgula** e milhar **ponto** (pt-BR): `≈ 977 kcal`, `≈ 1.200 ml`.
+  - Prefixo `≈` (aproximadamente) **MUST** aparecer em qualquer linha nutricional cuja origem tenha pelo menos 1 item com `is_estimate=true` ou `needs_confirmation=true`. Se todos os itens têm quantidade exata + catálogo, o `≈` **MUST NOT** aparecer.
+  - Água pura e volume nunca recebem `≈` (são medidas diretas).
+  - Aviso legal (Const. Art. VII §26) continua ao final, separado por linha em branco.
+- **Warnings de itens pendentes** (needs_confirmation/no_catalog_hit) aparecem em um bloco separado abaixo do disclaimer, no formato: *"Confirma estes itens? — feijão, sushi ninja"* (referencia SP-24/SP-117 para o fluxo de correção).
+- Este SP substitui o formato livre gerado hoje pelos `_compose_meal_summary` / `_compose_water_summary` / `_compose_beverage_summary` / `_compose_activity_summary` em `services/message_processor.py`.
+
 ### 3.3 Registro de alimentos
 
 **SP-20** (`must`) — Texto com quantidades explícitas.
@@ -431,6 +457,7 @@ Registrado aqui para não voltar como dúvida durante execução.
 
 ## Histórico de alterações
 
+- **2026-07-18** — v1.4. Adicionado SP-118 (formato tabular padronizado da assistant message após qualquer registro, com "Total da refeição/registro" + "Total acumulado do dia"). Substitui o texto solto atual dos `_compose_*_summary` do `MessageProcessor` — output previsível, com pt-BR (`≈`, vírgula decimal, milhar), asterisco explicando `Líquidos Totais`.
 - **2026-07-17** — v1.3. Adicionados SP-115 (balão de `log_food` com cards estruturados no chat), SP-116 (barra fixa de totais do dia) e SP-117 (highlight + fluxo de confirmação inline dos itens pendentes, estende SP-24) como `may`. Formalizam o `DayTable` mencionado no `app_plan.md` §11 e o "destaque na tabela" da SP-24.
 - **2026-07-16** — v1.2. Adicionados SP-17 (limite client-side de 4 imagens com feedback por nome), SP-18 (mensagens de erro amigáveis para rejeições de upload citando o nome do arquivo) e SP-19 (drag-and-drop na área de anexo do chat) como `may`. Todos entram no mesmo backlog de UX do chat pós-MVP.
 - **2026-07-16** — v1.1. Adicionados SP-15 (envio por Enter) e SP-16 (captura direta pela câmera em mobile) como `may` (pós-MVP). Melhorias de UX no chat que não bloqueiam o MVP; entram no backlog para depois da Fase 9.
