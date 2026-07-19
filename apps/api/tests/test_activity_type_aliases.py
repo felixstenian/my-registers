@@ -13,6 +13,8 @@ from app.schemas.llm import LLMEnvelope
 from app.services.activity import ActivityService
 from app.services.activity_calculator import ActivityCalculator
 
+pytestmark = pytest.mark.asyncio
+
 
 @pytest.mark.parametrize(
     "raw,expected",
@@ -59,7 +61,6 @@ def test_compute_with_pt_br_activity_type():
     assert result.reasons == []
 
 
-@pytest.mark.asyncio
 async def test_activity_service_persists_kcal_when_pt_br_type(db_session: AsyncSession, admin_user):
     """End-to-end no service: LLM manda activity_type='corrida', service
     persiste kcal correto (não zero)."""

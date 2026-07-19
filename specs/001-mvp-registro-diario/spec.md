@@ -114,7 +114,6 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 
 **SP-24** (`must`) — Confiança baixa.
 - `confidence < 0.5` → `needs_confirmation=true`, destaque na tabela, aguarda confirmação por chat ou `PATCH /records/food-items/{id}`.
-- **Chat-side (SP-24a):** "confirmo", "sim", "está certo" → `intent=confirm_items` com `confirmation.scope='all'`. "Confirma o pão", "o queijo prato tá certo" → `scope='specific'` com `target_hints=[...]` casados via `TargetMatcher`. Sem itens pendentes → clarify ("não achei item pendente"). Confirmação NÃO recomputa snapshot (macros não mudam); apenas remove `needs_confirmation` e registra `audit_events(action='confirm')`. Dia fechado bloqueia (INV-5).
 
 **SP-25** (`should`) — Múltiplas fotos.
 - Até 4 fotos em uma mensagem, agrupadas em 1 `food_records` (não separa refeições distintas no MVP).
@@ -362,4 +361,3 @@ Registrado aqui para não voltar como dúvida durante execução.
 ## Histórico de alterações
 
 - **2026-07-15** — v1.0. Spec inicial extraída de `docs/specs.md`; alinhada com `constitution.md` v1.0.0 e `app_plan.md` 20 seções.
-- **2026-07-19** — v1.5. SP-24 detalha chat-side (SP-24a): intent `confirm_items` com scopes `all`/`specific`. Sem novo SP-ID — é implementação faltante do SP-24 original que já previa "aguarda confirmação por chat".
