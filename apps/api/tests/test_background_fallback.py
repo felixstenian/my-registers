@@ -79,78 +79,36 @@ async def test_fallback_assistant_message_created_on_exception(
     assert assistant.raw_llm_response == {"error": "background_processor_failed"}
 
 
-class OrphanAnthropic:
-    """Explode DEPOIS de já ter chamado o LLM — variante que simula erro
-    tardio em service downstream (ex.: recompute, WeeklyReportService)."""
-
-    is_configured = True
-    model = "fake-orphan"
-
-    async def call_record_intent(self, **_kwargs):
-        from app.integrations.anthropic.client import LLMCallResult
-        from app.schemas.llm import LLMEnvelope
-
-        envelope = LLMEnvelope.model_validate(
-            {
-                "intent": "log_food",
-                "confidence": 0.9,
-                "user_text_summary": ".",
-                "needs_clarification": False,
-                "meal_slot": "breakfast",
-                # payload inválido para o schema do FoodItemIn: `grams_estimate`
-                # existe mas `detected_name` está OK; falha vai vir do service.
-                "food_items": [
-                    {
-                        "detected_name": "aveia",
-                        "normalized_name": "aveia",
-                        "grams_estimate": 100,
-                        "confidence": 0.9,
-                        "is_estimate": False,
-                    }
-                ],
-            }
-        )
-        return LLMCallResult(
-            envelope=envelope,
-            raw_tool_input=envelope.model_dump(mode="json"),
-            tokens_input=10,
-            tokens_output=5,
-            model=self.model,
-            prompt_version="system_v2",
-        )
-
-
-async def test_fallback_covers_downstream_service_failure(
+async def test_fallback_uses_new_session_after_rollback(
     admin_user: User, test_engine, db_session: AsyncSession, fake_storage
 ):
-    """Envelope válido, mas o service downstream (MealService) explode porque
-    o day_log_id não existe (edge case artificial). Fallback é acionado.
-    """
+    """Regressão: se o rollback fecha a sessão original, o fallback
+    precisa abrir uma nova para conseguir persistir."""
     Session = async_sessionmaker(test_engine, expire_on_commit=False, class_=AsyncSession)
 
     chat = ChatService(db_session)
-    user_message = await chat.post_user_message(
-        user=admin_user, text="add 100g de aveia", media_ids=[]
-    )
-    # Force day_log_id inválido para causar exceção downstream.
-    import uuid as _uuid
-
-    user_message.day_log_id = _uuid.uuid4()
+    user_message = await chat.post_user_message(user=admin_user, text="oi", media_ids=[])
     await db_session.commit()
 
     await run_processor_in_background(
         user_message.id,
         session_factory=Session,
-        anthropic_client=OrphanAnthropic(),  # type: ignore[arg-type]
+        anthropic_client=ExplodingAnthropic(),  # type: ignore[arg-type]
         storage=fake_storage,
     )
 
     async with Session() as verify:
-        messages = list(
+        assistants = list(
             (
-                await verify.execute(select(Message).where(Message.user_id == admin_user.id))
+                await verify.execute(
+                    select(Message).where(
+                        Message.user_id == admin_user.id,
+                        Message.role == "assistant",
+                    )
+                )
             ).scalars()
         )
-    assistants = [m for m in messages if m.role == "assistant"]
+    # Exatamente um assistant — nem 0 (fallback falhou), nem 2 (fallback rodou
+    # duas vezes por bug de retry).
     assert len(assistants) == 1
-    assert assistants[0].content == _FALLBACK_LLM_ERROR
+    assert assistants[0].day_log_id == user_message.day_log_id
