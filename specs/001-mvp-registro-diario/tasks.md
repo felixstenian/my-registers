@@ -206,11 +206,25 @@ Meta: melhorar UX do compositor de mensagens no `/chat`. Todas SPs `may` (pós-M
 - [x] **T-B101** — SP-15: `Enter` envia, `Shift+Enter` quebra linha, tecla é ignorada durante envio em curso ou compositor vazio. Considera composição IME (`event.nativeEvent.isComposing`).
 - [x] **T-B102** — SP-16: `capture="environment"` no `<input type="file">` para sugerir câmera traseira no mobile (ignorado em desktop, comportamento continua sendo file picker).
 - [x] **T-B103** — SP-17: cap client-side de 4 anexos com feedback por nome. `mergeFiles(incoming, mode)` — `replace` para o input file, `append` para drop. Nomes excedentes listados em bloco de erro amigável.
-- [x] **T-B104** — SP-18: erros por-arquivo (`file_too_large`, `invalid_image`, `unsupported_media_type`, `empty_upload`) traduzidos para pt-BR com o nome do arquivo. Batch de upload não aborta por causa de um item — anexos válidos continuam. Compositor não perde o texto digitado.
+- [x] **T-B104** — SP-18: erros por-arquivo (`file_too_large`, `invalid_image`, `unsupported_media_type`, `empty_upload`) traduzidos para pt-BR com o nome do arquivo. Batch de upload não aborta por causa de um item — anexos válidos continuam. Compositor não perde o texto digitado. Cap de 8 MB validado também no `mergeFiles` (client-side) para feedback imediato antes do upload.
 - [x] **T-B105** — SP-19: drag-and-drop com feedback visual (borda tracejada + fundo), contador de dragenter/leave para evitar flicker. Aplica mesmas regras de MIME/cap.
 - [x] **T-B106** — Lista de chips por arquivo com botão remover (`×`) e reset do `input.value` após seleção para permitir re-selecionar o mesmo arquivo.
 
 **Gate Bloco 1 — cumprido:** `pnpm typecheck` verde; smoke manual (Felix) das cinco SPs.
+
+---
+
+## Bloco 2 — Renderização de assistant messages (SP-115..118) ✅
+
+Meta: transformar as respostas do assistant em cards estruturados legíveis + barra fixa com totais do dia + confirmação inline de itens pendentes.
+
+- [x] **T-B201** — SP-118: `app/services/message_formatter.py` com helpers `_fmt_int/_fmt_dec/_fmt_kcal/_fmt_g/_fmt_ml/_fmt_min` (pt-BR), `_table` (markdown 2-cols), `_daily_totals_table` (comum a todos os intents), `_warnings_block` (dedup preservando ordem). `compose_meal/water/beverage/activity` seguem a spec: cabeçalho pt-BR + 1ª tabela (só do registro atual) + 2ª tabela (`Total acumulado — DD/MM/YYYY`) + disclaimer + bloco de warnings opcional. `MessageProcessor._handle_registration` delega às novas funções passando `local_today(user.timezone)`. `≈` só aparece em linhas nutricionais quando pelo menos 1 item é estimativa ou precisa de confirmação; água/volume nunca recebem `≈`. `Líquidos Totais*` recebe asterisco quando `other_liquids_ml > 0`, com nota em rodapé.
+- [x] **T-B202** — SP-115: `apps/web/src/app/(app)/chat/AssistantContent.tsx` — parser mínimo de markdown (bold + tabelas + parágrafos) que renderiza cada tabela como card com header destacado. Suporta detecção de células com `≈` (italic) e labels com `*` (amber accent). Sem dependência de biblioteca de markdown externa — bundle enxuto, dialeto controlado pelo backend.
+- [x] **T-B203** — SP-116: `apps/web/src/app/(app)/chat/DayTotalsBar.tsx` — fixado acima da lista de mensagens; consome `GET /days/today`; revalida via prop `revalidateKey` incrementado pelo `page.tsx` a cada nova assistant message detectada pelo poll. Colapsa horizontalmente em telas pequenas (`overflow-x-auto`). Estado vazio quando `kcal_in=0` && sem líquidos. Badge de warnings clicável (`N itens precisam de confirmação`) dispara callback do pai.
+- [x] **T-B204** — SP-117: `apps/web/src/app/(app)/chat/PendingItemsModal.tsx` — modal (overlay + trap) listando `food_items` com `needs_confirmation=true` puxados do `GET /days/today`. Botão **Confirmar** re-envia grams/ml/quantity atuais via `PATCH /records/food-items/{id}` (backend recomputa macros e limpa `needs_confirmation`); botão **Descartar** dispara `DELETE /records/food-items/{id}` (soft delete + recompute). Sinaliza `onChanged()` que revalida a barra de totais e fecha o modal.
+- [x] **T-B205** — `tests/test_message_formatter.py` (18 casos): formatação pt-BR de int/dec/kcal/g/ml/min; `compose_meal` pt-BR do slot, agregação só de items da mensagem, `≈` presente/ausente conforme is_estimate/needs_confirmation, warnings depois do disclaimer, `Calorias Gastas`/`Saldo` só quando `kcal_out > 0`; `compose_water` sem `≈`; `compose_beverage` com linha `Volume` + `Líquidos Totais*`; `compose_activity` com `Duração` + hint `informado pelo dispositivo`; cabeçalho `Total acumulado — DD/MM/YYYY` da data local. Suíte completa em verde (226 tests).
+
+**Gate Bloco 2 — cumprido:** assistant messages viraram cards de tabela pt-BR, barra fixa de totais reage a novas mensagens, itens pendentes confirmáveis inline sem sair do chat.
 
 ---
 

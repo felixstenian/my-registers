@@ -72,6 +72,7 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
         "water": {
             "type": ["object", "null"],
             "additionalProperties": False,
+            "required": ["volume_ml", "confidence"],
             "properties": {
                 "volume_ml": {"type": "number", "minimum": 1},
                 "confidence": {"type": "number"},
@@ -80,6 +81,7 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
         "beverage": {
             "type": ["object", "null"],
             "additionalProperties": False,
+            "required": ["detected_name", "volume_ml", "confidence"],
             "properties": {
                 "detected_name": {"type": "string"},
                 "brand": {"type": ["string", "null"]},
@@ -91,6 +93,17 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
         "activity": {
             "type": ["object", "null"],
             "additionalProperties": False,
+            # Sonnet costuma incluir tudo mesmo sem `required`; Haiku 4.5 é
+            # mais preguiçoso e omite `confidence`/`intensity` — daí o retry
+            # semântico esgotava. Marcar como required deixa qualquer modelo
+            # ciente do contrato.
+            "required": [
+                "detected_name",
+                "activity_type",
+                "duration_minutes",
+                "intensity",
+                "confidence",
+            ],
             "properties": {
                 "detected_name": {"type": "string"},
                 "activity_type": {"type": "string"},
@@ -117,6 +130,7 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
         "correction": {
             "type": ["object", "null"],
             "additionalProperties": False,
+            "required": ["target_hint", "confidence"],
             "properties": {
                 "target_hint": {"type": "string"},
                 "changes": {"type": "object"},
@@ -126,6 +140,7 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
         "deletion": {
             "type": ["object", "null"],
             "additionalProperties": False,
+            "required": ["target_hint", "confidence"],
             "properties": {
                 "target_hint": {"type": "string"},
                 "confidence": {"type": "number"},
@@ -134,6 +149,7 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
         "confirmation": {
             "type": ["object", "null"],
             "additionalProperties": False,
+            "required": ["scope", "confidence"],
             "properties": {
                 "scope": {"type": "string", "enum": ["all", "specific"]},
                 "target_hints": {

@@ -32,8 +32,10 @@ from app.integrations.nutrition.local_tbca import LocalTBCACatalog
 from app.integrations.storage.minio import MinioStorage
 from app.models import Media, Message, MessageMedia, User
 from app.repositories.message import MessageRepository
+from app.services import message_formatter
 from app.services.activity import ActivityResult, ActivityService, WeightRequired
 from app.services.beverage import BeverageResult, BeverageService
+from app.services.chat import local_today
 from app.services.confirmation import (
     ConfirmationResult,
     ConfirmationService,
@@ -206,7 +208,9 @@ class MessageProcessor:
                     "item_ids": [str(i.id) for i in meal.items],
                     "warnings": meal.warnings,
                 }
-                content = _compose_meal_summary(meal, recompute)
+                content = message_formatter.compose_meal(
+                    meal, recompute, local_today(user.timezone)
+                )
             elif envelope.intent == "log_water":
                 if envelope.water is None:
                     return await self._record_error(user_message, result)
@@ -218,7 +222,9 @@ class MessageProcessor:
                 )
                 recompute = await recompute_service.recompute(user_message.day_log_id)
                 dispatch_meta["water"] = {"record_id": str(hydration.record.id)}
-                content = _compose_water_summary(hydration, recompute)
+                content = message_formatter.compose_water(
+                    hydration, recompute, local_today(user.timezone)
+                )
             elif envelope.intent == "log_beverage":
                 if envelope.beverage is None:
                     return await self._record_error(user_message, result)
@@ -233,7 +239,9 @@ class MessageProcessor:
                     "record_id": str(beverage.record.id),
                     "warnings": beverage.warnings,
                 }
-                content = _compose_beverage_summary(beverage, recompute)
+                content = message_formatter.compose_beverage(
+                    beverage, recompute, local_today(user.timezone)
+                )
             elif envelope.intent == "log_activity":
                 if envelope.activity is None:
                     return await self._record_error(user_message, result)
@@ -258,7 +266,9 @@ class MessageProcessor:
                     "record_id": str(activity.record.id),
                     "warnings": activity.warnings,
                 }
-                content = _compose_activity_summary(activity, recompute)
+                content = message_formatter.compose_activity(
+                    activity, recompute, local_today(user.timezone)
+                )
             else:  # pragma: no cover — guarded by the branch above
                 return await self._record_error(user_message, result)
         except ValidationAppError as exc:
@@ -775,6 +785,23 @@ class MessageProcessor:
         )
 
     async def _record_error(self, user_message: Message, result: LLMCallResult) -> Message:
+        # Log estruturado — facilita diagnóstico quando o assistant cai
+        # no fallback genérico. Inclui o erro do cliente Anthropic e, se
+        # foi validation_exhausted, os erros específicos do Pydantic +
+        # o último payload que a LLM tentou emitir.
+        logger.warning(
+            "llm_error_recorded",
+            extra={
+                "event": "message_processor",
+                "message_id": str(user_message.id),
+                "user_id": str(user_message.user_id),
+                "error": result.error,
+                "model": result.model,
+                "prompt_version": result.prompt_version,
+                "validation_errors": result.validation_errors,
+                "raw_tool_input": result.raw_tool_input,
+            },
+        )
         raw = _pack_raw(result)
         return await self.messages.create(
             user_id=user_message.user_id,
@@ -1035,9 +1062,7 @@ def _compose_label_summary(
             consumed_item.quantity,
             consumed_item.unit,
         )
-        lines.append(
-            f"Consumo registrado: {consumed_item.detected_name} — {amount}."
-        )
+        lines.append(f"Consumo registrado: {consumed_item.detected_name} — {amount}.")
         lines.append(_totals_line(recompute.snapshot))
     lines.append(_DISCLAIMER)
     return "\n".join(lines)
@@ -1100,35 +1125,39 @@ def _compose_close_summary(close_result: DayCloseResult) -> str:
 
 
 def _compose_query_day_summary(payload: DayPayload) -> str:
-    """SP-90/SP-91: resumo direto do snapshot para o chat.
+    """SP-90/SP-91: resumo do dia em formato tabular (padrão SP-118).
 
-    Como o chat mostra texto, damos totais consolidados. Frontend pode
-    também chamar `GET /days/today` para uma tabela completa (SP-118).
+    Usa `message_formatter._daily_totals_table` para produzir a mesma
+    tabela `Total acumulado — DD/MM/YYYY` que aparece após qualquer
+    registro, com formatação pt-BR + `≈` quando houver itens pendentes.
     """
-    totals = payload.totals
-    log_date = payload.date.strftime("%d/%m/%Y")
+    from types import SimpleNamespace
+
+    # `_daily_totals_table` lê o snapshot por atributos — o payload aqui
+    # devolve totals como dict, então adaptamos para SimpleNamespace.
+    snap = SimpleNamespace(**payload.totals)
+    # `approx=True` quando existem warnings de itens que ainda podem mudar
+    # os totais (needs_confirmation/no_catalog_hit/low_confidence_item).
+    approx = any(
+        w.get("code") in ("needs_confirmation", "no_catalog_hit", "low_confidence_item")
+        for w in payload.warnings
+    )
+
+    log_date_str = payload.date.strftime("%d/%m/%Y")
     status_label = "encerrado" if payload.status == "closed" else "em aberto"
-    lines = [
-        f"Resumo de {log_date} ({status_label}):",
-        (
-            f"Consumidas: {int(totals['kcal_in'])} kcal · "
-            f"Gastas: {int(totals['kcal_out'])} kcal · "
-            f"Saldo: {int(totals['kcal_balance'])} kcal."
-        ),
-        (
-            f"Macros — P {int(totals['protein_g'])}g · "
-            f"C {int(totals['carbs_g'])}g · G {int(totals['fat_g'])}g · "
-            f"Fib {int(totals['fiber_g'])}g."
-        ),
-        (
-            f"Água {int(totals['water_ml'])} ml · "
-            f"Outros líquidos {int(totals['other_liquids_ml'])} ml."
-        ),
-    ]
+
+    header = f"Resumo de {log_date_str} ({status_label})."
+    totals_table = message_formatter._daily_totals_table(snap, payload.date, approx)
+
+    parts = [header, "", totals_table, "", _DISCLAIMER]
     if payload.warnings:
-        lines.append(f"Ainda há {len(payload.warnings)} itens que podem ser confirmados.")
-    lines.append(_DISCLAIMER)
-    return "\n".join(lines)
+        n = len(payload.warnings)
+        parts.append("")
+        pending_label = (
+            "item ainda pode ser confirmado" if n == 1 else "itens ainda podem ser confirmados"
+        )
+        parts.append(f"**Confirma estes itens?** — {n} {pending_label}.")
+    return "\n".join(parts)
 
 
 _CLARIFY_TEMPLATES = {

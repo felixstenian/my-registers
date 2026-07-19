@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Intent = Literal[
     "log_food",
@@ -41,7 +41,18 @@ class _StrictBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class FoodItemIn(_StrictBase):
+# Payloads de registro (`FoodItemIn`, `BeverageIn`, `ActivityIn`) usam
+# `extra="ignore"`: a LLM tende a inventar campos comuns de contexto
+# (`pace`, `heart_rate_avg`, `calories`, `sugars_g`, etc.) que **não**
+# consumimos, mas rejeitá-los levaria a `validation_exhausted` — o
+# assistant cairia no fallback genérico "Não consegui interpretar".
+# Fields conhecidos ainda são validados normalmente; extras são
+# silenciosamente descartados.
+class _LenientBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class FoodItemIn(_LenientBase):
     detected_name: str
     normalized_name: str | None = None
     brand: str | None = None
@@ -58,7 +69,7 @@ class WaterIn(_StrictBase):
     confidence: float = Confidence
 
 
-class BeverageIn(_StrictBase):
+class BeverageIn(_LenientBase):
     detected_name: str
     brand: str | None = None
     volume_ml: float = Field(ge=1)
@@ -66,7 +77,53 @@ class BeverageIn(_StrictBase):
     confidence: float = Confidence
 
 
-class ActivityIn(_StrictBase):
+_INTENSITY_ALIASES: dict[str, str] = {
+    # pt-BR (feminino e masculino) → canônico. Normalizado sem acento.
+    "leve": "light",
+    "baixa": "light",
+    "baixo": "light",
+    "moderada": "moderate",
+    "moderado": "moderate",
+    "media": "moderate",
+    "medio": "moderate",
+    "intensa": "vigorous",
+    "intenso": "vigorous",
+    "alta": "vigorous",
+    "alto": "vigorous",
+    "forte": "vigorous",
+    "vigorosa": "vigorous",
+    "vigoroso": "vigorous",
+    "pesada": "vigorous",
+    "pesado": "vigorous",
+    # Inglês minúsculo direto (para caso do LLM devolver capitalizado).
+    "light": "light",
+    "moderate": "moderate",
+    "vigorous": "vigorous",
+    "unknown": "unknown",
+}
+
+
+def _normalize_intensity(value: object) -> object:
+    """Aceita pt-BR e maiúsculas antes da validação do Literal.
+
+    Regressão: LLM às vezes emite "moderada" (pt-BR) mesmo com prompt em
+    inglês — o Literal do Pydantic rejeita e o retry semântico esgota,
+    resultando em "Não consegui interpretar sua mensagem agora." O fix
+    normaliza os aliases mais comuns aqui, antes da validação.
+    """
+    if not isinstance(value, str):
+        return value
+    import unicodedata
+
+    stripped = "".join(
+        ch
+        for ch in unicodedata.normalize("NFKD", value.strip().lower())
+        if not unicodedata.combining(ch)
+    )
+    return _INTENSITY_ALIASES.get(stripped, value)
+
+
+class ActivityIn(_LenientBase):
     detected_name: str
     activity_type: str
     duration_minutes: float = Field(ge=1)
@@ -77,6 +134,24 @@ class ActivityIn(_StrictBase):
     # a LLM extrai esse número aqui. Se presente, é fonte de verdade
     # (`calc_method='user_manual'`) — sobrescreve o cálculo MET × weight.
     kcal_burned_reported: float | None = Field(default=None, ge=0, le=10000)
+
+    @field_validator("intensity", mode="before")
+    @classmethod
+    def _accept_ptbr_intensity(cls, value):
+        return _normalize_intensity(value)
+
+    @field_validator("duration_minutes", mode="before")
+    @classmethod
+    def _coerce_duration(cls, value):
+        """LLM ocasionalmente emite duração como string ("40") ou dict
+        com unidade. Aceita string numérica; deixa Pydantic falhar em
+        outros casos."""
+        if isinstance(value, str):
+            try:
+                return float(value.strip().split()[0])
+            except (ValueError, IndexError):
+                return value
+        return value
 
 
 class CorrectionIn(_StrictBase):
