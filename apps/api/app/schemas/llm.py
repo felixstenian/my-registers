@@ -21,6 +21,7 @@ Intent = Literal[
     "log_activity",
     "correct_record",
     "delete_record",
+    "confirm_items",
     "query_day",
     "close_day",
     "weekly_summary",
@@ -86,6 +87,18 @@ class CorrectionIn(_StrictBase):
 
 class DeletionIn(_StrictBase):
     target_hint: str
+    confidence: float = Confidence
+
+
+class ConfirmationIn(_StrictBase):
+    """SP-24 (chat): usuário confirma itens pendentes.
+
+    - `scope='all'`: confirma tudo do dia com `needs_confirmation=true`.
+    - `scope='specific'`: usa `target_hints` para escolher quais confirmar.
+    """
+
+    scope: Literal["all", "specific"] = "all"
+    target_hints: list[str] = Field(default_factory=list)
     confidence: float = Confidence
 
 
@@ -156,5 +169,6 @@ class LLMEnvelope(_StrictBase):
     activity: ActivityIn | None = None
     correction: CorrectionIn | None = None
     deletion: DeletionIn | None = None
+    confirmation: ConfirmationIn | None = None
     nutrition_label: NutritionLabelIn | None = None
     profile_update: ProfileUpdateIn | None = None
