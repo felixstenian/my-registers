@@ -306,17 +306,30 @@ class AnthropicClient:
                         error="validation_exhausted",
                         validation_errors=last_validation_errors,
                     )
-                conversation.append({"role": "assistant", "content": response.content})
+                # Retry: enviar de volta o `tool_use` limpo (SDK inclui
+                # campos internos como `caller` que a API rejeita — Haiku
+                # 4.5 devolve 400 quando esses campos aparecem no payload)
+                # + resposta como `tool_result` (não texto solto — Haiku
+                # exige tool_result após tool_use).
+                tool_use_id = _find_tool_use_id(response) or ""
+                conversation.append(
+                    {
+                        "role": "assistant",
+                        "content": _clean_content_for_retry(response.content),
+                    }
+                )
                 conversation.append(
                     {
                         "role": "user",
                         "content": [
                             {
-                                "type": "text",
-                                "text": (
+                                "type": "tool_result",
+                                "tool_use_id": tool_use_id,
+                                "is_error": True,
+                                "content": (
                                     "O JSON anterior falhou na validação com os "
                                     f"seguintes erros: {last_validation_errors}. "
-                                    "Retorne APENAS via `record_intent` com o "
+                                    "Retorne novamente via `record_intent` com o "
                                     "schema correto, mantendo o mesmo sentido."
                                 ),
                             }
@@ -604,6 +617,40 @@ def _extract_tool_input(response: Any) -> dict[str, Any] | None:
         if isinstance(input_data, dict):
             return input_data
     return None
+
+
+def _find_tool_use_id(response: Any) -> str | None:
+    for block in getattr(response, "content", []):
+        if getattr(block, "type", None) == "tool_use":
+            return getattr(block, "id", None)
+    return None
+
+
+def _clean_content_for_retry(content: Any) -> list[dict[str, Any]]:
+    """Devolve os blocos de resposta em formato aceitável para reenviar
+    como `assistant` na próxima chamada.
+
+    O SDK anexa metadata interna (ex.: `caller`) nos blocos de `tool_use`
+    que a API rejeita com HTTP 400 (Haiku 4.5 é estrito quanto a isso).
+    Aqui mantemos só os campos que compõem o contrato do endpoint:
+    `type`, `id`, `name`, `input` para `tool_use`; `type`, `text` para
+    blocos de texto.
+    """
+    cleaned: list[dict[str, Any]] = []
+    for block in content or []:
+        btype = getattr(block, "type", None)
+        if btype == "tool_use":
+            cleaned.append(
+                {
+                    "type": "tool_use",
+                    "id": getattr(block, "id", ""),
+                    "name": getattr(block, "name", ""),
+                    "input": getattr(block, "input", {}),
+                }
+            )
+        elif btype == "text":
+            cleaned.append({"type": "text", "text": getattr(block, "text", "")})
+    return cleaned
 
 
 @lru_cache
