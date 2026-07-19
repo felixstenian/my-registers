@@ -169,6 +169,30 @@ async def test_list_after_returns_newer(client: AsyncClient, admin_user):
     assert [m["content"] for m in messages] == ["msg 2", "msg 3"]
 
 
+async def test_list_no_anchor_returns_most_recent_not_oldest(
+    client: AsyncClient, admin_user
+):
+    """Regressão do bug reportado em 2026-07-19.
+
+    Antes o fetch inicial fazia `ORDER BY created_at ASC LIMIT n` e devolvia
+    as MAIS ANTIGAS. Em contas com histórico > limit, o usuário abria o chat
+    e via só mensagens de dias atrás; a conversa recente sumia até enviar
+    algo novo, e o refresh não resolvia.
+
+    Comportamento esperado: sem `after`/`before`, devolver as N MAIS RECENTES
+    em ordem cronológica ASC.
+    """
+    await _login(client)
+    for i in range(6):
+        r = await client.post("/chat/messages", json={"text": f"msg {i}"})
+        assert r.status_code == 202
+
+    resp = await client.get("/chat/messages?limit=3")
+    assert resp.status_code == 200
+    messages = resp.json()["messages"]
+    assert [m["content"] for m in messages] == ["msg 3", "msg 4", "msg 5"]
+
+
 async def test_list_before_returns_older(client: AsyncClient, admin_user):
     await _login(client)
     ids = []

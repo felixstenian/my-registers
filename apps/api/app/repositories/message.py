@@ -62,6 +62,19 @@ class MessageRepository:
         before_id: uuid.UUID | None = None,
         limit: int = 50,
     ) -> list[Message]:
+        """Pagina cronologicamente. Regras:
+
+        - `after_id`: pega TUDO desde o anchor (exclusivo) em ASC, cap no
+          `limit`. Uso principal: polling incremental do chat.
+        - `before_id`: pega os N mais recentes ANTES do anchor e devolve em
+          ASC. Uso: scroll para cima no histórico.
+        - **Sem anchor** (chamada inicial): pega os `limit` MAIS RECENTES
+          (`ORDER BY created_at DESC LIMIT N`), depois reverte para ASC.
+          Antes fazíamos `ASC LIMIT N` que devolvia as mais ANTIGAS — em
+          contas com muito histórico isso escondia a conversa recente e
+          o refresh não trazia o que o usuário acabou de escrever
+          (bug reportado em 2026-07-19).
+        """
         anchor_after = await self.get_by_id(after_id, user_id=user_id) if after_id else None
         anchor_before = await self.get_by_id(before_id, user_id=user_id) if before_id else None
 
@@ -71,15 +84,17 @@ class MessageRepository:
         if anchor_before is not None:
             stmt = stmt.where(Message.created_at < anchor_before.created_at)
 
-        if anchor_before is not None:
-            # pega os N MAIS RECENTES antes do anchor, depois reverte
-            stmt = stmt.order_by(Message.created_at.desc()).limit(limit)
-            rows = list((await self.session.execute(stmt)).scalars())
-            rows.reverse()
-            return rows
+        if anchor_after is not None:
+            # Polling incremental: ordem cronológica ASC direto.
+            stmt = stmt.order_by(Message.created_at).limit(limit)
+            return list((await self.session.execute(stmt)).scalars())
 
-        stmt = stmt.order_by(Message.created_at).limit(limit)
-        return list((await self.session.execute(stmt)).scalars())
+        # Sem `after` (initial load ou scroll com `before`): pega os N MAIS
+        # RECENTES, depois reverte para devolver em ASC.
+        stmt = stmt.order_by(Message.created_at.desc()).limit(limit)
+        rows = list((await self.session.execute(stmt)).scalars())
+        rows.reverse()
+        return rows
 
     async def load_media_map(self, message_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[Media]]:
         if not message_ids:
