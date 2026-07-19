@@ -92,7 +92,8 @@ export default function ChatPage() {
     if (pollRef.current) return;
     pollStartRef.current = Date.now();
     setAwaitingAssistant(true);
-    pollRef.current = setInterval(async () => {
+
+    const tick = async (): Promise<boolean> => {
       const anchor = lastIdRef.current;
       const query = anchor ? `?after=${encodeURIComponent(anchor)}` : '';
       const result = await api<{ messages: Message[] }>(`/chat/messages${query}`);
@@ -101,12 +102,24 @@ export default function ChatPage() {
         const last = result.data.messages.at(-1);
         if (last) lastIdRef.current = last.id;
         const gotAssistant = result.data.messages.some((m) => m.role === 'assistant');
-        if (gotAssistant) stopPolling();
+        if (gotAssistant) {
+          stopPolling();
+          return true;
+        }
       }
       if (pollStartRef.current && Date.now() - pollStartRef.current > POLL_CAP_MS) {
         stopPolling();
+        return true;
       }
-    }, POLL_INTERVAL_MS);
+      return false;
+    };
+
+    // Poll imediato para não perder resposta que já chegou dentro do
+    // primeiro `POLL_INTERVAL_MS`; depois cai no ciclo normal.
+    void tick().then((done) => {
+      if (done) return;
+      pollRef.current = setInterval(tick, POLL_INTERVAL_MS);
+    });
   }, [stopPolling]);
 
   useEffect(() => stopPolling, [stopPolling]);
