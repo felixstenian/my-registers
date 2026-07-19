@@ -67,9 +67,7 @@ async def _delete_generic(
             entity_id=entity_id,
         )
     except DayClosedError as exc:
-        raise ConflictError(
-            "day is closed", code="conflict_closed_day"
-        ) from exc
+        raise ConflictError("day is closed", code="conflict_closed_day") from exc
     except AppError as exc:
         if exc.code == "target_not_found":
             raise NotFoundError("record not found", code="not_found") from exc
@@ -182,12 +180,8 @@ async def patch_food_item(
         hit = None
         if item.catalog_ref_id is not None:
             catalog = LocalTBCACatalog(session)
-            hit = await catalog.lookup(
-                LookupQuery(name=item.normalized_name, brand=item.brand)
-            )
-        computed = NutritionCalculator.compute(
-            hit=hit, grams=item.grams, ml=item.ml
-        )
+            hit = await catalog.lookup(LookupQuery(name=item.normalized_name, brand=item.brand))
+        computed = NutritionCalculator.compute(hit=hit, grams=item.grams, ml=item.ml)
         for field in (
             "kcal",
             "protein_g",

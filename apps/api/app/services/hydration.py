@@ -29,6 +29,7 @@ def _strip_accents(text: str) -> str:
     nfkd = unicodedata.normalize("NFKD", text)
     return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
 
+
 # Palavras que denunciam bebida com calorias mesmo se a LLM disser log_water.
 _NON_WATER_HINTS = {
     "cafe",
@@ -66,9 +67,7 @@ class HydrationService:
         occurred_at: datetime | None = None,
     ) -> HydrationResult:
         if envelope.water is None:
-            raise ValidationAppError(
-                "envelope missing water block", code="invalid_water_envelope"
-            )
+            raise ValidationAppError("envelope missing water block", code="invalid_water_envelope")
 
         summary = _strip_accents((envelope.user_text_summary or "").lower())
         for hint in _NON_WATER_HINTS:

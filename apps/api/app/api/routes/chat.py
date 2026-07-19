@@ -80,9 +80,7 @@ async def list_messages(
         media_refs: list[MediaRef] = []
         for m in item.media:
             url = await storage.presigned_get_url(m.storage_key)
-            media_refs.append(
-                MediaRef(id=m.id, content_type=m.content_type, url=url)
-            )
+            media_refs.append(MediaRef(id=m.id, content_type=m.content_type, url=url))
         out.append(
             MessageOut(
                 id=item.message.id,

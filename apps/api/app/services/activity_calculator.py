@@ -129,9 +129,7 @@ def _canonicalize_activity_type(raw: str) -> str:
 
     lowered = raw.strip().lower().replace("-", "_").replace(" ", "_")
     stripped = "".join(
-        ch
-        for ch in unicodedata.normalize("NFKD", lowered)
-        if not unicodedata.combining(ch)
+        ch for ch in unicodedata.normalize("NFKD", lowered) if not unicodedata.combining(ch)
     )
     return _ACTIVITY_TYPE_ALIASES.get(stripped, stripped)
 
@@ -155,9 +153,7 @@ class ActivityCalculator:
         return _MET_TABLE.get((canonical, intensity))
 
     @staticmethod
-    def estimate_duration_from_distance(
-        activity_type: str, distance_km: Decimal
-    ) -> Decimal | None:
+    def estimate_duration_from_distance(activity_type: str, distance_km: Decimal) -> Decimal | None:
         """SP-63: sem duração mas com distância → estimar por velocidade média."""
         canonical = _canonicalize_activity_type(activity_type)
         speed = _SPEED_KMH.get(canonical)

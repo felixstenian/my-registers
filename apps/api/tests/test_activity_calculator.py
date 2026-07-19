@@ -90,17 +90,13 @@ def test_missing_weight_zeros_but_keeps_met():
 
 def test_estimate_duration_from_distance_walk():
     """SP-63: 4 km caminhando a 5 km/h → 48 min."""
-    duration = ActivityCalculator.estimate_duration_from_distance(
-        "cardio_walk", Decimal("4.0")
-    )
+    duration = ActivityCalculator.estimate_duration_from_distance("cardio_walk", Decimal("4.0"))
     assert duration == Decimal("48.0000")
 
 
 def test_estimate_duration_from_distance_run():
     """SP-63: 10 km correndo a 9 km/h → 66.67 min."""
-    duration = ActivityCalculator.estimate_duration_from_distance(
-        "cardio_run", Decimal("10.0")
-    )
+    duration = ActivityCalculator.estimate_duration_from_distance("cardio_run", Decimal("10.0"))
     assert duration is not None
     assert duration.compare(Decimal("66.66")) == 1
     assert duration.compare(Decimal("66.67")) == -1

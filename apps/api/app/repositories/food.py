@@ -94,9 +94,7 @@ class FoodItemRepository:
         await self.session.flush()
         return item
 
-    async def list_alive_for_day(
-        self, day_log_id: uuid.UUID
-    ) -> list[FoodItem]:
+    async def list_alive_for_day(self, day_log_id: uuid.UUID) -> list[FoodItem]:
         stmt = (
             select(FoodItem)
             .join(FoodRecord, FoodRecord.id == FoodItem.food_record_id)

@@ -54,9 +54,7 @@ async def _day_log(session: AsyncSession, user):
     from app.repositories.day_log import DayLogRepository
 
     local_date = datetime.now(ZoneInfo(user.timezone)).date()
-    dl = await DayLogRepository(session).get_or_create(
-        user_id=user.id, log_date=local_date
-    )
+    dl = await DayLogRepository(session).get_or_create(user_id=user.id, log_date=local_date)
     await session.commit()
     return dl
 
@@ -102,9 +100,7 @@ def _deletion(target_hint: str) -> LLMEnvelope:
     )
 
 
-async def _create_food(
-    db_session, user, dl_id, name, normalized, grams, meal_slot="lunch"
-):
+async def _create_food(db_session, user, dl_id, name, normalized, grams, meal_slot="lunch"):
     catalog = LocalTBCACatalog(db_session)
     service = MealService(db_session, catalog)
     envelope = _log_food_envelope(
@@ -131,39 +127,51 @@ async def _create_food(
 # ---------------------------------------------------------------------------
 
 
-async def test_matcher_unambiguous_food_hit(
-    db_session: AsyncSession, admin_user
-):
+async def test_matcher_unambiguous_food_hit(db_session: AsyncSession, admin_user):
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     await _create_food(
-        db_session, admin_user, dl.id, "peito de frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "peito de frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     await _create_food(
-        db_session, admin_user, dl.id, "arroz branco",
-        "arroz_branco_cozido", 100,
+        db_session,
+        admin_user,
+        dl.id,
+        "arroz branco",
+        "arroz_branco_cozido",
+        100,
     )
     matcher = TargetMatcher(db_session)
-    candidate = await matcher.resolve(
-        day_log_id=dl.id, target_hint="frango"
-    )
+    candidate = await matcher.resolve(day_log_id=dl.id, target_hint="frango")
     assert candidate.entity.normalized_name == "peito_de_frango_grelhado"
 
 
-async def test_matcher_ambiguous_raises(
-    db_session: AsyncSession, admin_user
-):
+async def test_matcher_ambiguous_raises(db_session: AsyncSession, admin_user):
     """SP-71: dois 'frangos' no dia sem qualificador → AmbiguousTarget."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     await _create_food(
-        db_session, admin_user, dl.id, "peito frango almoço",
-        "peito_de_frango_grelhado", 150, meal_slot="lunch",
+        db_session,
+        admin_user,
+        dl.id,
+        "peito frango almoço",
+        "peito_de_frango_grelhado",
+        150,
+        meal_slot="lunch",
     )
     await _create_food(
-        db_session, admin_user, dl.id, "coxa frango jantar",
-        "coxa_de_frango_cozida", 200, meal_slot="dinner",
+        db_session,
+        admin_user,
+        dl.id,
+        "coxa frango jantar",
+        "coxa_de_frango_cozida",
+        200,
+        meal_slot="dinner",
     )
     matcher = TargetMatcher(db_session)
     with pytest.raises(AmbiguousTarget) as exc:
@@ -171,30 +179,34 @@ async def test_matcher_ambiguous_raises(
     assert len(exc.value.candidates) == 2
 
 
-async def test_matcher_qualified_by_meal_slot(
-    db_session: AsyncSession, admin_user
-):
+async def test_matcher_qualified_by_meal_slot(db_session: AsyncSession, admin_user):
     """SP-72: 'frango do almoço' desambigua por meal_slot."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     lunch_item = await _create_food(
-        db_session, admin_user, dl.id, "peito de frango",
-        "peito_de_frango_grelhado", 150, meal_slot="lunch",
+        db_session,
+        admin_user,
+        dl.id,
+        "peito de frango",
+        "peito_de_frango_grelhado",
+        150,
+        meal_slot="lunch",
     )
     await _create_food(
-        db_session, admin_user, dl.id, "coxa de frango",
-        "coxa_de_frango_cozida", 200, meal_slot="dinner",
+        db_session,
+        admin_user,
+        dl.id,
+        "coxa de frango",
+        "coxa_de_frango_cozida",
+        200,
+        meal_slot="dinner",
     )
     matcher = TargetMatcher(db_session)
-    candidate = await matcher.resolve(
-        day_log_id=dl.id, target_hint="frango do almoço"
-    )
+    candidate = await matcher.resolve(day_log_id=dl.id, target_hint="frango do almoço")
     assert candidate.entity_id == lunch_item.id
 
 
-async def test_matcher_no_target_raises(
-    db_session: AsyncSession, admin_user
-):
+async def test_matcher_no_target_raises(db_session: AsyncSession, admin_user):
     dl = await _day_log(db_session, admin_user)
     matcher = TargetMatcher(db_session)
     with pytest.raises(NoTargetFound):
@@ -206,15 +218,17 @@ async def test_matcher_no_target_raises(
 # ---------------------------------------------------------------------------
 
 
-async def test_correction_updates_grams_and_recomputes_macros(
-    db_session: AsyncSession, admin_user
-):
+async def test_correction_updates_grams_and_recomputes_macros(db_session: AsyncSession, admin_user):
     """SP-70: corrigir grams do frango recalcula macros pelo catálogo."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     item = await _create_food(
-        db_session, admin_user, dl.id, "peito de frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "peito de frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     old_kcal = item.kcal
 
@@ -236,15 +250,17 @@ async def test_correction_updates_grams_and_recomputes_macros(
     assert "grams" in result.changed_fields
 
 
-async def test_correction_grava_audit_event(
-    db_session: AsyncSession, admin_user
-):
+async def test_correction_grava_audit_event(db_session: AsyncSession, admin_user):
     """SP-74: audit_event(before/after/actor='llm') gravado."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     item = await _create_food(
-        db_session, admin_user, dl.id, "peito de frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "peito de frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     envelope = _correction("frango", {"grams": 200})
     await CorrectionService(db_session).apply_from_llm(
@@ -254,9 +270,7 @@ async def test_correction_grava_audit_event(
 
     events = list(
         (
-            await db_session.execute(
-                select(AuditEvent).where(AuditEvent.action == "correct")
-            )
+            await db_session.execute(select(AuditEvent).where(AuditEvent.action == "correct"))
         ).scalars()
     )
     assert len(events) == 1
@@ -267,19 +281,27 @@ async def test_correction_grava_audit_event(
     assert e.after["grams"] == 200.0
 
 
-async def test_correction_ambiguous_does_not_persist(
-    db_session: AsyncSession, admin_user
-):
+async def test_correction_ambiguous_does_not_persist(db_session: AsyncSession, admin_user):
     """SP-71: correção ambígua não altera nada (LLM path via CorrectionService)."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     await _create_food(
-        db_session, admin_user, dl.id, "peito de frango",
-        "peito_de_frango_grelhado", 150, meal_slot="lunch",
+        db_session,
+        admin_user,
+        dl.id,
+        "peito de frango",
+        "peito_de_frango_grelhado",
+        150,
+        meal_slot="lunch",
     )
     await _create_food(
-        db_session, admin_user, dl.id, "coxa de frango",
-        "coxa_de_frango_cozida", 200, meal_slot="dinner",
+        db_session,
+        admin_user,
+        dl.id,
+        "coxa de frango",
+        "coxa_de_frango_cozida",
+        200,
+        meal_slot="dinner",
     )
     envelope = _correction("frango", {"grams": 220})
     with pytest.raises(AmbiguousTarget):
@@ -288,15 +310,17 @@ async def test_correction_ambiguous_does_not_persist(
         )
 
 
-async def test_correction_on_closed_day_blocks(
-    db_session: AsyncSession, admin_user
-):
+async def test_correction_on_closed_day_blocks(db_session: AsyncSession, admin_user):
     """SP-73/INV-5: correção em dia fechado → DayClosedError."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     await _create_food(
-        db_session, admin_user, dl.id, "frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     dl.status = "closed"
     dl.closed_at = datetime.now(UTC)
@@ -314,14 +338,16 @@ async def test_correction_on_closed_day_blocks(
 # ---------------------------------------------------------------------------
 
 
-async def test_deletion_soft_deletes_and_audits(
-    db_session: AsyncSession, admin_user
-):
+async def test_deletion_soft_deletes_and_audits(db_session: AsyncSession, admin_user):
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     item = await _create_food(
-        db_session, admin_user, dl.id, "frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "frango",
+        "peito_de_frango_grelhado",
+        150,
     )
 
     envelope = _deletion("frango")
@@ -335,24 +361,24 @@ async def test_deletion_soft_deletes_and_audits(
 
     events = list(
         (
-            await db_session.execute(
-                select(AuditEvent).where(AuditEvent.action == "delete")
-            )
+            await db_session.execute(select(AuditEvent).where(AuditEvent.action == "delete"))
         ).scalars()
     )
     assert len(events) == 1
     assert events[0].after is None
 
 
-async def test_deletion_closed_day_blocks(
-    db_session: AsyncSession, admin_user
-):
+async def test_deletion_closed_day_blocks(db_session: AsyncSession, admin_user):
     """SP-82: deleção em dia fechado → DayClosedError."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     await _create_food(
-        db_session, admin_user, dl.id, "frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     dl.status = "closed"
     await db_session.commit()
@@ -377,14 +403,16 @@ async def _login(client: AsyncClient) -> None:
     assert resp.status_code == 204
 
 
-async def test_delete_food_item_endpoint(
-    client: AsyncClient, admin_user, db_session: AsyncSession
-):
+async def test_delete_food_item_endpoint(client: AsyncClient, admin_user, db_session: AsyncSession):
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     item = await _create_food(
-        db_session, admin_user, dl.id, "frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     await _login(client)
 
@@ -402,8 +430,12 @@ async def test_delete_endpoint_idempotent(
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     item = await _create_food(
-        db_session, admin_user, dl.id, "frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     await _login(client)
 
@@ -421,8 +453,12 @@ async def test_delete_endpoint_closed_day_returns_409(
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     item = await _create_food(
-        db_session, admin_user, dl.id, "frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     dl.status = "closed"
     await db_session.commit()
@@ -439,14 +475,16 @@ async def test_patch_food_item_recomputes_macros(
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     item = await _create_food(
-        db_session, admin_user, dl.id, "frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     await _login(client)
 
-    resp = await client.patch(
-        f"/records/food-items/{item.id}", json={"grams": 250}
-    )
+    resp = await client.patch(f"/records/food-items/{item.id}", json={"grams": 250})
     assert resp.status_code == 200
     body = resp.json()
     # 250 × 159 / 100 = 397.50
@@ -469,17 +507,19 @@ async def test_snapshot_recomputes_after_correction(
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     await _create_food(
-        db_session, admin_user, dl.id, "frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     from app.services.daily_recompute import DailyRecomputeService
 
     await DailyRecomputeService(db_session).recompute(dl.id)
     await db_session.commit()
 
-    snap_before = (
-        await db_session.execute(select(DailySnapshot))
-    ).scalar_one()
+    snap_before = (await db_session.execute(select(DailySnapshot))).scalar_one()
     kcal_before = snap_before.kcal_in
     version_before = snap_before.version
 
@@ -519,8 +559,12 @@ async def test_snapshot_recomputes_after_deletion(
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     await _create_food(
-        db_session, admin_user, dl.id, "frango",
-        "peito_de_frango_grelhado", 150,
+        db_session,
+        admin_user,
+        dl.id,
+        "frango",
+        "peito_de_frango_grelhado",
+        150,
     )
     from app.services.daily_recompute import DailyRecomputeService
 
@@ -562,12 +606,22 @@ async def test_ambiguous_correction_via_chat_returns_clarify(
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     await _create_food(
-        db_session, admin_user, dl.id, "peito frango",
-        "peito_de_frango_grelhado", 150, meal_slot="lunch",
+        db_session,
+        admin_user,
+        dl.id,
+        "peito frango",
+        "peito_de_frango_grelhado",
+        150,
+        meal_slot="lunch",
     )
     await _create_food(
-        db_session, admin_user, dl.id, "coxa frango",
-        "coxa_de_frango_cozida", 200, meal_slot="dinner",
+        db_session,
+        admin_user,
+        dl.id,
+        "coxa frango",
+        "coxa_de_frango_cozida",
+        200,
+        meal_slot="dinner",
     )
     await _login(client)
     fake_anthropic.queue(

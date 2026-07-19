@@ -28,9 +28,7 @@ class ActivityRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "calc_method IN ('mets_body_weight','llm_estimate','user_manual')",
             name="ck_activity_records_calc_method",
         ),
-        CheckConstraint(
-            "duration_minutes > 0", name="ck_activity_records_duration_positive"
-        ),
+        CheckConstraint("duration_minutes > 0", name="ck_activity_records_duration_positive"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -48,24 +46,16 @@ class ActivityRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("messages.id", ondelete="SET NULL"),
         nullable=True,
     )
-    occurred_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     detected_name: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
     activity_type: Mapped[str] = mapped_column(Text, nullable=False)
     duration_minutes: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False)
     distance_km: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
-    intensity: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default="unknown"
-    )
+    intensity: Mapped[str] = mapped_column(Text, nullable=False, server_default="unknown")
     met_value: Mapped[Decimal | None] = mapped_column(Numeric(4, 2), nullable=True)
-    kcal_burned: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2), nullable=False, server_default="0"
-    )
+    kcal_burned: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
     calc_method: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

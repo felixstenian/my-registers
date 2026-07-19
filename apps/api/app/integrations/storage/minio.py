@@ -72,9 +72,7 @@ class MinioStorage:
         )
 
     async def get_object(self, key: str) -> bytes:
-        response = await asyncio.to_thread(
-            self._client.get_object, Bucket=self.bucket, Key=key
-        )
+        response = await asyncio.to_thread(self._client.get_object, Bucket=self.bucket, Key=key)
         return await asyncio.to_thread(response["Body"].read)
 
     async def presigned_get_url(self, key: str, *, expires_in: int = 3600) -> str:
@@ -92,9 +90,7 @@ class MinioStorage:
 
             parts = urlsplit(url)
             pub = urlsplit(self._public_base_url)
-            url = urlunsplit(
-                (pub.scheme, pub.netloc, parts.path, parts.query, parts.fragment)
-            )
+            url = urlunsplit((pub.scheme, pub.netloc, parts.path, parts.query, parts.fragment))
         return url
 
 

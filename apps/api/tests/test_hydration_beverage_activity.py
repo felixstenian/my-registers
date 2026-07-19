@@ -61,14 +61,10 @@ def _envelope(**overrides) -> LLMEnvelope:
 # ---------------------------------------------------------------------------
 
 
-async def test_sp40_water_records_volume(
-    db_session: AsyncSession, admin_user
-):
+async def test_sp40_water_records_volume(db_session: AsyncSession, admin_user):
     dl = await _day_log(db_session, admin_user.id)
     service = HydrationService(db_session)
-    envelope = _envelope(
-        intent="log_water", water={"volume_ml": 500, "confidence": 0.95}
-    )
+    envelope = _envelope(intent="log_water", water={"volume_ml": 500, "confidence": 0.95})
     result = await service.create_from_llm(
         user=admin_user, day_log_id=dl.id, message_id=None, envelope=envelope
     )
@@ -106,14 +102,10 @@ async def test_sp41_rejects_water_intent_when_summary_hints_beverage(
     assert rows == []
 
 
-async def test_hydration_grava_audit_event(
-    db_session: AsyncSession, admin_user
-):
+async def test_hydration_grava_audit_event(db_session: AsyncSession, admin_user):
     dl = await _day_log(db_session, admin_user.id)
     service = HydrationService(db_session)
-    envelope = _envelope(
-        intent="log_water", water={"volume_ml": 250, "confidence": 0.9}
-    )
+    envelope = _envelope(intent="log_water", water={"volume_ml": 250, "confidence": 0.9})
     await service.create_from_llm(
         user=admin_user, day_log_id=dl.id, message_id=None, envelope=envelope
     )
@@ -131,9 +123,7 @@ async def test_hydration_grava_audit_event(
 # ---------------------------------------------------------------------------
 
 
-async def test_sp50_beverage_with_catalog_hit(
-    db_session: AsyncSession, admin_user
-):
+async def test_sp50_beverage_with_catalog_hit(db_session: AsyncSession, admin_user):
     """SP-50: café/refrigerante/etc → beverage_records com kcal do catálogo."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user.id)
@@ -162,9 +152,7 @@ async def test_sp50_beverage_with_catalog_hit(
     assert result.record.volume_ml == 200
 
 
-async def test_sp52_beverage_no_catalog_zeros(
-    db_session: AsyncSession, admin_user
-):
+async def test_sp52_beverage_no_catalog_zeros(db_session: AsyncSession, admin_user):
     """SP-52: bebida sem catálogo → macros zerados + warning no_catalog_hit."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user.id)
@@ -192,9 +180,7 @@ async def test_sp52_beverage_no_catalog_zeros(
     assert any(w["code"] == "no_catalog_hit" for w in result.warnings)
 
 
-async def test_beverage_never_lands_in_water_table(
-    db_session: AsyncSession, admin_user
-):
+async def test_beverage_never_lands_in_water_table(db_session: AsyncSession, admin_user):
     """INV-3 estrutural: bebida calórica só entra em beverage_records."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user.id)
@@ -233,9 +219,7 @@ async def _admin_with_weight(db_session: AsyncSession, admin_user, weight_kg):
     return admin_user
 
 
-async def test_sp60_activity_computes_kcal_burned(
-    db_session: AsyncSession, admin_user
-):
+async def test_sp60_activity_computes_kcal_burned(db_session: AsyncSession, admin_user):
     """SP-60: corrida 40min moderada + peso → kcal_burned deterministicamente."""
     user = await _admin_with_weight(db_session, admin_user, 78)
     dl = await _day_log(db_session, user.id)
@@ -264,9 +248,7 @@ async def test_sp60_activity_computes_kcal_burned(
     assert result.record.duration_minutes == Decimal("40.00")
 
 
-async def test_sp61_missing_weight_raises_weight_required(
-    db_session: AsyncSession, admin_user
-):
+async def test_sp61_missing_weight_raises_weight_required(db_session: AsyncSession, admin_user):
     """SP-61: users.weight_kg=null → não persiste; service levanta WeightRequired."""
     dl = await _day_log(db_session, admin_user.id)
     service = ActivityService(db_session)
@@ -322,9 +304,7 @@ async def test_sp62_strength_unknown_intensity_uses_moderate_met(
     assert result.record.kcal_burned == Decimal("400.00")
 
 
-async def test_sp64_audit_and_calc_method_stored(
-    db_session: AsyncSession, admin_user
-):
+async def test_sp64_audit_and_calc_method_stored(db_session: AsyncSession, admin_user):
     """SP-64: met_value + calc_method persistidos para recomputo futuro."""
     user = await _admin_with_weight(db_session, admin_user, 75)
     dl = await _day_log(db_session, user.id)

@@ -34,13 +34,7 @@ class FoodRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("messages.id", ondelete="SET NULL"),
         nullable=True,
     )
-    meal_slot: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default="unspecified"
-    )
-    occurred_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    meal_slot: Mapped[str] = mapped_column(Text, nullable=False, server_default="unspecified")
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

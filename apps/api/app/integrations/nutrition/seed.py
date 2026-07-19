@@ -34,9 +34,7 @@ def _parse_dec(value: str) -> Decimal | None:
     return Decimal(value)
 
 
-async def seed_from_csv(
-    session: AsyncSession, *, path: Path | None = None
-) -> SeedResult:
+async def seed_from_csv(session: AsyncSession, *, path: Path | None = None) -> SeedResult:
     csv_path = path or _SEED_PATH
     inserted = 0
     updated = 0
@@ -47,12 +45,7 @@ async def seed_from_csv(
             canonical = normalize_name(row["canonical_name"])
             aliases_raw = row.get("aliases", "") or ""
             aliases = sorted(
-                {
-                    normalize_name(a)
-                    for a in aliases_raw.split(";")
-                    if a.strip()
-                }
-                | {canonical}
+                {normalize_name(a) for a in aliases_raw.split(";") if a.strip()} | {canonical}
             )
 
             stmt = select(NutrientFact).where(

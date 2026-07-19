@@ -43,9 +43,7 @@ class MealResult:
 
 
 class MealService:
-    def __init__(
-        self, session: AsyncSession, catalog: NutritionCatalog
-    ) -> None:
+    def __init__(self, session: AsyncSession, catalog: NutritionCatalog) -> None:
         self.session = session
         self.catalog = catalog
         self.food_records = FoodRecordRepository(session)
@@ -103,9 +101,7 @@ class MealService:
         self, food_record_id: uuid.UUID, entry: FoodItemIn
     ) -> tuple[FoodItem, list[dict[str, Any]]]:
         normalized = normalize_name(entry.normalized_name or entry.detected_name)
-        hit = await self.catalog.lookup(
-            LookupQuery(name=normalized, brand=entry.brand)
-        )
+        hit = await self.catalog.lookup(LookupQuery(name=normalized, brand=entry.brand))
 
         grams = _decimal_or_none(entry.grams_estimate)
         ml = _decimal_or_none(entry.ml_estimate)
@@ -116,9 +112,7 @@ class MealService:
 
         # SP-24: item com confiança < 0.5 → needs_confirmation.
         # SP-23: sem catálogo → macros zerados + warning por item.
-        needs_confirmation = confidence < LOW_CONFIDENCE_THRESHOLD or (
-            hit is None
-        )
+        needs_confirmation = confidence < LOW_CONFIDENCE_THRESHOLD or (hit is None)
 
         item = await self.food_items.create(
             food_record_id=food_record_id,
@@ -164,9 +158,7 @@ class MealService:
             )
         for reason in computed.reasons:
             if reason.startswith("missing_"):
-                item_warnings.append(
-                    {"code": reason, "item_id": str(item.id)}
-                )
+                item_warnings.append({"code": reason, "item_id": str(item.id)})
         return item, item_warnings
 
 

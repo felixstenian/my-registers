@@ -41,9 +41,7 @@ class FoodItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ml: Mapped[Decimal | None] = mapped_column(Numeric(10, 3), nullable=True)
     source: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
-    is_estimate: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="false"
-    )
+    is_estimate: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     needs_confirmation: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
@@ -60,9 +58,5 @@ class FoodItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sodium_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     calcium_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     iron_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
-    potassium_mg: Mapped[Decimal | None] = mapped_column(
-        Numeric(10, 2), nullable=True
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    potassium_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

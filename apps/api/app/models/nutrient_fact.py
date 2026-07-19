@@ -31,14 +31,10 @@ class NutrientFact(UUIDPrimaryKeyMixin, Base):
     )
 
     canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
-    aliases: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default="{}"
-    )
+    aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
     brand: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(Text, nullable=False)
-    serving_grams: Mapped[Decimal | None] = mapped_column(
-        Numeric(10, 2), nullable=True
-    )
+    serving_grams: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     kcal: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     protein_g: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     carbs_g: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
@@ -47,9 +43,7 @@ class NutrientFact(UUIDPrimaryKeyMixin, Base):
     sodium_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     calcium_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     iron_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
-    potassium_mg: Mapped[Decimal | None] = mapped_column(
-        Numeric(10, 2), nullable=True
-    )
+    potassium_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     basis: Mapped[str] = mapped_column(Text, nullable=False)
     barcode: Mapped[str | None] = mapped_column(Text, nullable=True)
     label_media_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -57,9 +51,7 @@ class NutrientFact(UUIDPrimaryKeyMixin, Base):
         ForeignKey("media.id", ondelete="SET NULL"),
         nullable=True,
     )
-    verified_by_user: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="false"
-    )
+    verified_by_user: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -26,10 +26,7 @@ class JsonFormatter(logging.Formatter):
 
 def _scrub(obj: Any) -> Any:
     if isinstance(obj, dict):
-        return {
-            k: ("***" if k.lower() in _SENSITIVE_KEYS else _scrub(v))
-            for k, v in obj.items()
-        }
+        return {k: ("***" if k.lower() in _SENSITIVE_KEYS else _scrub(v)) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_scrub(v) for v in obj]
     return obj
@@ -40,9 +37,7 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
     if fmt == "json":
         handler.setFormatter(JsonFormatter())
     else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level.upper())

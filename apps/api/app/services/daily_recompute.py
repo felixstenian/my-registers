@@ -58,9 +58,7 @@ class DailyRecomputeService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def recompute(
-        self, day_log_id: uuid.UUID
-    ) -> RecomputeResult:
+    async def recompute(self, day_log_id: uuid.UUID) -> RecomputeResult:
         day_log = await self.session.get(DayLog, day_log_id)
         if day_log is None:
             raise ValueError(f"day_log {day_log_id} not found")
@@ -139,8 +137,7 @@ class DailyRecomputeService:
         )
         row = (await self.session.execute(stmt)).one()
         totals = {
-            field: Decimal(value or 0)
-            for field, value in zip(_MACRO_FIELDS, row, strict=True)
+            field: Decimal(value or 0) for field, value in zip(_MACRO_FIELDS, row, strict=True)
         }
 
         stmt_warnings = (
@@ -188,21 +185,15 @@ class DailyRecomputeService:
             func.coalesce(func.sum(getattr(BeverageRecord, field)), 0).label(field)
             for field in _MACRO_FIELDS
         ]
-        vol_col = func.coalesce(func.sum(BeverageRecord.volume_ml), 0).label(
-            "volume_ml"
-        )
+        vol_col = func.coalesce(func.sum(BeverageRecord.volume_ml), 0).label("volume_ml")
         stmt = select(*sum_cols, vol_col).where(
             BeverageRecord.day_log_id == day_log_id,
             BeverageRecord.deleted_at.is_(None),
         )
         row = (await self.session.execute(stmt)).one()
         totals: dict[str, Decimal] = {}
-        for field, value in zip(
-            (*_MACRO_FIELDS, "volume_ml"), row, strict=True
-        ):
-            totals[field] = (
-                int(value or 0) if field == "volume_ml" else Decimal(value or 0)
-            )
+        for field, value in zip((*_MACRO_FIELDS, "volume_ml"), row, strict=True):
+            totals[field] = int(value or 0) if field == "volume_ml" else Decimal(value or 0)
 
         stmt_warnings = select(
             BeverageRecord.id,
@@ -238,9 +229,7 @@ class DailyRecomputeService:
         return totals, warnings
 
     async def _aggregate_water(self, day_log_id: uuid.UUID) -> int:
-        stmt = select(
-            func.coalesce(func.sum(WaterRecord.volume_ml), 0)
-        ).where(
+        stmt = select(func.coalesce(func.sum(WaterRecord.volume_ml), 0)).where(
             WaterRecord.day_log_id == day_log_id,
             WaterRecord.deleted_at.is_(None),
         )
@@ -249,9 +238,7 @@ class DailyRecomputeService:
     async def _aggregate_activity(
         self, day_log_id: uuid.UUID
     ) -> tuple[Decimal, list[dict[str, Any]]]:
-        stmt = select(
-            func.coalesce(func.sum(ActivityRecord.kcal_burned), 0)
-        ).where(
+        stmt = select(func.coalesce(func.sum(ActivityRecord.kcal_burned), 0)).where(
             ActivityRecord.day_log_id == day_log_id,
             ActivityRecord.deleted_at.is_(None),
         )

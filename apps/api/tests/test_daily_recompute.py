@@ -45,9 +45,7 @@ def _envelope(items: list[dict]) -> LLMEnvelope:
     )
 
 
-async def test_snapshot_sums_food_items(
-    db_session: AsyncSession, admin_user
-):
+async def test_snapshot_sums_food_items(db_session: AsyncSession, admin_user):
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user.id)
     catalog = LocalTBCACatalog(db_session)
@@ -87,9 +85,7 @@ async def test_snapshot_sums_food_items(
     assert snap.version == 1
 
 
-async def test_recompute_is_idempotent_and_increments_version(
-    db_session: AsyncSession, admin_user
-):
+async def test_recompute_is_idempotent_and_increments_version(db_session: AsyncSession, admin_user):
     """INV-4: mesmos itens → mesmos totais, mas version++ a cada chamada."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user.id)
@@ -123,9 +119,7 @@ async def test_recompute_is_idempotent_and_increments_version(
     assert r2.snapshot.version == v1 + 1
 
 
-async def test_recompute_new_items_reflect_immediately(
-    db_session: AsyncSession, admin_user
-):
+async def test_recompute_new_items_reflect_immediately(db_session: AsyncSession, admin_user):
     """SP-20: snapshot recompute após novos itens; sem cache stale."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user.id)
@@ -176,9 +170,7 @@ async def test_recompute_new_items_reflect_immediately(
     assert r2.snapshot.kcal_in.compare(283) == 0
 
 
-async def test_deleted_items_excluded_from_snapshot(
-    db_session: AsyncSession, admin_user
-):
+async def test_deleted_items_excluded_from_snapshot(db_session: AsyncSession, admin_user):
     """INV-4: soft delete no food_item some do snapshot na próxima recompute."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user.id)

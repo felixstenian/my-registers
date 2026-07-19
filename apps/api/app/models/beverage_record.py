@@ -27,9 +27,7 @@ class BeverageRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "beverage_records"
     __table_args__ = (
-        CheckConstraint(
-            "volume_ml > 0", name="ck_beverage_records_volume_positive"
-        ),
+        CheckConstraint("volume_ml > 0", name="ck_beverage_records_volume_positive"),
         CheckConstraint(
             "source IN ('manual','llm','user_corrected','catalog')",
             name="ck_beverage_records_source",
@@ -51,18 +49,14 @@ class BeverageRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("messages.id", ondelete="SET NULL"),
         nullable=True,
     )
-    occurred_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     detected_name: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
     brand: Mapped[str | None] = mapped_column(Text, nullable=True)
     volume_ml: Mapped[int] = mapped_column(Integer, nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
-    is_estimate: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="false"
-    )
+    is_estimate: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     needs_confirmation: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
@@ -79,9 +73,5 @@ class BeverageRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sodium_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     calcium_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     iron_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
-    potassium_mg: Mapped[Decimal | None] = mapped_column(
-        Numeric(10, 2), nullable=True
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    potassium_mg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -109,9 +109,7 @@ class TargetMatcher:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def resolve(
-        self, *, day_log_id: uuid.UUID, target_hint: str
-    ) -> Candidate:
+    async def resolve(self, *, day_log_id: uuid.UUID, target_hint: str) -> Candidate:
         tokens = _tokenize(target_hint)
         if not tokens:
             raise NoTargetFound(target_hint)
@@ -125,23 +123,13 @@ class TargetMatcher:
 
         candidates: list[Candidate] = []
         if kind_filter is None or kind_filter == TargetKind.FOOD:
-            candidates.extend(
-                await self._search_food(
-                    day_log_id, name_tokens, meal_slot_filter
-                )
-            )
+            candidates.extend(await self._search_food(day_log_id, name_tokens, meal_slot_filter))
         if kind_filter is None or kind_filter == TargetKind.WATER:
-            candidates.extend(
-                await self._search_water(day_log_id, name_tokens)
-            )
+            candidates.extend(await self._search_water(day_log_id, name_tokens))
         if kind_filter is None or kind_filter == TargetKind.BEVERAGE:
-            candidates.extend(
-                await self._search_beverage(day_log_id, name_tokens)
-            )
+            candidates.extend(await self._search_beverage(day_log_id, name_tokens))
         if kind_filter is None or kind_filter == TargetKind.ACTIVITY:
-            candidates.extend(
-                await self._search_activity(day_log_id, name_tokens)
-            )
+            candidates.extend(await self._search_activity(day_log_id, name_tokens))
 
         if not candidates:
             raise NoTargetFound(target_hint)
@@ -186,9 +174,7 @@ class TargetMatcher:
             )
         return out
 
-    async def _search_water(
-        self, day_log_id: uuid.UUID, tokens: set[str]
-    ) -> list[Candidate]:
+    async def _search_water(self, day_log_id: uuid.UUID, tokens: set[str]) -> list[Candidate]:
         stmt = select(WaterRecord).where(
             WaterRecord.day_log_id == day_log_id,
             WaterRecord.deleted_at.is_(None),
@@ -208,9 +194,7 @@ class TargetMatcher:
             for r in rows
         ]
 
-    async def _search_beverage(
-        self, day_log_id: uuid.UUID, tokens: set[str]
-    ) -> list[Candidate]:
+    async def _search_beverage(self, day_log_id: uuid.UUID, tokens: set[str]) -> list[Candidate]:
         stmt = select(BeverageRecord).where(
             BeverageRecord.day_log_id == day_log_id,
             BeverageRecord.deleted_at.is_(None),
@@ -231,9 +215,7 @@ class TargetMatcher:
             )
         return out
 
-    async def _search_activity(
-        self, day_log_id: uuid.UUID, tokens: set[str]
-    ) -> list[Candidate]:
+    async def _search_activity(self, day_log_id: uuid.UUID, tokens: set[str]) -> list[Candidate]:
         stmt = select(ActivityRecord).where(
             ActivityRecord.day_log_id == day_log_id,
             ActivityRecord.deleted_at.is_(None),

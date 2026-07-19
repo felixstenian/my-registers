@@ -27,9 +27,7 @@ async def upload_media(
     storage: MinioStorage = Depends(get_storage_dep),
 ) -> MediaOut:
     if file.content_type is None:
-        raise ValidationAppError(
-            "missing content type", code="unsupported_media_type"
-        )
+        raise ValidationAppError("missing content type", code="unsupported_media_type")
     data = await file.read()
     service = MediaService(session, storage)
     media = await service.upload(
