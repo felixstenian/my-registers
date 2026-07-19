@@ -24,13 +24,10 @@ _FALLBACK_CLARIFY = (
     "Pode me contar mais? Você comeu algo, bebeu, treinou, ou é só um comentário sobre o dia?"
 )
 
-# Intents que o MessageProcessor trata diretamente (persistência custom):
-# - log_food (Fase 4), log_water/log_beverage/log_activity (Fase 5).
-# Não devem passar pelo dispatcher; se chegarem aqui é bug e cai como unknown.
-# Intents que ainda dependem de fase futura ficam aqui:
-_STRUCTURED_INTENTS = {
-    "log_nutrition_label",  # Fase 4.b
-}
+# Nenhum intent estruturado permanece pendente após a Fase 4.b — todos são
+# roteados diretamente pelo `MessageProcessor`. Mantemos o set vazio como
+# extension point caso apareça algo novo no futuro.
+_STRUCTURED_INTENTS: set[str] = set()
 
 
 class IntentNotImplemented(Exception):
