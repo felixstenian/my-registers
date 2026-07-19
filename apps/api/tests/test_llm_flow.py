@@ -238,9 +238,10 @@ async def test_validation_exhausted_treated_as_error(
 
 @pytest.mark.parametrize(
     "intent",
-    # log_food (Fase 4), log_water/log_beverage/log_activity (Fase 5) foram
-    # implementados. Ficam aqui apenas os que ainda dependem de fases futuras.
-    ["correct_record", "delete_record", "query_day", "weekly_summary"],
+    # log_food (Fase 4), log_water/log_beverage/log_activity (Fase 5),
+    # correct_record/delete_record (Fase 6) foram implementados. Ficam aqui
+    # apenas os que ainda dependem de fases futuras.
+    ["query_day", "close_day", "weekly_summary"],
 )
 async def test_not_implemented_intents_fall_back_to_reformulation(
     client: AsyncClient,
