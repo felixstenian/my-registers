@@ -541,7 +541,20 @@ class MessageProcessor:
         if user is None:
             return await self._record_error(user_message, result)
 
-        payload = await DayQueryService(self.session).get_today(user=user)
+        from app.core.exceptions import NotFoundError
+
+        try:
+            payload = await DayQueryService(self.session).get_today(user=user)
+        except NotFoundError:
+            # Usuário novo, sem day_log ainda. Ao chegar até `query_day` a
+            # `ChatService.post_user_message` já deveria ter criado, mas caso
+            # algo tenha impedido, respondemos amigável em vez de estourar.
+            return await self._record_clarify(
+                user_message,
+                result,
+                "Ainda não há registros no dia de hoje pra resumir. Me conta o que você comeu, bebeu ou treinou.",
+                code="day_not_found",
+            )
 
         raw = _pack_raw(result)
         raw["dispatch"] = {
