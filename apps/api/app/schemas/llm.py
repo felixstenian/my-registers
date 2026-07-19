@@ -41,7 +41,18 @@ class _StrictBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class FoodItemIn(_StrictBase):
+# Payloads de registro (`FoodItemIn`, `BeverageIn`, `ActivityIn`) usam
+# `extra="ignore"`: a LLM tende a inventar campos comuns de contexto
+# (`pace`, `heart_rate_avg`, `calories`, `sugars_g`, etc.) que **não**
+# consumimos, mas rejeitá-los levaria a `validation_exhausted` — o
+# assistant cairia no fallback genérico "Não consegui interpretar".
+# Fields conhecidos ainda são validados normalmente; extras são
+# silenciosamente descartados.
+class _LenientBase(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class FoodItemIn(_LenientBase):
     detected_name: str
     normalized_name: str | None = None
     brand: str | None = None
@@ -58,7 +69,7 @@ class WaterIn(_StrictBase):
     confidence: float = Confidence
 
 
-class BeverageIn(_StrictBase):
+class BeverageIn(_LenientBase):
     detected_name: str
     brand: str | None = None
     volume_ml: float = Field(ge=1)
@@ -112,7 +123,7 @@ def _normalize_intensity(value: object) -> object:
     return _INTENSITY_ALIASES.get(stripped, value)
 
 
-class ActivityIn(_StrictBase):
+class ActivityIn(_LenientBase):
     detected_name: str
     activity_type: str
     duration_minutes: float = Field(ge=1)
@@ -128,6 +139,19 @@ class ActivityIn(_StrictBase):
     @classmethod
     def _accept_ptbr_intensity(cls, value):
         return _normalize_intensity(value)
+
+    @field_validator("duration_minutes", mode="before")
+    @classmethod
+    def _coerce_duration(cls, value):
+        """LLM ocasionalmente emite duração como string ("40") ou dict
+        com unidade. Aceita string numérica; deixa Pydantic falhar em
+        outros casos."""
+        if isinstance(value, str):
+            try:
+                return float(value.strip().split()[0])
+            except (ValueError, IndexError):
+                return value
+        return value
 
 
 class CorrectionIn(_StrictBase):

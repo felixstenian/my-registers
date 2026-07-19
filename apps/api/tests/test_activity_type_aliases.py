@@ -177,3 +177,131 @@ def test_intensity_unknown_string_falls_through():
                 },
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# Regressão: LLM inventa campos extras que causavam validation_exhausted
+# ---------------------------------------------------------------------------
+
+
+def test_activity_in_ignores_extra_fields_from_llm():
+    """LLM tende a inventar `pace`, `heart_rate_avg`, `calories`, etc. Antes
+    do fix, esses campos rejeitavam via `extra="forbid"`, o retry esgotava,
+    e o assistant caía em "Não consegui interpretar sua mensagem agora."
+    Agora extras são silenciosamente descartados."""
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_activity",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "activity": {
+                "detected_name": "corrida",
+                "activity_type": "cardio_run",
+                "duration_minutes": 40,
+                "intensity": "moderate",
+                "confidence": 0.9,
+                # Extras comuns que a LLM emite:
+                "pace": "5:30/km",
+                "heart_rate_avg": 152,
+                "calories": 359,
+                "elevation_gain": 45,
+                "notes": "corrida no parque",
+            },
+        }
+    )
+    assert envelope.activity is not None
+    assert envelope.activity.duration_minutes == 40
+    # Nenhum extra viaja no objeto — só os declarados.
+    assert not hasattr(envelope.activity, "pace")
+    assert not hasattr(envelope.activity, "calories")
+
+
+def test_beverage_in_ignores_extra_fields():
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_beverage",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "beverage": {
+                "detected_name": "café",
+                "volume_ml": 200,
+                "beverage_kind": "other",
+                "confidence": 0.9,
+                # LLM comumente adiciona:
+                "sugars_g": 5.0,
+                "caffeine_mg": 80,
+                "temperature": "quente",
+            },
+        }
+    )
+    assert envelope.beverage is not None
+    assert envelope.beverage.volume_ml == 200
+
+
+def test_food_item_in_ignores_extra_fields():
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_food",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "meal_slot": "lunch",
+            "food_items": [
+                {
+                    "detected_name": "arroz",
+                    "grams_estimate": 150,
+                    "confidence": 0.9,
+                    # LLM às vezes tenta:
+                    "kcal": 186,
+                    "protein_g": 4.5,
+                    "cooking_method": "cozido",
+                }
+            ],
+        }
+    )
+    assert len(envelope.food_items) == 1
+    assert envelope.food_items[0].grams_estimate == 150
+
+
+def test_duration_minutes_accepts_numeric_string():
+    """LLM ocasionalmente emite duração como string. Coerção antes da
+    validação de tipo float."""
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_activity",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "activity": {
+                "detected_name": "corrida",
+                "activity_type": "cardio_run",
+                "duration_minutes": "40",  # string em vez de float
+                "intensity": "moderate",
+                "confidence": 0.9,
+            },
+        }
+    )
+    assert envelope.activity is not None
+    assert envelope.activity.duration_minutes == 40.0
+
+
+def test_duration_minutes_accepts_string_with_unit():
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_activity",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "activity": {
+                "detected_name": "corrida",
+                "activity_type": "cardio_run",
+                "duration_minutes": "40 min",  # com unidade
+                "intensity": "moderate",
+                "confidence": 0.9,
+            },
+        }
+    )
+    assert envelope.activity is not None
+    assert envelope.activity.duration_minutes == 40.0

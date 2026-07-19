@@ -785,6 +785,23 @@ class MessageProcessor:
         )
 
     async def _record_error(self, user_message: Message, result: LLMCallResult) -> Message:
+        # Log estruturado — facilita diagnóstico quando o assistant cai
+        # no fallback genérico. Inclui o erro do cliente Anthropic e, se
+        # foi validation_exhausted, os erros específicos do Pydantic +
+        # o último payload que a LLM tentou emitir.
+        logger.warning(
+            "llm_error_recorded",
+            extra={
+                "event": "message_processor",
+                "message_id": str(user_message.id),
+                "user_id": str(user_message.user_id),
+                "error": result.error,
+                "model": result.model,
+                "prompt_version": result.prompt_version,
+                "validation_errors": result.validation_errors,
+                "raw_tool_input": result.raw_tool_input,
+            },
+        )
         raw = _pack_raw(result)
         return await self.messages.create(
             user_id=user_message.user_id,
@@ -1137,9 +1154,7 @@ def _compose_query_day_summary(payload: DayPayload) -> str:
         n = len(payload.warnings)
         parts.append("")
         pending_label = (
-            "item ainda pode ser confirmado"
-            if n == 1
-            else "itens ainda podem ser confirmados"
+            "item ainda pode ser confirmado" if n == 1 else "itens ainda podem ser confirmados"
         )
         parts.append(f"**Confirma estes itens?** — {n} {pending_label}.")
     return "\n".join(parts)
