@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Intent = Literal[
     "log_food",
@@ -66,6 +66,52 @@ class BeverageIn(_StrictBase):
     confidence: float = Confidence
 
 
+_INTENSITY_ALIASES: dict[str, str] = {
+    # pt-BR (feminino e masculino) → canônico. Normalizado sem acento.
+    "leve": "light",
+    "baixa": "light",
+    "baixo": "light",
+    "moderada": "moderate",
+    "moderado": "moderate",
+    "media": "moderate",
+    "medio": "moderate",
+    "intensa": "vigorous",
+    "intenso": "vigorous",
+    "alta": "vigorous",
+    "alto": "vigorous",
+    "forte": "vigorous",
+    "vigorosa": "vigorous",
+    "vigoroso": "vigorous",
+    "pesada": "vigorous",
+    "pesado": "vigorous",
+    # Inglês minúsculo direto (para caso do LLM devolver capitalizado).
+    "light": "light",
+    "moderate": "moderate",
+    "vigorous": "vigorous",
+    "unknown": "unknown",
+}
+
+
+def _normalize_intensity(value: object) -> object:
+    """Aceita pt-BR e maiúsculas antes da validação do Literal.
+
+    Regressão: LLM às vezes emite "moderada" (pt-BR) mesmo com prompt em
+    inglês — o Literal do Pydantic rejeita e o retry semântico esgota,
+    resultando em "Não consegui interpretar sua mensagem agora." O fix
+    normaliza os aliases mais comuns aqui, antes da validação.
+    """
+    if not isinstance(value, str):
+        return value
+    import unicodedata
+
+    stripped = "".join(
+        ch
+        for ch in unicodedata.normalize("NFKD", value.strip().lower())
+        if not unicodedata.combining(ch)
+    )
+    return _INTENSITY_ALIASES.get(stripped, value)
+
+
 class ActivityIn(_StrictBase):
     detected_name: str
     activity_type: str
@@ -77,6 +123,11 @@ class ActivityIn(_StrictBase):
     # a LLM extrai esse número aqui. Se presente, é fonte de verdade
     # (`calc_method='user_manual'`) — sobrescreve o cálculo MET × weight.
     kcal_burned_reported: float | None = Field(default=None, ge=0, le=10000)
+
+    @field_validator("intensity", mode="before")
+    @classmethod
+    def _accept_ptbr_intensity(cls, value):
+        return _normalize_intensity(value)
 
 
 class CorrectionIn(_StrictBase):

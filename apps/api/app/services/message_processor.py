@@ -1045,9 +1045,7 @@ def _compose_label_summary(
             consumed_item.quantity,
             consumed_item.unit,
         )
-        lines.append(
-            f"Consumo registrado: {consumed_item.detected_name} — {amount}."
-        )
+        lines.append(f"Consumo registrado: {consumed_item.detected_name} — {amount}.")
         lines.append(_totals_line(recompute.snapshot))
     lines.append(_DISCLAIMER)
     return "\n".join(lines)
@@ -1138,10 +1136,12 @@ def _compose_query_day_summary(payload: DayPayload) -> str:
     if payload.warnings:
         n = len(payload.warnings)
         parts.append("")
-        parts.append(
-            "**Confirma estes itens?** — "
-            + f"{n} {'item ainda pode ser confirmado' if n == 1 else 'itens ainda podem ser confirmados'}."
+        pending_label = (
+            "item ainda pode ser confirmado"
+            if n == 1
+            else "itens ainda podem ser confirmados"
         )
+        parts.append(f"**Confirma estes itens?** — {n} {pending_label}.")
     return "\n".join(parts)
 
 
