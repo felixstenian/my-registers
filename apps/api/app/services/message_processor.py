@@ -1043,15 +1043,47 @@ async def run_processor_in_background(
     testes usem o mesmo engine da sessão de request (evita 'attached to a
     different loop' quando o event loop do teste difere do que criou o
     engine module-level).
+
+    Contrato de segurança: **o usuário sempre recebe uma assistant message**.
+    Se `processor.process()` erguer qualquer exceção inesperada, a
+    transação primária é revertida e abrimos uma NOVA sessão para gravar
+    uma mensagem de fallback. Sem isso, o usuário fica preso ao "digitando"
+    e nem o refresh resolve — apenas outra mensagem (que dispara novo
+    background task) mostraria alguma resposta.
     """
     async with session_factory() as session:
         processor = MessageProcessor(session=session, anthropic=anthropic_client, storage=storage)
         try:
             await processor.process(message_id)
             await session.commit()
+            return
         except Exception:
             await session.rollback()
             logger.exception(
                 "background_processor_failed",
                 extra={"event": "message_processor", "message_id": str(message_id)},
             )
+
+    # Fallback: nova sessão, tenta persistir um assistant message amigável.
+    # Falha silenciosa aqui é aceitável — melhor não mascarar o problema
+    # original nos logs.
+    try:
+        async with session_factory() as fallback_session:
+            stmt = select(Message).where(Message.id == message_id)
+            user_message = (await fallback_session.execute(stmt)).scalar_one_or_none()
+            if user_message is None:
+                return
+            await MessageRepository(fallback_session).create(
+                user_id=user_message.user_id,
+                day_log_id=user_message.day_log_id,
+                role="assistant",
+                content=_FALLBACK_LLM_ERROR,
+                llm_intent="unknown",
+                raw_llm_response={"error": "background_processor_failed"},
+            )
+            await fallback_session.commit()
+    except Exception:
+        logger.exception(
+            "background_fallback_failed",
+            extra={"event": "message_processor", "message_id": str(message_id)},
+        )
