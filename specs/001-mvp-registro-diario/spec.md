@@ -98,6 +98,103 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 **SP-14** (`must`) — Timeout ou erro da LLM.
 - >60s ou erro após 2 retries → assistente responde "Não consegui interpretar; pode reformular?" e grava `messages.raw_llm_response.error`. **Nada** persistido.
 
+**SP-15** (`may`) — Envio por tecla Enter.
+- **Given** o usuário está com foco na textarea do chat.
+- **When** aperta `Enter` sem `Shift`.
+- **Then** a mensagem é enviada — mesmo caminho do clique em "Enviar" (SP-10/SP-11).
+- `Shift+Enter` **MUST** inserir quebra de linha em vez de enviar.
+- Textarea vazia e sem mídia anexada → a tecla é ignorada (sem envio, sem erro).
+- Enquanto uma requisição de envio anterior está em curso, a tecla é ignorada para evitar duplo envio.
+
+**SP-16** (`may`) — Captura direta pela câmera em mobile.
+- **Given** o usuário acessa `/chat` em um dispositivo com câmera (celular ou tablet).
+- **When** aciona o seletor de arquivos para anexar imagem.
+- **Then** o sistema operacional oferece "Tirar foto" além de "Escolher da galeria" — habilitado via atributo `capture="environment"` no `<input type="file">` (câmera traseira preferida por padrão para foto de prato/rótulo).
+- Em desktop, o comportamento continua sendo o seletor de arquivo padrão (o `capture` é ignorado pelo navegador). Nenhuma requisição de permissão é feita se o usuário não abrir o seletor.
+- A imagem capturada segue o mesmo fluxo do SP-11 (validação de MIME/tamanho, decode probe, MinIO).
+
+**SP-17** (`may`) — Limite client-side de 4 imagens por mensagem, com feedback por nome de arquivo.
+- **Given** o usuário seleciona (ou solta) N arquivos no seletor/dropzone do chat.
+- **When** N > 4.
+- **Then** a UI **MUST** aceitar apenas os 4 primeiros (por ordem de seleção) **e** exibir uma mensagem listando o **nome de cada arquivo rejeitado** com o motivo (ex.: *"5 arquivos selecionados. `foto5.png` não foi anexada — limite de 4 por mensagem."*).
+- Se por algum motivo (ex.: bypass programático) mais de 4 `media_ids` chegarem no `POST /chat/messages`, o backend continua rejeitando com 422 (comportamento atual do SP-11); a UI **MUST** exibir na mensagem de erro o nome de cada arquivo excedente com base no cálculo local (não depende do backend nomear).
+- A contagem inclui arquivos já pré-anexados em uma mensagem ainda não enviada (o usuário não consegue passar de 4 anexos no compositor).
+
+**SP-18** (`may`) — Mensagens de erro amigáveis para rejeições de upload de mídia.
+- **Given** o usuário anexa um arquivo que o backend rejeita em `POST /media`.
+- **When** o erro é `file_too_large` (> 8MB, SP-11) **ou** `invalid_image` (decode probe falha, Const. §22) **ou** `unsupported_media_type`.
+- **Then** a UI **MUST** exibir uma mensagem contextual em pt-BR **citando o nome do arquivo** e o motivo em linguagem natural. Exemplos:
+  - `file_too_large` → *"`selfie_grande.jpg` é maior que 8 MB e não pode ser enviada. Reduza a qualidade ou tire outra."*
+  - `invalid_image` → *"`documento.png` não parece ser uma imagem válida."*
+  - `unsupported_media_type` → *"Formato de `arquivo.gif` não suportado. Envie JPEG, PNG ou WEBP."*
+- Cada arquivo rejeitado gera uma linha própria na mensagem de erro; envios em lote não são abortados por falha de um único arquivo (os demais válidos são anexados normalmente).
+- O compositor não fecha nem perde o texto digitado ao mostrar o erro.
+
+**SP-19** (`may`) — Drag-and-drop na área de anexo do chat.
+- **Given** o usuário arrasta um ou mais arquivos sobre o compositor do chat.
+- **When** solta os arquivos.
+- **Then** a UI **MUST** adicioná-los ao anexo da mensagem em preparo, aplicando as mesmas regras do input file (allowlist de MIME, SP-17 para o cap de 4, SP-18 para erros).
+- **MUST** haver feedback visual enquanto o arquivo é arrastado por cima da área (ex.: borda tracejada, mudança de cor de fundo). Ao sair ou soltar, o feedback é removido.
+- Se algum arquivo arrastado for de um tipo não suportado, a UI aplica a mesma mensagem do SP-18.
+- Em desktop, drag-and-drop convive com o botão de seleção; em mobile, o comportamento padrão do sistema (touch) prevalece — o drop é opcional e não obrigatório.
+
+**SP-115** (`may`) — Balão de `log_food` com cards estruturados no chat.
+- **Given** `intent=log_food` foi processado com sucesso (SP-20) e a assistant message correspondente vai renderizar.
+- **Then** o balão **MUST NOT** ser apenas texto corrido; deve renderizar cada `food_items` como um **card estruturado**, com:
+  - Nome do alimento em destaque tipográfico.
+  - Quantidade formatada (`150g` / `250ml` / `1 concha`).
+  - Kcal + macros em linha compacta (`186 kcal · P 4.6g · C 38.7g · G 1.5g · Fibra 2.4g`).
+  - Badges/ícones para `is_estimate=true` e `needs_confirmation=true` — visualmente distintos entre si (a estimativa é "quantidade aproximada", a confirmação é "precisa de sua validação").
+- Um "footer" do balão **MUST** exibir os totais do dia (kcal_in + macros agregados) tipograficamente separado dos itens individuais.
+- O aviso legal (Const. Art. VII §26) continua ao final do balão, em fonte reduzida mas ainda legível (não pode virar tooltip).
+- Em telas pequenas, os cards podem virar linhas verticais empilhadas; a distinção item vs total precisa se manter.
+
+**SP-116** (`may`) — Barra fixa de totais do dia na página do chat.
+- **Given** o usuário está autenticado em `/chat`.
+- **Then** um componente fixo (abaixo do header, acima da lista de mensagens) **MUST** exibir sempre:
+  - `kcal_in` acumulado do dia, com destaque tipográfico.
+  - Macros agregados (P/C/G/fibra em g).
+  - `water_ml` e `other_liquids_ml` (a partir da Fase 5).
+  - Contador de warnings do snapshot (ex.: "2 itens precisam de confirmação") clicável — abre painel/modal com a lista.
+- Consulta `GET /days/today` (SP-90) no primeiro render e **MUST** revalidar sempre que uma assistant message nova for detectada pelo polling do chat (mesmo signal já usado).
+- Em telas pequenas (mobile), colapsa em uma única linha rolável horizontalmente, mantendo `kcal_in` sempre visível.
+- Se ainda não houver registros no dia, exibe estado vazio explicativo (ex.: "Nenhum registro hoje — mande sua primeira mensagem").
+
+**SP-117** (`may`) — Highlight e confirmação inline de itens pendentes.
+- Estende SP-24 (que já pede "destaque na tabela" para `needs_confirmation=true`) fixando **como** o destaque acontece e **o fluxo de confirmação**.
+- **Given** um `food_items` tem `needs_confirmation=true` (por SP-24 confidence baixa ou SP-23 sem catálogo).
+- **Then** na barra de totais (SP-116) e no card do chat (SP-115), o item **MUST** aparecer visualmente marcado (ex.: borda amarela + ícone ⚠️ padronizado com o resto da UI).
+- **When** o usuário clica em "Confirmar" no card do item.
+- **Then** abre um modal com os campos editáveis pré-preenchidos (`grams`, `kcal`, macros principais, `catalog_ref_id` se identificável). Ao submeter, dispara `PATCH /records/food-items/{id}` (endpoint da Fase 6, spec §3.8 correção). Ao sucesso, o snapshot é recomputado no backend (INV-4) e a UI revalida a barra de totais.
+- Se o usuário fechar o modal sem submeter, o item permanece com o destaque até ele confirmar ou descartar.
+- Botão adicional "Descartar" no modal dispara `DELETE /records/food-items/{id}` (soft delete, SP-80/SP-81).
+
+**SP-118** (`may`) — Formato tabular padronizado da assistant message após qualquer registro.
+- Substitui o texto solto atual dos `_compose_*_summary` do `MessageProcessor` por **duas tabelas** dirigidas ao usuário.
+- **Given** qualquer intent de registro (`log_food`, `log_water`, `log_beverage`, `log_activity`) foi processado com sucesso.
+- **Then** a assistant message **MUST** conter, nesta ordem:
+  1. **Cabeçalho curto** identificando o que foi registrado (ex.: "Registrei o almoço.", "Registrei 500 ml de água.", "Registrei 40 min de corrida.").
+  2. **Tabela "Total da refeição/registro"** com título contextual em pt-BR:
+     - `log_food` → *"Total da refeição — {meal_slot_pt_br}"* (Café da manhã / Almoço / Lanche / Jantar / Refeição). **MUST** conter as linhas `Calorias`, `Proteínas`, `Carboidratos`, `Gorduras`, `Fibras` somadas apenas dos `food_items` recém-criados nesta mensagem.
+     - `log_beverage` → *"Total da bebida — {detected_name}"*. Mesmas 5 linhas nutricionais + linha `Volume` (ml).
+     - `log_water` → *"Total do registro"* com uma única linha `Água` = X ml (sem macros — INV-2 estrutural).
+     - `log_activity` → *"Total do exercício — {detected_name}"* com linhas `Duração` (min) e `Calorias gastas` (kcal).
+  3. **Tabela "Total acumulado — {DD/MM/YYYY}"** com a data local do usuário no cabeçalho e **MUST** conter, nesta ordem:
+     - `Calorias Consumidas` (kcal_in do snapshot)
+     - `Calorias Gastas` (kcal_out — só aparece se > 0)
+     - `Saldo Calórico` (kcal_balance — só aparece se `kcal_out > 0`)
+     - `Proteínas` / `Carboidratos` / `Gorduras` / `Fibras` (g)
+     - `Água Pura` (ml, do `water_ml`)
+     - `Líquidos Totais` (ml, `water_ml + other_liquids_ml`) — asterisco no rótulo (`*`) se `other_liquids_ml > 0`, com nota abaixo da tabela: *"* inclui café, leite, sucos e outras bebidas calóricas."*
+- **Formatação e conteúdo:**
+  - Tabelas em **markdown** (renderizáveis pela UI do chat) com colunas `Nutriente|Indicador` × `Total`.
+  - Números com separador decimal **vírgula** e milhar **ponto** (pt-BR): `≈ 977 kcal`, `≈ 1.200 ml`.
+  - Prefixo `≈` (aproximadamente) **MUST** aparecer em qualquer linha nutricional cuja origem tenha pelo menos 1 item com `is_estimate=true` ou `needs_confirmation=true`. Se todos os itens têm quantidade exata + catálogo, o `≈` **MUST NOT** aparecer.
+  - Água pura e volume nunca recebem `≈` (são medidas diretas).
+  - Aviso legal (Const. Art. VII §26) continua ao final, separado por linha em branco.
+- **Warnings de itens pendentes** (needs_confirmation/no_catalog_hit) aparecem em um bloco separado abaixo do disclaimer, no formato: *"Confirma estes itens? — feijão, sushi ninja"* (referencia SP-24/SP-117 para o fluxo de correção).
+- Este SP substitui o formato livre gerado hoje pelos `_compose_meal_summary` / `_compose_water_summary` / `_compose_beverage_summary` / `_compose_activity_summary` em `services/message_processor.py`.
+
 ### 3.3 Registro de alimentos
 
 **SP-20** (`must`) — Texto com quantidades explícitas.
@@ -361,5 +458,9 @@ Registrado aqui para não voltar como dúvida durante execução.
 
 ## Histórico de alterações
 
+- **2026-07-18** — v1.4. Adicionado SP-118 (formato tabular padronizado da assistant message após qualquer registro, com "Total da refeição/registro" + "Total acumulado do dia"). Substitui o texto solto atual dos `_compose_*_summary` do `MessageProcessor` — output previsível, com pt-BR (`≈`, vírgula decimal, milhar), asterisco explicando `Líquidos Totais`.
+- **2026-07-17** — v1.3. Adicionados SP-115 (balão de `log_food` com cards estruturados no chat), SP-116 (barra fixa de totais do dia) e SP-117 (highlight + fluxo de confirmação inline dos itens pendentes, estende SP-24) como `may`. Formalizam o `DayTable` mencionado no `app_plan.md` §11 e o "destaque na tabela" da SP-24.
+- **2026-07-16** — v1.2. Adicionados SP-17 (limite client-side de 4 imagens com feedback por nome), SP-18 (mensagens de erro amigáveis para rejeições de upload citando o nome do arquivo) e SP-19 (drag-and-drop na área de anexo do chat) como `may`. Todos entram no mesmo backlog de UX do chat pós-MVP.
+- **2026-07-16** — v1.1. Adicionados SP-15 (envio por Enter) e SP-16 (captura direta pela câmera em mobile) como `may` (pós-MVP). Melhorias de UX no chat que não bloqueiam o MVP; entram no backlog para depois da Fase 9.
 - **2026-07-15** — v1.0. Spec inicial extraída de `docs/specs.md`; alinhada com `constitution.md` v1.0.0 e `app_plan.md` 20 seções.
 - **2026-07-19** — v1.5. SP-24 detalha chat-side (SP-24a): intent `confirm_items` com scopes `all`/`specific`. Sem novo SP-ID — é implementação faltante do SP-24 original que já previa "aguarda confirmação por chat".

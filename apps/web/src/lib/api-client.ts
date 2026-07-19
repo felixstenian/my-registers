@@ -17,9 +17,13 @@ export async function api<T = unknown>(
   if (init.body && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
   }
+  // Cache off: o chat depende de poll bater na mesma URL enquanto o
+  // assistant não chega. Sem `no-store`, o browser pode servir a resposta
+  // vazia da chamada anterior do cache e a mensagem só aparece no refresh.
   const res = await fetch(`/api${path}`, {
     ...init,
     credentials: 'include',
+    cache: 'no-store',
     headers,
   });
 
