@@ -199,6 +199,20 @@ Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 
 ---
 
+## Bloco 2 — Renderização de assistant messages (SP-115..118) ✅
+
+Meta: transformar as respostas do assistant em cards estruturados legíveis + barra fixa com totais do dia + confirmação inline de itens pendentes.
+
+- [x] **T-B201** — SP-118: `app/services/message_formatter.py` com helpers `_fmt_int/_fmt_dec/_fmt_kcal/_fmt_g/_fmt_ml/_fmt_min` (pt-BR), `_table` (markdown 2-cols), `_daily_totals_table` (comum a todos os intents), `_warnings_block` (dedup preservando ordem). `compose_meal/water/beverage/activity` seguem a spec: cabeçalho pt-BR + 1ª tabela (só do registro atual) + 2ª tabela (`Total acumulado — DD/MM/YYYY`) + disclaimer + bloco de warnings opcional. `MessageProcessor._handle_registration` delega às novas funções passando `local_today(user.timezone)`. `≈` só aparece em linhas nutricionais quando pelo menos 1 item é estimativa ou precisa de confirmação; água/volume nunca recebem `≈`. `Líquidos Totais*` recebe asterisco quando `other_liquids_ml > 0`, com nota em rodapé.
+- [x] **T-B202** — SP-115: `apps/web/src/app/(app)/chat/AssistantContent.tsx` — parser mínimo de markdown (bold + tabelas + parágrafos) que renderiza cada tabela como card com header destacado. Suporta detecção de células com `≈` (italic) e labels com `*` (amber accent). Sem dependência de biblioteca de markdown externa — bundle enxuto, dialeto controlado pelo backend.
+- [x] **T-B203** — SP-116: `apps/web/src/app/(app)/chat/DayTotalsBar.tsx` — fixado acima da lista de mensagens; consome `GET /days/today`; revalida via prop `revalidateKey` incrementado pelo `page.tsx` a cada nova assistant message detectada pelo poll. Colapsa horizontalmente em telas pequenas (`overflow-x-auto`). Estado vazio quando `kcal_in=0` && sem líquidos. Badge de warnings clicável (`N itens precisam de confirmação`) dispara callback do pai.
+- [x] **T-B204** — SP-117: `apps/web/src/app/(app)/chat/PendingItemsModal.tsx` — modal (overlay + trap) listando `food_items` com `needs_confirmation=true` puxados do `GET /days/today`. Botão **Confirmar** re-envia grams/ml/quantity atuais via `PATCH /records/food-items/{id}` (backend recomputa macros e limpa `needs_confirmation`); botão **Descartar** dispara `DELETE /records/food-items/{id}` (soft delete + recompute). Sinaliza `onChanged()` que revalida a barra de totais e fecha o modal.
+- [x] **T-B205** — `tests/test_message_formatter.py` (18 casos): formatação pt-BR de int/dec/kcal/g/ml/min; `compose_meal` pt-BR do slot, agregação só de items da mensagem, `≈` presente/ausente conforme is_estimate/needs_confirmation, warnings depois do disclaimer, `Calorias Gastas`/`Saldo` só quando `kcal_out > 0`; `compose_water` sem `≈`; `compose_beverage` com linha `Volume` + `Líquidos Totais*`; `compose_activity` com `Duração` + hint `informado pelo dispositivo`; cabeçalho `Total acumulado — DD/MM/YYYY` da data local. Suíte completa em verde (226 tests).
+
+**Gate Bloco 2 — cumprido:** assistant messages viraram cards de tabela pt-BR, barra fixa de totais reage a novas mensagens, itens pendentes confirmáveis inline sem sair do chat.
+
+---
+
 ## Backlog (pós-MVP, `may`)
 
 - **B-01** — Persistência agregada de `sugars_g`, `added_sugars_g`, `saturated_fat_g`, `trans_fat_g`.

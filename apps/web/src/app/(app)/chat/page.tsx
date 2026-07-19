@@ -2,6 +2,9 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api-client';
+import { AssistantContent } from './AssistantContent';
+import { DayTotalsBar, type FoodItemRef } from './DayTotalsBar';
+import { PendingItemsModal } from './PendingItemsModal';
 
 type MediaRef = {
   id: string;
@@ -59,6 +62,11 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [awaitingAssistant, setAwaitingAssistant] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // SP-116: signal para o DayTotalsBar revalidar. Incrementa a cada nova
+  // assistant message chegando pelo poll (ou pós-ação em modal).
+  const [totalsRevalidateKey, setTotalsRevalidateKey] = useState(0);
+  // SP-117: modal de pending items aberto quando != null.
+  const [pendingItems, setPendingItems] = useState<FoodItemRef[] | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartRef = useRef<number | null>(null);
@@ -110,6 +118,8 @@ export default function ChatPage() {
         if (last) lastIdRef.current = last.id;
         const gotAssistant = result.data.messages.some((m) => m.role === 'assistant');
         if (gotAssistant) {
+          // SP-116: dispara revalidação da barra de totais.
+          setTotalsRevalidateKey((k) => k + 1);
           stopPolling();
           return true;
         }
@@ -173,37 +183,60 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="mx-auto flex h-[calc(100vh-49px)] max-w-3xl flex-col gap-4 p-4">
+    <main className="mx-auto flex h-[calc(100vh-49px)] max-w-3xl flex-col gap-2 p-4">
+      <DayTotalsBar
+        revalidateKey={totalsRevalidateKey}
+        onPendingClick={(items) => setPendingItems(items)}
+      />
+      {pendingItems !== null && (
+        <PendingItemsModal
+          items={pendingItems}
+          onClose={() => setPendingItems(null)}
+          onChanged={() => {
+            setTotalsRevalidateKey((k) => k + 1);
+            setPendingItems(null);
+          }}
+        />
+      )}
       <div className="flex-1 space-y-3 overflow-y-auto rounded border border-slate-200 p-4 dark:border-slate-800">
         {messages.length === 0 && (
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Nenhuma mensagem ainda. Envie algo abaixo — texto ou foto.
           </p>
         )}
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={
-              m.role === 'user'
-                ? 'ml-auto max-w-[80%] rounded-2xl bg-slate-900 px-3 py-2 text-sm text-white dark:bg-slate-100 dark:text-slate-900'
-                : 'mr-auto max-w-[80%] rounded-2xl bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800'
-            }
-          >
-            {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
-            {m.media.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {m.media.map((media) => (
-                  <img
-                    key={media.id}
-                    src={media.url}
-                    alt=""
-                    className="max-h-40 rounded border border-slate-300 dark:border-slate-700"
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+        {messages.map((m) => {
+          const isUser = m.role === 'user';
+          return (
+            <div
+              key={m.id}
+              className={
+                isUser
+                  ? 'ml-auto max-w-[80%] rounded-2xl bg-slate-900 px-3 py-2 text-sm text-white dark:bg-slate-100 dark:text-slate-900'
+                  : 'mr-auto max-w-[90%] rounded-2xl bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800'
+              }
+            >
+              {m.content && (
+                isUser ? (
+                  <p className="whitespace-pre-wrap">{m.content}</p>
+                ) : (
+                  <AssistantContent content={m.content} />
+                )
+              )}
+              {m.media.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {m.media.map((media) => (
+                    <img
+                      key={media.id}
+                      src={media.url}
+                      alt=""
+                      className="max-h-40 rounded border border-slate-300 dark:border-slate-700"
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
         {awaitingAssistant && <TypingIndicator />}
         <div ref={bottomRef} />
       </div>

@@ -93,9 +93,11 @@ async def test_log_food_end_to_end_persists_and_recomputes(
         for m in list((await db_session.execute(select(Message))).scalars())
         if m.role == "assistant"
     )
+    # SP-118: formato tabular. Item names ficam na estrutura (raw dispatch),
+    # não no texto — apenas o cabeçalho + tabelas + disclaimer aparecem.
     assert "Registrei" in assistant.content
-    assert "arroz branco cozido" in assistant.content
-    assert "peito de frango grelhado" in assistant.content
+    assert "Total da refeição — Almoço" in assistant.content
+    assert "Total acumulado —" in assistant.content
     assert "kcal" in assistant.content
     assert "acompanhamento médico" in assistant.content
     assert assistant.llm_intent == "log_food"

@@ -32,8 +32,10 @@ from app.integrations.nutrition.local_tbca import LocalTBCACatalog
 from app.integrations.storage.minio import MinioStorage
 from app.models import Media, Message, MessageMedia, User
 from app.repositories.message import MessageRepository
+from app.services import message_formatter
 from app.services.activity import ActivityResult, ActivityService, WeightRequired
 from app.services.beverage import BeverageResult, BeverageService
+from app.services.chat import local_today
 from app.services.confirmation import (
     ConfirmationResult,
     ConfirmationService,
@@ -201,7 +203,9 @@ class MessageProcessor:
                     "item_ids": [str(i.id) for i in meal.items],
                     "warnings": meal.warnings,
                 }
-                content = _compose_meal_summary(meal, recompute)
+                content = message_formatter.compose_meal(
+                    meal, recompute, local_today(user.timezone)
+                )
             elif envelope.intent == "log_water":
                 if envelope.water is None:
                     return await self._record_error(user_message, result)
@@ -213,7 +217,9 @@ class MessageProcessor:
                 )
                 recompute = await recompute_service.recompute(user_message.day_log_id)
                 dispatch_meta["water"] = {"record_id": str(hydration.record.id)}
-                content = _compose_water_summary(hydration, recompute)
+                content = message_formatter.compose_water(
+                    hydration, recompute, local_today(user.timezone)
+                )
             elif envelope.intent == "log_beverage":
                 if envelope.beverage is None:
                     return await self._record_error(user_message, result)
@@ -228,7 +234,9 @@ class MessageProcessor:
                     "record_id": str(beverage.record.id),
                     "warnings": beverage.warnings,
                 }
-                content = _compose_beverage_summary(beverage, recompute)
+                content = message_formatter.compose_beverage(
+                    beverage, recompute, local_today(user.timezone)
+                )
             elif envelope.intent == "log_activity":
                 if envelope.activity is None:
                     return await self._record_error(user_message, result)
@@ -253,7 +261,9 @@ class MessageProcessor:
                     "record_id": str(activity.record.id),
                     "warnings": activity.warnings,
                 }
-                content = _compose_activity_summary(activity, recompute)
+                content = message_formatter.compose_activity(
+                    activity, recompute, local_today(user.timezone)
+                )
             else:  # pragma: no cover — guarded by the branch above
                 return await self._record_error(user_message, result)
         except ValidationAppError as exc:
@@ -552,7 +562,10 @@ class MessageProcessor:
             return await self._record_clarify(
                 user_message,
                 result,
-                "Ainda não há registros no dia de hoje pra resumir. Me conta o que você comeu, bebeu ou treinou.",
+                (
+                    "Ainda não há registros no dia de hoje pra resumir. "
+                    "Me conta o que você comeu, bebeu ou treinou."
+                ),
                 code="day_not_found",
             )
 
