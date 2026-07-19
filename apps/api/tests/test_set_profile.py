@@ -40,9 +40,7 @@ def _envelope(**overrides) -> LLMEnvelope:
 # ---------------------------------------------------------------------------
 
 
-async def test_updates_weight_kg_and_logs_audit(
-    db_session: AsyncSession, admin_user: User
-):
+async def test_updates_weight_kg_and_logs_audit(db_session: AsyncSession, admin_user: User):
     envelope = _envelope(profile_update={"weight_kg": 65})
     result = await ProfileService(db_session).update_from_llm(
         user=admin_user, envelope=envelope, message_id=None
@@ -63,9 +61,7 @@ async def test_updates_weight_kg_and_logs_audit(
     assert profile_events[0].after == {"weight_kg": 65.0}
 
 
-async def test_updates_multiple_fields_at_once(
-    db_session: AsyncSession, admin_user: User
-):
+async def test_updates_multiple_fields_at_once(db_session: AsyncSession, admin_user: User):
     from datetime import date
 
     envelope = _envelope(
@@ -93,9 +89,7 @@ async def test_updates_multiple_fields_at_once(
     }
 
 
-async def test_raises_when_no_new_values(
-    db_session: AsyncSession, admin_user: User
-):
+async def test_raises_when_no_new_values(db_session: AsyncSession, admin_user: User):
     """profile_update com valor igual ao atual → nada muda, service rejeita."""
     from app.core.exceptions import ValidationAppError
 
@@ -110,9 +104,7 @@ async def test_raises_when_no_new_values(
     assert exc.value.code == "profile_no_change"
 
 
-async def test_pydantic_rejects_absurd_weight(
-    db_session: AsyncSession, admin_user: User
-):
+async def test_pydantic_rejects_absurd_weight(db_session: AsyncSession, admin_user: User):
     """Weight fora de [0, 500] falha na validação do Pydantic."""
     from pydantic import ValidationError
 
@@ -157,9 +149,7 @@ async def test_end_to_end_set_weight_via_chat(
     assert resp.status_code == 202
 
     # Refresh admin from DB
-    updated = (
-        await db_session.execute(select(User).where(User.id == admin_user.id))
-    ).scalar_one()
+    updated = (await db_session.execute(select(User).where(User.id == admin_user.id))).scalar_one()
     await db_session.refresh(updated)
     assert updated.weight_kg == Decimal("65")
 
@@ -235,9 +225,7 @@ async def test_sp61_full_flow_activity_then_weight_then_activity(
     )
     await client.post("/chat/messages", json={"text": "peso 65 kg"})
 
-    updated = (
-        await db_session.execute(select(User).where(User.id == admin_user.id))
-    ).scalar_one()
+    updated = (await db_session.execute(select(User).where(User.id == admin_user.id))).scalar_one()
     await db_session.refresh(updated)
     assert updated.weight_kg == Decimal("65")
 

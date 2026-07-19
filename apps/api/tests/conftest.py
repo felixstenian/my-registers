@@ -18,9 +18,7 @@ import pytest
 import pytest_asyncio
 
 TEST_DB_NAME = "registers_test"
-TEST_DB_URL = (
-    f"postgresql+asyncpg://registers_app:dev_password@localhost:5432/{TEST_DB_NAME}"
-)
+TEST_DB_URL = f"postgresql+asyncpg://registers_app:dev_password@localhost:5432/{TEST_DB_NAME}"
 
 # Setar antes de qualquer import da app (get_settings é @lru_cache).
 os.environ["DATABASE_URL"] = TEST_DB_URL
@@ -43,9 +41,7 @@ async def _ensure_test_db() -> None:
         database="postgres",
     )
     try:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", TEST_DB_NAME
-        )
+        exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", TEST_DB_NAME)
         if not exists:
             await conn.execute(f'CREATE DATABASE "{TEST_DB_NAME}"')
     finally:
@@ -64,9 +60,7 @@ def _run_migrations() -> None:
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(
-            f"alembic upgrade failed: {result.stdout}\n{result.stderr}"
-        )
+        raise RuntimeError(f"alembic upgrade failed: {result.stdout}\n{result.stderr}")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -187,6 +181,9 @@ class FakeAnthropicClient:
         self.is_configured = True
         self.results: list = []
         self.calls: list[dict] = []
+        # Fase 7: fila separada para `call_narrative` (T-702).
+        self.narratives: list = []
+        self.narrative_calls: list[dict] = []
 
     def queue(self, result) -> None:
         self.results.append(result)
@@ -219,6 +216,23 @@ class FakeAnthropicClient:
             )
         return self.results.pop(0)
 
+    def queue_narrative(self, text: str | None) -> None:
+        self.narratives.append(text)
+
+    async def call_narrative(self, *, totals_payload):
+        from app.integrations.anthropic.client import NarrativeResult
+
+        self.narrative_calls.append({"totals_payload": totals_payload})
+        text = self.narratives.pop(0) if self.narratives else None
+        return NarrativeResult(
+            text=text,
+            tokens_input=0,
+            tokens_output=0,
+            model=self.model,
+            prompt_version="narrative_v1",
+            error=None if text else "empty_narrative",
+        )
+
 
 @pytest.fixture()
 def fake_anthropic() -> FakeAnthropicClient:
@@ -226,9 +240,7 @@ def fake_anthropic() -> FakeAnthropicClient:
 
 
 @pytest_asyncio.fixture()
-async def client(
-    db_session, test_engine, fake_storage, fake_anthropic
-) -> AsyncIterator:
+async def client(db_session, test_engine, fake_storage, fake_anthropic) -> AsyncIterator:
     from httpx import ASGITransport, AsyncClient
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 

@@ -49,9 +49,7 @@ class ChatService:
     ) -> Message:
         text_stripped = (text or "").strip() or None
         if text_stripped is None and not media_ids:
-            raise ValidationAppError(
-                "message needs text or media", code="empty_message"
-            )
+            raise ValidationAppError("message needs text or media", code="empty_message")
         if len(media_ids) > MAX_MEDIA_PER_MESSAGE:
             raise ValidationAppError(
                 f"max {MAX_MEDIA_PER_MESSAGE} media per message",
@@ -61,9 +59,7 @@ class ChatService:
             # SP-11 / Const. §21: media precisa pertencer ao próprio user.
             resolved = await self.media.list_by_ids(media_ids, user_id=user.id)
             if len(resolved) != len(set(media_ids)):
-                raise ValidationAppError(
-                    "unknown media_id for this user", code="unknown_media"
-                )
+                raise ValidationAppError("unknown media_id for this user", code="unknown_media")
 
         day_log = await self.day_logs.get_or_create(
             user_id=user.id, log_date=local_today(user.timezone)
@@ -95,7 +91,4 @@ class ChatService:
             limit=limit,
         )
         media_map = await self.messages.load_media_map([m.id for m in rows])
-        return [
-            MessageWithMedia(message=m, media=media_map.get(m.id, []))
-            for m in rows
-        ]
+        return [MessageWithMedia(message=m, media=media_map.get(m.id, [])) for m in rows]

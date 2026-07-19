@@ -44,9 +44,7 @@ async def test_login_case_insensitive_email(client: AsyncClient, admin_user):
     assert resp.status_code == 204
 
 
-async def test_login_invalid_password_returns_401_generic(
-    client: AsyncClient, admin_user
-):
+async def test_login_invalid_password_returns_401_generic(client: AsyncClient, admin_user):
     resp = await client.post(
         "/auth/login",
         json={"email": "admin@example.com", "password": "wrong-password"},

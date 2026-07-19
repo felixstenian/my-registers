@@ -153,17 +153,17 @@ Status: **done** (branch `feat/fase-6-corrections-deletions`). 154 testes verdes
 
 ---
 
-## Fase 7 — Encerramento e relatório diário
+## Fase 7 — Encerramento e relatório diário ✅
 
 Meta: fechar o dia por chat, gerar narrative sobre totais calculados.
 
-- [ ] **T-701** — `POST /days/{date}/close` idempotente + recompute forçado + snapshot com `warnings` agregados. (M) — SP-100, SP-101, SP-102.
-- [ ] **T-702** — Geração de `narrative` via LLM alimentada pelo snapshot já calculado (segunda chamada, temperature=0.3, sem tool_use). Concatena disclaimer. (M) — SP-103, SP-104, Const. §26.
-- [ ] **T-703** — Dispatcher `close_day` → `POST /days/{today}/close`. (S)
-- [ ] **T-704** — Frontend: botão "Encerrar dia" na barra do chat + tela de resumo pós-fechamento. (M)
-- [ ] **T-705** — Testes: SP-100 a SP-104, INV-5. (M) — gate.
+- [x] **T-701** — `POST /days/{date}/close` idempotente + recompute forçado + snapshot com `warnings` agregados (via `DayCloseService`). (M) — SP-100, SP-101, SP-102.
+- [x] **T-702** — Geração de `narrative` via `AnthropicClient.call_narrative` alimentada por totais já calculados (segunda chamada, temperature=0.3, sem tool_use). `narrative` é armazenada em `daily_snapshots.narrative` (migration 0005) e o disclaimer é concatenado por `_with_disclaimer` no service. (M) — SP-103, SP-104, Const. §26.
+- [x] **T-703** — Dispatcher `close_day` e `query_day` movidos para o `MessageProcessor` (fora do `IntentDispatcher` estruturado); chamam `DayCloseService.close_today` / `DayQueryService.get_today`. (S)
+- [ ] **T-704** — Frontend: botão "Encerrar dia" na barra do chat + tela de resumo pós-fechamento. (M) — mantido pendente para PR separada de UI (padrão das Fases 4-6).
+- [x] **T-705** — `tests/test_day_close_report.py` (17 casos): SP-90 (empty + records), SP-91 (404 + open), SP-92 (timezone), SP-100 (close via chat), SP-101 (idempotência preserva `closed_at`/`snapshot_version`/`narrative`), SP-102 (recompute pré-close reflete records tardios), SP-103 (payload de totals sem IDs para a LLM), SP-104 (disclaimer sempre presente + fallback LLM + não-duplicação), INV-5 (correction/deletion bloqueados + leitura congelada), INV-10 (audit event `action='close'`), `query_day` via chat. (M) — gate.
 
-**Gate Fase 7:** fechamento gera relatório correto; dia fechado é imutável. Const. Art. VIII verificada.
+**Gate Fase 7 — cumprido:** fechamento gera relatório correto e idempotente; dia fechado é imutável. Const. Art. III §10 (INV-4), Art. VIII §28 (INV-5), §26 (disclaimer) e §22 (audit) verificadas.
 
 ---
 

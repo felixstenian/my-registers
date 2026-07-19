@@ -45,19 +45,13 @@ class MessageRepository:
         await self.session.flush()
         return message
 
-    async def link_media(
-        self, *, message_id: uuid.UUID, media_ids: list[uuid.UUID]
-    ) -> None:
+    async def link_media(self, *, message_id: uuid.UUID, media_ids: list[uuid.UUID]) -> None:
         for mid in media_ids:
             self.session.add(MessageMedia(message_id=message_id, media_id=mid))
         await self.session.flush()
 
-    async def get_by_id(
-        self, message_id: uuid.UUID, *, user_id: uuid.UUID
-    ) -> Message | None:
-        stmt = select(Message).where(
-            Message.id == message_id, Message.user_id == user_id
-        )
+    async def get_by_id(self, message_id: uuid.UUID, *, user_id: uuid.UUID) -> Message | None:
+        stmt = select(Message).where(Message.id == message_id, Message.user_id == user_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def list_messages(
@@ -68,12 +62,8 @@ class MessageRepository:
         before_id: uuid.UUID | None = None,
         limit: int = 50,
     ) -> list[Message]:
-        anchor_after = (
-            await self.get_by_id(after_id, user_id=user_id) if after_id else None
-        )
-        anchor_before = (
-            await self.get_by_id(before_id, user_id=user_id) if before_id else None
-        )
+        anchor_after = await self.get_by_id(after_id, user_id=user_id) if after_id else None
+        anchor_before = await self.get_by_id(before_id, user_id=user_id) if before_id else None
 
         stmt = select(Message).where(Message.user_id == user_id)
         if anchor_after is not None:
@@ -91,9 +81,7 @@ class MessageRepository:
         stmt = stmt.order_by(Message.created_at).limit(limit)
         return list((await self.session.execute(stmt)).scalars())
 
-    async def load_media_map(
-        self, message_ids: list[uuid.UUID]
-    ) -> dict[uuid.UUID, list[Media]]:
+    async def load_media_map(self, message_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[Media]]:
         if not message_ids:
             return {}
         stmt = (

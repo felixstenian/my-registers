@@ -83,19 +83,13 @@ class CorrectionService:
         changed: dict[str, tuple[Any, Any]] = {}
 
         if candidate.kind == TargetKind.FOOD:
-            changed = await self._apply_food_changes(
-                candidate.entity, changes, warnings, user
-            )
+            changed = await self._apply_food_changes(candidate.entity, changes, warnings, user)
         elif candidate.kind == TargetKind.WATER:
             changed = _apply_water_changes(candidate.entity, changes)
         elif candidate.kind == TargetKind.BEVERAGE:
-            changed = await self._apply_beverage_changes(
-                candidate.entity, changes, warnings
-            )
+            changed = await self._apply_beverage_changes(candidate.entity, changes, warnings)
         elif candidate.kind == TargetKind.ACTIVITY:
-            changed = _apply_activity_changes(
-                candidate.entity, changes, user, warnings
-            )
+            changed = _apply_activity_changes(candidate.entity, changes, user, warnings)
 
         if not changed:
             raise ValidationAppError(
@@ -163,12 +157,8 @@ class CorrectionService:
             hit = None
             if item.catalog_ref_id is not None:
                 catalog = LocalTBCACatalog(self.session)
-                hit = await catalog.lookup(
-                    LookupQuery(name=item.normalized_name, brand=item.brand)
-                )
-            computed = NutritionCalculator.compute(
-                hit=hit, grams=item.grams, ml=item.ml
-            )
+                hit = await catalog.lookup(LookupQuery(name=item.normalized_name, brand=item.brand))
+            computed = NutritionCalculator.compute(hit=hit, grams=item.grams, ml=item.ml)
             for field in (
                 "kcal",
                 "protein_g",
@@ -243,9 +233,7 @@ class CorrectionService:
 async def _ensure_day_open(session: AsyncSession, day_log_id: uuid.UUID) -> None:
     day_log = await session.get(DayLog, day_log_id)
     if day_log is None:
-        raise ValidationAppError(
-            f"day_log {day_log_id} not found", code="day_log_not_found"
-        )
+        raise ValidationAppError(f"day_log {day_log_id} not found", code="day_log_not_found")
     if day_log.status == "closed":
         raise DayClosedError()
 

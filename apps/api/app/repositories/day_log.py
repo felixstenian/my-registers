@@ -13,14 +13,10 @@ class DayLogRepository:
         self.session = session
 
     async def get(self, *, user_id: uuid.UUID, log_date: date) -> DayLog | None:
-        stmt = select(DayLog).where(
-            DayLog.user_id == user_id, DayLog.log_date == log_date
-        )
+        stmt = select(DayLog).where(DayLog.user_id == user_id, DayLog.log_date == log_date)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def get_or_create(
-        self, *, user_id: uuid.UUID, log_date: date
-    ) -> DayLog:
+    async def get_or_create(self, *, user_id: uuid.UUID, log_date: date) -> DayLog:
         """Idempotente. Usa INSERT ... ON CONFLICT DO NOTHING para evitar corrida.
 
         A UNIQUE(user_id, log_date) protege contra duplicatas mesmo com

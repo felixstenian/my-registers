@@ -38,9 +38,7 @@ class RefreshTokenRepository:
         stmt = select(RefreshToken).where(RefreshToken.token_hash == token_hash)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def revoke(
-        self, token: RefreshToken, *, replaced_by: uuid.UUID | None = None
-    ) -> None:
+    async def revoke(self, token: RefreshToken, *, replaced_by: uuid.UUID | None = None) -> None:
         token.revoked_at = datetime.now(UTC)
         token.replaced_by = replaced_by
         await self.session.flush()

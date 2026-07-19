@@ -87,9 +87,7 @@ def test_compress_invalid_bytes_returns_original():
 def test_build_user_content_compresses_images_in_base64():
     """A cadeia completa: bytes → compress → base64 no payload."""
     original = _big_png_bytes()
-    content = AnthropicClient._build_user_content(
-        "descreva a imagem", [("image/png", original)]
-    )
+    content = AnthropicClient._build_user_content("descreva a imagem", [("image/png", original)])
     image_block = next(b for b in content if b["type"] == "image")
     assert image_block["source"]["media_type"] == "image/jpeg"
     decoded = base64.b64decode(image_block["source"]["data"])
@@ -118,9 +116,7 @@ def test_router_picks_fallback_for_text_only_short():
 def test_router_picks_primary_for_images():
     c = _client()
     assert c._pick_model(has_images=True, user_text=None) == "sonnet"
-    assert (
-        c._pick_model(has_images=True, user_text="rótulo desse iogurte") == "sonnet"
-    )
+    assert c._pick_model(has_images=True, user_text="rótulo desse iogurte") == "sonnet"
 
 
 def test_router_picks_primary_for_long_text():
@@ -177,9 +173,7 @@ async def test_call_logs_cache_metrics(caplog: pytest.LogCaptureFixture):
         result = await c.call_record_intent(user_text="oi")
 
     assert result.error is None
-    usage_records = [
-        r for r in caplog.records if getattr(r, "event", None) == "anthropic_usage"
-    ]
+    usage_records = [r for r in caplog.records if getattr(r, "event", None) == "anthropic_usage"]
     assert len(usage_records) == 1
     r = usage_records[0]
     assert r.cache_read_input_tokens == 90

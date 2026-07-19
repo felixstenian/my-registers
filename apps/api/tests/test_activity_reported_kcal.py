@@ -54,9 +54,7 @@ def _envelope(**activity_overrides) -> LLMEnvelope:
 # ---------------------------------------------------------------------------
 
 
-async def test_reported_kcal_wins_over_met_calculation(
-    db_session: AsyncSession, admin_user: User
-):
+async def test_reported_kcal_wins_over_met_calculation(db_session: AsyncSession, admin_user: User):
     """Print de smartwatch com 520 kcal: registra 520 (não 373 do MET)."""
     admin_user.weight_kg = Decimal("65")
     dl = await _day_log(db_session, admin_user.id)
@@ -74,9 +72,7 @@ async def test_reported_kcal_wins_over_met_calculation(
     assert record.met_value == Decimal("8.3")
 
 
-async def test_reported_kcal_bypasses_weight_required(
-    db_session: AsyncSession, admin_user: User
-):
+async def test_reported_kcal_bypasses_weight_required(db_session: AsyncSession, admin_user: User):
     """SP-61 não aplica se o valor veio do dispositivo — dispensa peso."""
     # weight_kg fica None de propósito
     assert admin_user.weight_kg is None
@@ -106,9 +102,7 @@ async def test_missing_reported_and_missing_weight_still_raises(
         )
 
 
-async def test_reported_kcal_zero_treated_as_reported(
-    db_session: AsyncSession, admin_user: User
-):
+async def test_reported_kcal_zero_treated_as_reported(db_session: AsyncSession, admin_user: User):
     """Edge case: dispositivo reporta 0 kcal (não é o mesmo que 'sem valor')."""
     admin_user.weight_kg = Decimal("65")
     dl = await _day_log(db_session, admin_user.id)
@@ -162,9 +156,7 @@ async def test_end_to_end_smartwatch_screenshot(
             )
         )
     )
-    resp = await client.post(
-        "/chat/messages", json={"text": "corrida foto anexada"}
-    )
+    resp = await client.post("/chat/messages", json={"text": "corrida foto anexada"})
     assert resp.status_code == 202
 
     record = (await db_session.execute(select(ActivityRecord))).scalar_one()

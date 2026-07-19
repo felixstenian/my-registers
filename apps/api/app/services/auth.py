@@ -89,9 +89,7 @@ class AuthService:
         new_session = await self._issue_pair(user=user, user_agent=user_agent, ip=ip)
         new_token_hash = hash_refresh_token(new_session.refresh_token)
         new_row = await self.refresh_tokens.get_by_hash(new_token_hash)
-        await self.refresh_tokens.revoke(
-            token, replaced_by=new_row.id if new_row else None
-        )
+        await self.refresh_tokens.revoke(token, replaced_by=new_row.id if new_row else None)
         return new_session
 
     async def logout(self, *, refresh_plain: str | None) -> None:
@@ -122,9 +120,7 @@ class AuthService:
             user_agent=user_agent,
             ip=ip,
         )
-        access_token, access_expires_at = encode_access_token(
-            sub=str(user.id), sid=str(row.id)
-        )
+        access_token, access_expires_at = encode_access_token(sub=str(user.id), sid=str(row.id))
         return IssuedSession(
             user=user,
             access_token=access_token,

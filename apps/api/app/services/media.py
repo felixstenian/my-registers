@@ -38,9 +38,7 @@ def _decode_probe(data: bytes) -> DecodedImage:
         with Image.open(io.BytesIO(data)) as img:
             width, height = img.size
     except (UnidentifiedImageError, OSError, ValueError) as exc:
-        raise ValidationAppError(
-            "invalid image", code="invalid_image"
-        ) from exc
+        raise ValidationAppError("invalid image", code="invalid_image") from exc
     return DecodedImage(width=width, height=height)
 
 
@@ -65,18 +63,14 @@ class MediaService:
         if len(data) == 0:
             raise ValidationAppError("empty upload", code="empty_upload")
         if len(data) > MAX_SIZE_BYTES:
-            raise ValidationAppError(
-                "file too large (max 8MB)", code="file_too_large"
-            )
+            raise ValidationAppError("file too large (max 8MB)", code="file_too_large")
 
         decoded = _decode_probe(data)
         checksum = hashlib.sha256(data).hexdigest()
         ext = MIME_TO_EXT[content_type]
         key = make_storage_key(user.id, ext)
 
-        await self.storage.put_object(
-            key=key, body=data, content_type=content_type
-        )
+        await self.storage.put_object(key=key, body=data, content_type=content_type)
 
         return await self.media.create(
             user_id=user.id,

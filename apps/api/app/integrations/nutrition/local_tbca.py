@@ -62,7 +62,5 @@ class LocalTBCACatalog(NutritionCatalog):
         fact = (await self.session.execute(stmt)).scalar_one_or_none()
         return CatalogHit.from_model(fact) if fact else None
 
-    async def bulk_lookup(
-        self, queries: list[LookupQuery]
-    ) -> list[CatalogHit | None]:
+    async def bulk_lookup(self, queries: list[LookupQuery]) -> list[CatalogHit | None]:
         return [await self.lookup(q) for q in queries]

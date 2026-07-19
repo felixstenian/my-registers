@@ -91,9 +91,7 @@ class ActivityService:
             # lookup como contexto para auditoria (se houver match), mas o
             # kcal_burned vem intacto do reportado.
             kcal_burned = Decimal(str(entry.kcal_burned_reported))
-            met_value = ActivityCalculator.lookup_met(
-                entry.activity_type, intensity_for_calc
-            )
+            met_value = ActivityCalculator.lookup_met(entry.activity_type, intensity_for_calc)
             calc_method = "user_manual"
             computation_reasons: list[str] = []
         else:
@@ -121,9 +119,7 @@ class ActivityService:
             activity_type=entry.activity_type,
             duration_minutes=duration_dec,
             distance_km=(
-                Decimal(str(entry.distance_km))
-                if entry.distance_km is not None
-                else None
+                Decimal(str(entry.distance_km)) if entry.distance_km is not None else None
             ),
             intensity=entry.intensity,
             met_value=met_value,
@@ -142,9 +138,7 @@ class ActivityService:
                 }
             )
         for reason in computation_reasons:
-            warnings.append(
-                {"code": reason, "record_id": str(record.id)}
-            )
+            warnings.append({"code": reason, "record_id": str(record.id)})
 
         await self.audit.record(
             user_id=user.id,

@@ -68,9 +68,7 @@ async def test_clarify_intent_creates_assistant_message(
     await _login(client)
     fake_anthropic.queue(make_llm_result(envelope))
 
-    resp = await client.post(
-        "/chat/messages", json={"text": "hoje foi puxado"}
-    )
+    resp = await client.post("/chat/messages", json={"text": "hoje foi puxado"})
     assert resp.status_code == 202
 
     messages = list((await db_session.execute(select(Message))).scalars())
@@ -91,9 +89,7 @@ async def test_clarify_does_not_create_business_records(
     (essas tabelas nem existem em Fase 3 — a garantia é implícita)."""
     await _login(client)
     fake_anthropic.queue(
-        make_llm_result(
-            make_envelope(intent="clarify", clarification_question="Detalhe?")
-        )
+        make_llm_result(make_envelope(intent="clarify", clarification_question="Detalhe?"))
     )
     resp = await client.post("/chat/messages", json={"text": "..."})
     assert resp.status_code == 202
@@ -124,9 +120,7 @@ async def test_clarify_without_question_uses_fallback_not_summary(
     )
     fake_anthropic.queue(make_llm_result(envelope))
 
-    resp = await client.post(
-        "/chat/messages", json={"text": "hoje foi puxado"}
-    )
+    resp = await client.post("/chat/messages", json={"text": "hoje foi puxado"})
     assert resp.status_code == 202
 
     assistant = next(
@@ -190,9 +184,7 @@ async def test_llm_error_creates_fallback_assistant_message(
     await _login(client)
     fake_anthropic.queue(make_llm_result(envelope=None, error=error_code))
 
-    resp = await client.post(
-        "/chat/messages", json={"text": "arroz e feijão"}
-    )
+    resp = await client.post("/chat/messages", json={"text": "arroz e feijão"})
     assert resp.status_code == 202
 
     messages = list((await db_session.execute(select(Message))).scalars())
@@ -221,9 +213,7 @@ async def test_validation_exhausted_treated_as_error(
 ):
     """Retry semântico esgotado (SP-14 estende Const. §7)."""
     await _login(client)
-    fake_anthropic.queue(
-        make_llm_result(envelope=None, error="validation_exhausted")
-    )
+    fake_anthropic.queue(make_llm_result(envelope=None, error="validation_exhausted"))
     resp = await client.post("/chat/messages", json={"text": "algo"})
     assert resp.status_code == 202
     resp = await client.get("/chat/messages")
@@ -239,9 +229,10 @@ async def test_validation_exhausted_treated_as_error(
 @pytest.mark.parametrize(
     "intent",
     # log_food (Fase 4), log_water/log_beverage/log_activity (Fase 5),
-    # correct_record/delete_record (Fase 6) foram implementados. Ficam aqui
-    # apenas os que ainda dependem de fases futuras.
-    ["query_day", "close_day", "weekly_summary"],
+    # correct_record/delete_record (Fase 6), query_day/close_day
+    # (Fase 7) foram implementados. Ficam aqui apenas os que ainda
+    # dependem de fases futuras.
+    ["weekly_summary"],
 )
 async def test_not_implemented_intents_fall_back_to_reformulation(
     client: AsyncClient,
@@ -260,9 +251,7 @@ async def test_not_implemented_intents_fall_back_to_reformulation(
     )
     fake_anthropic.queue(make_llm_result(envelope))
 
-    resp = await client.post(
-        "/chat/messages", json={"text": f"testando {intent}"}
-    )
+    resp = await client.post("/chat/messages", json={"text": f"testando {intent}"})
     assert resp.status_code == 202
 
     assistant = next(
@@ -292,9 +281,7 @@ async def test_media_is_downloaded_and_forwarded_to_llm(
 ):
     await _login(client)
     fake_anthropic.queue(
-        make_llm_result(
-            make_envelope(intent="unknown", user_text_summary="Não sei o que é isso.")
-        )
+        make_llm_result(make_envelope(intent="unknown", user_text_summary="Não sei o que é isso."))
     )
     media_id = await _upload_media(client)
 

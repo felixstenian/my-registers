@@ -13,9 +13,7 @@ from app.db.base import Base, UUIDPrimaryKeyMixin
 class Message(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "messages"
     __table_args__ = (
-        CheckConstraint(
-            "role IN ('user','assistant','system')", name="ck_messages_role"
-        ),
+        CheckConstraint("role IN ('user','assistant','system')", name="ck_messages_role"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -34,9 +32,7 @@ class Message(UUIDPrimaryKeyMixin, Base):
     llm_model: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_prompt_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
-    raw_llm_response: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB, nullable=True
-    )
+    raw_llm_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     tokens_input: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_output: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

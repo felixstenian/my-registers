@@ -10,9 +10,7 @@ from app.db.base import Base, UUIDPrimaryKeyMixin
 
 class Media(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "media"
-    __table_args__ = (
-        CheckConstraint("status IN ('uploaded','failed')", name="ck_media_status"),
-    )
+    __table_args__ = (CheckConstraint("status IN ('uploaded','failed')", name="ck_media_status"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -25,9 +23,7 @@ class Media(UUIDPrimaryKeyMixin, Base):
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     checksum_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default="uploaded"
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="uploaded")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

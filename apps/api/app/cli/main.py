@@ -51,9 +51,7 @@ def bootstrap() -> None:
         raise typer.Exit(code=1)
 
     user_id, created = asyncio.run(
-        _bootstrap_admin(
-            settings.default_admin_email.lower(), settings.default_admin_password
-        )
+        _bootstrap_admin(settings.default_admin_email.lower(), settings.default_admin_password)
     )
     action = "created" if created else "already_exists"
     logger.info(

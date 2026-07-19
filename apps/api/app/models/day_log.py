@@ -21,10 +21,6 @@ class DayLog(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
     log_date: Mapped[date] = mapped_column(Date, nullable=False)
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default="open"
-    )
-    closed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

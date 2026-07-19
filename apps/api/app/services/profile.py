@@ -79,9 +79,7 @@ class ProfileService:
             user.sex = pu.sex
 
         if not changed:
-            raise ValidationAppError(
-                "profile_update has no new values", code="profile_no_change"
-            )
+            raise ValidationAppError("profile_update has no new values", code="profile_no_change")
 
         await self.session.flush()
 

@@ -45,6 +45,8 @@ from app.services.correction_matcher import (
     TargetKind,
 )
 from app.services.daily_recompute import DailyRecomputeService, RecomputeResult
+from app.services.day_close import DayCloseResult, DayCloseService
+from app.services.day_query import DayPayload, DayQueryService
 from app.services.deletion import DeletionResult, DeletionService
 from app.services.hydration import HydrationResult, HydrationService
 from app.services.intent_dispatcher import (
@@ -57,9 +59,7 @@ from app.services.profile import ProfileService, ProfileUpdateResult
 
 logger = logging.getLogger("app.message_processor")
 
-_FALLBACK_LLM_ERROR = (
-    "Não consegui interpretar sua mensagem agora. Pode reformular?"
-)
+_FALLBACK_LLM_ERROR = "Não consegui interpretar sua mensagem agora. Pode reformular?"
 _FALLBACK_NOT_IMPLEMENTED = (
     "Recebi sua mensagem, mas o registro dessa categoria ainda não está "
     "disponível — está previsto para uma fase futura."
@@ -129,9 +129,15 @@ class MessageProcessor:
 
         # SP-70..74 correções, SP-80..82 remoções.
         if result.envelope.intent in {"correct_record", "delete_record"}:
-            return await self._handle_correction_or_deletion(
-                user_message, result
-            )
+            return await self._handle_correction_or_deletion(user_message, result)
+
+        # SP-100..104 encerramento do dia por chat.
+        if result.envelope.intent == "close_day":
+            return await self._handle_close_day(user_message, result)
+
+        # SP-90..92 consulta do dia por chat.
+        if result.envelope.intent == "query_day":
+            return await self._handle_query_day(user_message, result)
 
         try:
             dispatch = self.dispatcher.dispatch(result.envelope)
@@ -144,9 +150,7 @@ class MessageProcessor:
 
         return await self._record_success(user_message, result, dispatch)
 
-    async def _handle_registration(
-        self, user_message: Message, result: LLMCallResult
-    ) -> Message:
+    async def _handle_registration(self, user_message: Message, result: LLMCallResult) -> Message:
         envelope = result.envelope
         if envelope is None:
             return await self._record_error(user_message, result)
@@ -226,7 +230,7 @@ class MessageProcessor:
                         user_message,
                         result,
                         "Antes de calcular as calorias gastas, me diga seu peso "
-                        "atual em kg. Você pode dizer, por exemplo, \"peso 78 kg\".",
+                        'atual em kg. Você pode dizer, por exemplo, "peso 78 kg".',
                         code="weight_kg_required",
                     )
                 recompute = await recompute_service.recompute(user_message.day_log_id)
@@ -266,9 +270,7 @@ class MessageProcessor:
             tokens_output=result.tokens_output,
         )
 
-    async def _handle_set_profile(
-        self, user_message: Message, result: LLMCallResult
-    ) -> Message:
+    async def _handle_set_profile(self, user_message: Message, result: LLMCallResult) -> Message:
         envelope = result.envelope
         if envelope is None or envelope.profile_update is None:
             return await self._record_error(user_message, result)
@@ -293,8 +295,7 @@ class MessageProcessor:
         raw["dispatch"] = {
             "profile": {
                 "changed": {
-                    k: {"before": v[0], "after": v[1]}
-                    for k, v in profile.changed_fields.items()
+                    k: {"before": v[0], "after": v[1]} for k, v in profile.changed_fields.items()
                 }
             }
         }
@@ -352,7 +353,7 @@ class MessageProcessor:
                 user_message,
                 result,
                 (
-                    f"Não achei nenhum registro que casse com \"{exc.hint}\" "
+                    f'Não achei nenhum registro que casse com "{exc.hint}" '
                     "no dia de hoje. Pode me dizer qual foi?"
                 ),
                 code="target_not_found",
@@ -373,9 +374,7 @@ class MessageProcessor:
             )
 
         # Sucesso → recompute do dia.
-        recompute = await DailyRecomputeService(self.session).recompute(
-            user_message.day_log_id
-        )
+        recompute = await DailyRecomputeService(self.session).recompute(user_message.day_log_id)
 
         raw = _pack_raw(result)
         raw["dispatch"] = {
@@ -387,8 +386,7 @@ class MessageProcessor:
         if is_correction:
             assert isinstance(outcome, CorrectionResult)
             raw["dispatch"]["changed"] = {
-                k: {"before": v[0], "after": v[1]}
-                for k, v in outcome.changed_fields.items()
+                k: {"before": v[0], "after": v[1]} for k, v in outcome.changed_fields.items()
             }
             content = _compose_correction_summary(outcome, recompute)
         else:
@@ -402,6 +400,74 @@ class MessageProcessor:
             role="assistant",
             content=content,
             llm_intent=envelope.intent,
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_close_day(self, user_message: Message, result: LLMCallResult) -> Message:
+        envelope = result.envelope
+        if envelope is None:
+            return await self._record_error(user_message, result)
+
+        user = await self.session.get(User, user_message.user_id)
+        if user is None:
+            return await self._record_error(user_message, result)
+
+        close_result = await DayCloseService(self.session, anthropic=self.anthropic).close_today(
+            user=user, message_id=user_message.id
+        )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "close_day",
+            "day_log_id": str(close_result.day_log.id),
+            "log_date": close_result.day_log.log_date.isoformat(),
+            "was_already_closed": close_result.was_already_closed,
+            "snapshot_version": close_result.snapshot.version,
+        }
+        content = _compose_close_summary(close_result)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=close_result.day_log.id,
+            role="assistant",
+            content=content,
+            llm_intent="close_day",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_query_day(self, user_message: Message, result: LLMCallResult) -> Message:
+        envelope = result.envelope
+        if envelope is None:
+            return await self._record_error(user_message, result)
+
+        user = await self.session.get(User, user_message.user_id)
+        if user is None:
+            return await self._record_error(user_message, result)
+
+        payload = await DayQueryService(self.session).get_today(user=user)
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "query_day",
+            "log_date": payload.date.isoformat(),
+            "snapshot_version": payload.snapshot_version,
+        }
+        content = _compose_query_day_summary(payload)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="query_day",
             llm_model=result.model,
             llm_prompt_version=result.prompt_version,
             llm_confidence=envelope.confidence,
@@ -434,9 +500,7 @@ class MessageProcessor:
             tokens_output=result.tokens_output,
         )
 
-    async def _load_media(
-        self, message_id: uuid.UUID
-    ) -> list[tuple[str, bytes]]:
+    async def _load_media(self, message_id: uuid.UUID) -> list[tuple[str, bytes]]:
         stmt = (
             select(Media)
             .join(MessageMedia, MessageMedia.media_id == Media.id)
@@ -481,9 +545,7 @@ class MessageProcessor:
             tokens_output=result.tokens_output,
         )
 
-    async def _record_error(
-        self, user_message: Message, result: LLMCallResult
-    ) -> Message:
+    async def _record_error(self, user_message: Message, result: LLMCallResult) -> Message:
         raw = _pack_raw(result)
         return await self.messages.create(
             user_id=user_message.user_id,
@@ -547,9 +609,7 @@ def _compose_meal_summary(meal: MealResult, recompute: RecomputeResult) -> str:
     warnings = meal.warnings
     to_confirm = [w for w in warnings if w["code"] in ("low_confidence_item", "no_catalog_hit")]
     if to_confirm:
-        names = ", ".join(
-            {w.get("detected_name", w.get("item_id", "item")) for w in to_confirm}
-        )
+        names = ", ".join({w.get("detected_name", w.get("item_id", "item")) for w in to_confirm})
         lines.append(f"Confirma esses itens? {names}")
 
     lines.append(_DISCLAIMER)
@@ -574,9 +634,7 @@ def _totals_line(snap) -> str:
     )
 
 
-def _compose_water_summary(
-    hydration: HydrationResult, recompute: RecomputeResult
-) -> str:
+def _compose_water_summary(hydration: HydrationResult, recompute: RecomputeResult) -> str:
     lines = [f"Registrei {hydration.record.volume_ml} ml de água.", ""]
     lines.append(_totals_line(recompute.snapshot))
     lines.append(_DISCLAIMER)
@@ -591,9 +649,7 @@ _KIND_LABELS = {
 }
 
 
-def _compose_correction_summary(
-    outcome: CorrectionResult, recompute: RecomputeResult
-) -> str:
+def _compose_correction_summary(outcome: CorrectionResult, recompute: RecomputeResult) -> str:
     label = _KIND_LABELS[outcome.kind]
     changes_parts = [
         f"{field}: {v[0]} → {v[1]}"
@@ -626,14 +682,10 @@ def _compose_correction_summary(
     return "\n".join(lines)
 
 
-def _compose_deletion_summary(
-    outcome: DeletionResult, recompute: RecomputeResult
-) -> str:
+def _compose_deletion_summary(outcome: DeletionResult, recompute: RecomputeResult) -> str:
     label = _KIND_LABELS[outcome.kind]
     if outcome.already_deleted:
-        first_line = (
-            f"O registro de {label} já estava removido — nada a fazer."
-        )
+        first_line = f"O registro de {label} já estava removido — nada a fazer."
     else:
         first_line = f"Removi o registro de {label}."
     lines = [first_line, ""]
@@ -673,22 +725,17 @@ def _entity_short_desc(kind: TargetKind, entity) -> str:
     return ""
 
 
-def _compose_beverage_summary(
-    beverage: BeverageResult, recompute: RecomputeResult
-) -> str:
+def _compose_beverage_summary(beverage: BeverageResult, recompute: RecomputeResult) -> str:
     record = beverage.record
     lines = [
         f"Registrei {record.volume_ml} ml de {record.detected_name}"
         f" ({int(record.kcal or 0)} kcal).",
     ]
     to_confirm = [
-        w for w in beverage.warnings
-        if w["code"] in ("no_catalog_hit", "low_confidence_item")
+        w for w in beverage.warnings if w["code"] in ("no_catalog_hit", "low_confidence_item")
     ]
     if to_confirm:
-        names = ", ".join(
-            {w.get("detected_name", record.detected_name) for w in to_confirm}
-        )
+        names = ", ".join({w.get("detected_name", record.detected_name) for w in to_confirm})
         lines.append(f"Confirma esses itens? {names}")
     lines.append("")
     lines.append(_totals_line(recompute.snapshot))
@@ -696,9 +743,7 @@ def _compose_beverage_summary(
     return "\n".join(lines)
 
 
-def _compose_activity_summary(
-    activity: ActivityResult, recompute: RecomputeResult
-) -> str:
+def _compose_activity_summary(activity: ActivityResult, recompute: RecomputeResult) -> str:
     record = activity.record
     duration = int(record.duration_minutes)
     kcal = int(record.kcal_burned)
@@ -708,21 +753,61 @@ def _compose_activity_summary(
         "vigorous": "intensa",
         "unknown": "sem intensidade informada",
     }.get(record.intensity, record.intensity)
-    source_hint = (
-        " (informado pelo dispositivo)"
-        if record.calc_method == "user_manual"
-        else ""
-    )
+    source_hint = " (informado pelo dispositivo)" if record.calc_method == "user_manual" else ""
     lines = [
         f"Registrei {duration} min de {record.detected_name}"
         f" ({intensity_label}) — {kcal} kcal gastos{source_hint}.",
     ]
     if any(w["code"].startswith("missing_") for w in activity.warnings):
-        lines.append(
-            "Alguns dados ficaram estimados; confirma se está certo?"
-        )
+        lines.append("Alguns dados ficaram estimados; confirma se está certo?")
     lines.append("")
     lines.append(_totals_line(recompute.snapshot))
+    lines.append(_DISCLAIMER)
+    return "\n".join(lines)
+
+
+def _compose_close_summary(close_result: DayCloseResult) -> str:
+    """SP-103: `narrative` já vem com disclaimer concatenado pelo service.
+
+    Prefixamos uma linha curta explicando o fechamento (ou reafirmação
+    idempotente), e depois a narrative in-full. Não repetimos o disclaimer.
+    """
+    log_date = close_result.day_log.log_date.strftime("%d/%m/%Y")
+    if close_result.was_already_closed:
+        prefix = f"O dia {log_date} já estava encerrado. Segue o resumo:"
+    else:
+        prefix = f"Dia {log_date} encerrado."
+    return f"{prefix}\n\n{close_result.narrative}"
+
+
+def _compose_query_day_summary(payload: DayPayload) -> str:
+    """SP-90/SP-91: resumo direto do snapshot para o chat.
+
+    Como o chat mostra texto, damos totais consolidados. Frontend pode
+    também chamar `GET /days/today` para uma tabela completa (SP-118).
+    """
+    totals = payload.totals
+    log_date = payload.date.strftime("%d/%m/%Y")
+    status_label = "encerrado" if payload.status == "closed" else "em aberto"
+    lines = [
+        f"Resumo de {log_date} ({status_label}):",
+        (
+            f"Consumidas: {int(totals['kcal_in'])} kcal · "
+            f"Gastas: {int(totals['kcal_out'])} kcal · "
+            f"Saldo: {int(totals['kcal_balance'])} kcal."
+        ),
+        (
+            f"Macros — P {int(totals['protein_g'])}g · "
+            f"C {int(totals['carbs_g'])}g · G {int(totals['fat_g'])}g · "
+            f"Fib {int(totals['fiber_g'])}g."
+        ),
+        (
+            f"Água {int(totals['water_ml'])} ml · "
+            f"Outros líquidos {int(totals['other_liquids_ml'])} ml."
+        ),
+    ]
+    if payload.warnings:
+        lines.append(f"Ainda há {len(payload.warnings)} itens que podem ser confirmados.")
     lines.append(_DISCLAIMER)
     return "\n".join(lines)
 
@@ -743,9 +828,7 @@ _CLARIFY_TEMPLATES = {
 
 
 def _clarify_from_validation(exc: ValidationAppError) -> str:
-    return _CLARIFY_TEMPLATES.get(
-        exc.code, "Pode reformular sua mensagem com mais detalhes?"
-    )
+    return _CLARIFY_TEMPLATES.get(exc.code, "Pode reformular sua mensagem com mais detalhes?")
 
 
 _FIELD_LABELS = {
@@ -780,9 +863,7 @@ def _compose_profile_summary(profile: ProfileUpdateResult) -> str:
 def _pack_raw(result: LLMCallResult) -> dict[str, Any]:
     packed = asdict(result)
     # `envelope` é um BaseModel e não é JSON-serializable por asdict.
-    packed["envelope"] = (
-        result.envelope.model_dump(mode="json") if result.envelope else None
-    )
+    packed["envelope"] = result.envelope.model_dump(mode="json") if result.envelope else None
     return packed
 
 
@@ -801,9 +882,7 @@ async def run_processor_in_background(
     engine module-level).
     """
     async with session_factory() as session:
-        processor = MessageProcessor(
-            session=session, anthropic=anthropic_client, storage=storage
-        )
+        processor = MessageProcessor(session=session, anthropic=anthropic_client, storage=storage)
         try:
             await processor.process(message_id)
             await session.commit()

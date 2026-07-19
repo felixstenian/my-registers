@@ -23,9 +23,7 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
             "action IN ('create','update','delete','correct')",
             name="ck_audit_events_action",
         ),
-        CheckConstraint(
-            "actor IN ('user','llm')", name="ck_audit_events_actor"
-        ),
+        CheckConstraint("actor IN ('user','llm')", name="ck_audit_events_actor"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(

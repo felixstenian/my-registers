@@ -186,9 +186,7 @@ async def test_list_before_returns_older(client: AsyncClient, admin_user):
 async def test_list_media_urls_returned(client: AsyncClient, admin_user):
     await _login(client)
     mid = await _upload_media(client)
-    r = await client.post(
-        "/chat/messages", json={"text": "foto", "media_ids": [mid]}
-    )
+    r = await client.post("/chat/messages", json={"text": "foto", "media_ids": [mid]})
     assert r.status_code == 202
 
     resp = await client.get("/chat/messages")

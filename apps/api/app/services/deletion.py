@@ -74,13 +74,9 @@ class DeletionService:
         """Path direto para os endpoints REST (SP-81 idempotente)."""
         entity = await _load_by_id(self.session, kind, entity_id, user.id)
         if entity is None:
-            raise ValidationAppError(
-                "target not found", code="target_not_found"
-            )
+            raise ValidationAppError("target not found", code="target_not_found")
         await _ensure_day_open(self.session, entity.day_log_id)
-        candidate = Candidate(
-            kind=kind, entity_id=entity_id, entity=entity, score=0
-        )
+        candidate = Candidate(kind=kind, entity_id=entity_id, entity=entity, score=0)
         return await self._soft_delete(user, candidate, message_id)
 
     async def _soft_delete(
@@ -90,9 +86,7 @@ class DeletionService:
         message_id: uuid.UUID | None,
     ) -> DeletionResult:
         entity = candidate.entity
-        day_log_id = await _resolve_day_log_id(
-            self.session, entity, candidate.kind
-        )
+        day_log_id = await _resolve_day_log_id(self.session, entity, candidate.kind)
         if entity.deleted_at is not None:
             # SP-81: idempotente — 2ª chamada é no-op.
             return DeletionResult(
@@ -127,9 +121,7 @@ class DeletionService:
 async def _ensure_day_open(session: AsyncSession, day_log_id: uuid.UUID) -> None:
     day_log = await session.get(DayLog, day_log_id)
     if day_log is None:
-        raise ValidationAppError(
-            f"day_log {day_log_id} not found", code="day_log_not_found"
-        )
+        raise ValidationAppError(f"day_log {day_log_id} not found", code="day_log_not_found")
     if day_log.status == "closed":
         raise DayClosedError()
 
@@ -159,19 +151,13 @@ async def _load_by_id(
         )
         entity = (await session.execute(stmt)).scalar_one_or_none()
         if entity is not None:
-            entity.day_log_id = (
-                await session.get(FoodRecord, entity.food_record_id)
-            ).day_log_id
+            entity.day_log_id = (await session.get(FoodRecord, entity.food_record_id)).day_log_id
         return entity
-    stmt = select(model).where(
-        model.id == entity_id, model.user_id == user_id
-    )
+    stmt = select(model).where(model.id == entity_id, model.user_id == user_id)
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def _resolve_day_log_id(
-    session: AsyncSession, entity: Any, kind: TargetKind
-) -> uuid.UUID:
+async def _resolve_day_log_id(session: AsyncSession, entity: Any, kind: TargetKind) -> uuid.UUID:
     if kind == TargetKind.FOOD:
         # FoodItem não tem day_log_id direto — está em FoodRecord.
         # Alguns paths (delete_by_id via REST) já pré-populam entity.day_log_id;

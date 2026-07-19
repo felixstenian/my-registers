@@ -35,9 +35,7 @@ class BeverageResult:
 
 
 class BeverageService:
-    def __init__(
-        self, session: AsyncSession, catalog: NutritionCatalog
-    ) -> None:
+    def __init__(self, session: AsyncSession, catalog: NutritionCatalog) -> None:
         self.session = session
         self.catalog = catalog
         self.records = BeverageRecordRepository(session)
@@ -60,16 +58,12 @@ class BeverageService:
 
         entry = envelope.beverage
         normalized = normalize_name(entry.detected_name)
-        hit = await self.catalog.lookup(
-            LookupQuery(name=normalized, brand=entry.brand)
-        )
+        hit = await self.catalog.lookup(LookupQuery(name=normalized, brand=entry.brand))
 
         volume_ml = Decimal(str(entry.volume_ml))
         # Beverage sempre calcula por volume (basis per_100ml). Se o catálogo
         # tiver per_100g, cai em `unknown_basis` (raro para bebidas).
-        computed = NutritionCalculator.compute(
-            hit=hit, grams=None, ml=volume_ml
-        )
+        computed = NutritionCalculator.compute(hit=hit, grams=None, ml=volume_ml)
         confidence = Decimal(str(entry.confidence))
         needs_confirmation = confidence < LOW_CONFIDENCE_THRESHOLD or hit is None
 

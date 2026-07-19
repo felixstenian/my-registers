@@ -36,18 +36,12 @@ class MediaRepository:
         await self.session.flush()
         return media
 
-    async def get_by_id(
-        self, media_id: uuid.UUID, *, user_id: uuid.UUID
-    ) -> Media | None:
+    async def get_by_id(self, media_id: uuid.UUID, *, user_id: uuid.UUID) -> Media | None:
         stmt = select(Media).where(Media.id == media_id, Media.user_id == user_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def list_by_ids(
-        self, media_ids: list[uuid.UUID], *, user_id: uuid.UUID
-    ) -> list[Media]:
+    async def list_by_ids(self, media_ids: list[uuid.UUID], *, user_id: uuid.UUID) -> list[Media]:
         if not media_ids:
             return []
-        stmt = select(Media).where(
-            Media.id.in_(media_ids), Media.user_id == user_id
-        )
+        stmt = select(Media).where(Media.id.in_(media_ids), Media.user_id == user_id)
         return list((await self.session.execute(stmt)).scalars())

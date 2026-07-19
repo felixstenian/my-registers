@@ -61,9 +61,7 @@ def test_compute_with_pt_br_activity_type():
     assert result.reasons == []
 
 
-async def test_activity_service_persists_kcal_when_pt_br_type(
-    db_session: AsyncSession, admin_user
-):
+async def test_activity_service_persists_kcal_when_pt_br_type(db_session: AsyncSession, admin_user):
     """End-to-end no service: LLM manda activity_type='corrida', service
     persiste kcal correto (não zero)."""
     admin_user.weight_kg = Decimal("65")

@@ -124,9 +124,7 @@ class NutritionLabelIn(_StrictBase):
     @model_validator(mode="after")
     def _serving_needs_size(self) -> NutritionLabelIn:
         if self.basis == "per_serving" and not (self.serving_size_g or self.serving_size_ml):
-            raise ValueError(
-                "basis=per_serving requer serving_size_g ou serving_size_ml"
-            )
+            raise ValueError("basis=per_serving requer serving_size_g ou serving_size_ml")
         return self
 
 
