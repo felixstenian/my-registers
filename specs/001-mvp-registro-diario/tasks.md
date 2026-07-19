@@ -137,17 +137,19 @@ Status: **done** (branch `feat/fase-5-hydration-beverage-activity`). 108 testes 
 
 ---
 
-## Fase 6 — Correções e remoções
+## Fase 6 — Correções e remoções ✅
 
 Meta: usuário corrige e remove registros por chat com auditoria completa.
 
-- [ ] **T-601** — `CorrectionService.apply(target_hint, changes, day)`: matching por `normalized_name` + qualificadores (meal_slot, hora). Retorna `AmbiguousTarget` se >1 match. (M) — SP-70, SP-71, SP-72.
-- [ ] **T-602** — `IntentDispatcher.route_correction` e `route_deletion`. Assistente responde pedindo desambiguação se `AmbiguousTarget`. (M) — SP-71. `blocked_by: T-601`.
-- [ ] **T-603** — Soft-delete em todos os services de registro + audit_events com `before`/`after`. Bloqueio em dias fechados (409). (M) — SP-73, SP-74, SP-80, SP-82, INV-5, INV-10.
-- [ ] **T-604** — `DELETE /records/*/{id}` e `PATCH /records/food-items/{id}` idempotentes. (S) — SP-81. `blocked_by: T-603`.
-- [ ] **T-605** — Testes: SP-70 a SP-82, INV-4, INV-5, INV-10. (M) — gate.
+Status: **done** (branch `feat/fase-6-corrections-deletions`). 154 testes verdes (17 novos cobrindo SP-70..82 + INV-4/5/10); lint verde.
 
-**Gate Fase 6:** correções e exclusões seguras, com trilha de auditoria. Const. Art. III §11 verificada.
+- [x] **T-601** — `services/correction_matcher.py` (TargetMatcher, kind_hints, meal_slot_hints, score) + `services/correction.py` (CorrectionService). Matching por token overlap + qualificador. Recompute macros via Calculator se `grams`/`ml` mudou. `source` vira `user_corrected`. Audit `action='correct'` com before/after.
+- [x] **T-602** — `services/deletion.py` (DeletionService). Soft delete via `deleted_at`. `apply_from_llm` usa matcher; `delete_by_id` para path REST direto. Idempotente (`already_deleted=True` no 2ª chamada). Audit `action='delete'`.
+- [x] **T-603** — `MessageProcessor._handle_correction_or_deletion` roteia intent `correct_record`/`delete_record`. `AmbiguousTarget` → assistant clarify listando candidatos. `NoTargetFound` → clarify pedindo mais detalhes. `DayClosedError` → clarify explicando dia encerrado. Recompute automático pós-mutação.
+- [x] **T-604** — `api/routes/records.py`: `DELETE /records/food-items|water|beverage|activity/{id}` (200 sempre, idempotente por SP-81); `PATCH /records/food-items/{id}` com update parcial + recompute + audit. 409 se dia closed; 404 se não achou.
+- [x] **T-605** — `tests/test_corrections_deletions.py` (17 casos): matcher (unambiguous/ambiguous/qualified/no-target), CorrectionService (grams update recompute, audit trail, ambiguous no-op, closed day), DeletionService (soft delete + audit, closed day), REST endpoints (delete, idempotência, 409, PATCH recompute), INV-4 (snapshot recomputa após correction/deletion via chat), ambiguidade via chat vira clarify. Helper `_day_log` resolve pela timezone do user (não UTC) para casar com o `ChatService`.
+
+**Gate Fase 6 — cumprido:** correções e exclusões seguras, com trilha de auditoria. Const. Art. III §11 e Art. VIII §28 verificadas.
 
 ---
 

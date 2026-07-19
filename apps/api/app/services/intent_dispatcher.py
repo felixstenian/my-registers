@@ -31,8 +31,6 @@ _FALLBACK_CLARIFY = (
 # Intents que ainda dependem de fase futura ficam aqui:
 _STRUCTURED_INTENTS = {
     "log_nutrition_label",  # Fase 4.b
-    "correct_record",  # Fase 6
-    "delete_record",  # Fase 6
     "query_day",  # Fase 7
     "close_day",  # Fase 7
     "weekly_summary",  # Fase 8

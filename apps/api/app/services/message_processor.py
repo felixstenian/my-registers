@@ -34,7 +34,18 @@ from app.models import Media, Message, MessageMedia, User
 from app.repositories.message import MessageRepository
 from app.services.activity import ActivityResult, ActivityService, WeightRequired
 from app.services.beverage import BeverageResult, BeverageService
+from app.services.correction import (
+    CorrectionResult,
+    CorrectionService,
+    DayClosedError,
+)
+from app.services.correction_matcher import (
+    AmbiguousTarget,
+    NoTargetFound,
+    TargetKind,
+)
 from app.services.daily_recompute import DailyRecomputeService, RecomputeResult
+from app.services.deletion import DeletionResult, DeletionService
 from app.services.hydration import HydrationResult, HydrationService
 from app.services.intent_dispatcher import (
     DispatchResult,
@@ -115,6 +126,12 @@ class MessageProcessor:
             "log_activity",
         }:
             return await self._handle_registration(user_message, result)
+
+        # SP-70..74 correções, SP-80..82 remoções.
+        if result.envelope.intent in {"correct_record", "delete_record"}:
+            return await self._handle_correction_or_deletion(
+                user_message, result
+            )
 
         try:
             dispatch = self.dispatcher.dispatch(result.envelope)
@@ -296,6 +313,103 @@ class MessageProcessor:
             tokens_output=result.tokens_output,
         )
 
+    async def _handle_correction_or_deletion(
+        self, user_message: Message, result: LLMCallResult
+    ) -> Message:
+        envelope = result.envelope
+        if envelope is None:
+            return await self._record_error(user_message, result)
+        if user_message.day_log_id is None:
+            return await self._record_error(user_message, result)
+
+        user = await self.session.get(User, user_message.user_id)
+        if user is None:
+            return await self._record_error(user_message, result)
+
+        is_correction = envelope.intent == "correct_record"
+        service_call = (
+            CorrectionService(self.session).apply_from_llm
+            if is_correction
+            else DeletionService(self.session).apply_from_llm
+        )
+
+        try:
+            outcome = await service_call(
+                user=user,
+                day_log_id=user_message.day_log_id,
+                message_id=user_message.id,
+                envelope=envelope,
+            )
+        except DayClosedError:
+            return await self._record_clarify(
+                user_message,
+                result,
+                "Esse dia já foi encerrado — não é possível alterar registros nele.",
+                code="conflict_closed_day",
+            )
+        except NoTargetFound as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                (
+                    f"Não achei nenhum registro que casse com \"{exc.hint}\" "
+                    "no dia de hoje. Pode me dizer qual foi?"
+                ),
+                code="target_not_found",
+            )
+        except AmbiguousTarget as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _compose_ambiguity_prompt(exc),
+                code="ambiguous_correction_target",
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
+
+        # Sucesso → recompute do dia.
+        recompute = await DailyRecomputeService(self.session).recompute(
+            user_message.day_log_id
+        )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "correct" if is_correction else "delete",
+            "kind": outcome.kind.value,
+            "entity_id": str(outcome.entity_id),
+            "snapshot_version": recompute.snapshot.version,
+        }
+        if is_correction:
+            assert isinstance(outcome, CorrectionResult)
+            raw["dispatch"]["changed"] = {
+                k: {"before": v[0], "after": v[1]}
+                for k, v in outcome.changed_fields.items()
+            }
+            content = _compose_correction_summary(outcome, recompute)
+        else:
+            assert isinstance(outcome, DeletionResult)
+            raw["dispatch"]["already_deleted"] = outcome.already_deleted
+            content = _compose_deletion_summary(outcome, recompute)
+
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent=envelope.intent,
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
     async def _record_clarify(
         self,
         user_message: Message,
@@ -467,6 +581,96 @@ def _compose_water_summary(
     lines.append(_totals_line(recompute.snapshot))
     lines.append(_DISCLAIMER)
     return "\n".join(lines)
+
+
+_KIND_LABELS = {
+    TargetKind.FOOD: "alimento",
+    TargetKind.WATER: "água",
+    TargetKind.BEVERAGE: "bebida",
+    TargetKind.ACTIVITY: "atividade",
+}
+
+
+def _compose_correction_summary(
+    outcome: CorrectionResult, recompute: RecomputeResult
+) -> str:
+    label = _KIND_LABELS[outcome.kind]
+    changes_parts = [
+        f"{field}: {v[0]} → {v[1]}"
+        for field, v in outcome.changed_fields.items()
+        if field
+        not in {
+            "kcal",
+            "protein_g",
+            "carbs_g",
+            "fat_g",
+            "fiber_g",
+            "sodium_mg",
+            "calcium_mg",
+            "iron_mg",
+            "potassium_mg",
+            "met_value",
+            "calc_method",
+            "needs_confirmation",
+            "source",
+        }
+    ]
+    lines = [
+        f"Ajustei o registro de {label}. Alterações: {'; '.join(changes_parts)}."
+        if changes_parts
+        else f"Ajustei o registro de {label}.",
+    ]
+    lines.append("")
+    lines.append(_totals_line(recompute.snapshot))
+    lines.append(_DISCLAIMER)
+    return "\n".join(lines)
+
+
+def _compose_deletion_summary(
+    outcome: DeletionResult, recompute: RecomputeResult
+) -> str:
+    label = _KIND_LABELS[outcome.kind]
+    if outcome.already_deleted:
+        first_line = (
+            f"O registro de {label} já estava removido — nada a fazer."
+        )
+    else:
+        first_line = f"Removi o registro de {label}."
+    lines = [first_line, ""]
+    lines.append(_totals_line(recompute.snapshot))
+    lines.append(_DISCLAIMER)
+    return "\n".join(lines)
+
+
+def _compose_ambiguity_prompt(exc: AmbiguousTarget) -> str:
+    candidates_desc: list[str] = []
+    for cand in exc.candidates[:4]:
+        entity = cand.entity
+        label = _KIND_LABELS[cand.kind]
+        name = getattr(entity, "detected_name", None) or "água"
+        detail = _entity_short_desc(cand.kind, entity)
+        candidates_desc.append(f"- {label}: {name} ({detail})")
+    listing = "\n".join(candidates_desc)
+    return (
+        f'Encontrei mais de um registro que casa com "{exc.hint}". '
+        "Pode me dizer qual desses?\n" + listing
+    )
+
+
+def _entity_short_desc(kind: TargetKind, entity) -> str:
+    if kind == TargetKind.FOOD:
+        if entity.grams:
+            return f"{int(entity.grams)}g"
+        if entity.ml:
+            return f"{int(entity.ml)}ml"
+        return f"{entity.quantity} {entity.unit or ''}".strip()
+    if kind == TargetKind.WATER:
+        return f"{entity.volume_ml}ml"
+    if kind == TargetKind.BEVERAGE:
+        return f"{entity.volume_ml}ml"
+    if kind == TargetKind.ACTIVITY:
+        return f"{int(entity.duration_minutes)}min"
+    return ""
 
 
 def _compose_beverage_summary(
