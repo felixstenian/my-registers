@@ -86,6 +86,15 @@ async def list_messages(
         for m in item.media:
             url = await storage.presigned_get_url(m.storage_key)
             media_refs.append(MediaRef(id=m.id, content_type=m.content_type, url=url))
+        # SP-33: expõe `nutrient_fact_id` ao cliente quando o assistant
+        # cadastrou um rótulo, para o botão de confirmação inline.
+        nutrient_fact_id = None
+        raw = item.message.raw_llm_response
+        if item.message.llm_intent == "log_nutrition_label" and isinstance(raw, dict):
+            dispatch = raw.get("dispatch") or {}
+            fid = dispatch.get("nutrient_fact_id")
+            if isinstance(fid, str):
+                nutrient_fact_id = fid  # type: ignore[assignment]
         out.append(
             MessageOut(
                 id=item.message.id,
@@ -95,6 +104,7 @@ async def list_messages(
                 llm_confidence=item.message.llm_confidence,
                 media=media_refs,
                 created_at=item.message.created_at,
+                nutrient_fact_id=nutrient_fact_id,
             )
         )
     return MessagesListResponse(messages=out)

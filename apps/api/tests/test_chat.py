@@ -169,9 +169,7 @@ async def test_list_after_returns_newer(client: AsyncClient, admin_user):
     assert [m["content"] for m in messages] == ["msg 2", "msg 3"]
 
 
-async def test_list_no_anchor_returns_most_recent_not_oldest(
-    client: AsyncClient, admin_user
-):
+async def test_list_no_anchor_returns_most_recent_not_oldest(client: AsyncClient, admin_user):
     """Regressão do bug reportado em 2026-07-19.
 
     Antes o fetch inicial fazia `ORDER BY created_at ASC LIMIT n` e devolvia

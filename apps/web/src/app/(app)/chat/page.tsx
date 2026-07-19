@@ -17,6 +17,9 @@ type Message = {
   llm_confidence: number | null;
   media: MediaRef[];
   created_at: string;
+  // SP-33: quando `llm_intent='log_nutrition_label'`, botão de confirmação
+  // aparece embaixo do balão e chama `PATCH /nutrient-facts/{id}`.
+  nutrient_fact_id?: string | null;
 };
 
 const MAX_FILES = 4;
@@ -59,6 +62,8 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [awaitingAssistant, setAwaitingAssistant] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // SP-33: nutrient_fact_ids que já foram confirmados nesta sessão de UI.
+  const [confirmedFacts, setConfirmedFacts] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartRef = useRef<number | null>(null);
@@ -131,6 +136,22 @@ export default function ChatPage() {
 
   useEffect(() => stopPolling, [stopPolling]);
 
+  // SP-33: PATCH /nutrient-facts/{id} sem corpo (só marca verified=true).
+  // Não fecha o cartão — apenas troca o botão para "Confirmado ✓".
+  const confirmNutrientFact = useCallback(async (id: string) => {
+    const result = await api(`/nutrient-facts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({}),
+    });
+    if (result.ok) {
+      setConfirmedFacts((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+    }
+  }, []);
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -200,6 +221,23 @@ export default function ChatPage() {
                     className="max-h-40 rounded border border-slate-300 dark:border-slate-700"
                   />
                 ))}
+              </div>
+            )}
+            {m.role === 'assistant' && m.llm_intent === 'log_nutrition_label' && m.nutrient_fact_id && (
+              <div className="mt-3 border-t border-slate-300 pt-2 text-xs dark:border-slate-700">
+                {confirmedFacts.has(m.nutrient_fact_id) ? (
+                  <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                    Confirmado ✓
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => confirmNutrientFact(m.nutrient_fact_id!)}
+                    className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-700"
+                  >
+                    Confirmar cadastro do produto
+                  </button>
+                )}
               </div>
             )}
           </div>
