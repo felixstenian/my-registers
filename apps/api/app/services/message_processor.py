@@ -1110,35 +1110,39 @@ def _compose_close_summary(close_result: DayCloseResult) -> str:
 
 
 def _compose_query_day_summary(payload: DayPayload) -> str:
-    """SP-90/SP-91: resumo direto do snapshot para o chat.
+    """SP-90/SP-91: resumo do dia em formato tabular (padrão SP-118).
 
-    Como o chat mostra texto, damos totais consolidados. Frontend pode
-    também chamar `GET /days/today` para uma tabela completa (SP-118).
+    Usa `message_formatter._daily_totals_table` para produzir a mesma
+    tabela `Total acumulado — DD/MM/YYYY` que aparece após qualquer
+    registro, com formatação pt-BR + `≈` quando houver itens pendentes.
     """
-    totals = payload.totals
-    log_date = payload.date.strftime("%d/%m/%Y")
+    from types import SimpleNamespace
+
+    # `_daily_totals_table` lê o snapshot por atributos — o payload aqui
+    # devolve totals como dict, então adaptamos para SimpleNamespace.
+    snap = SimpleNamespace(**payload.totals)
+    # `approx=True` quando existem warnings de itens que ainda podem mudar
+    # os totais (needs_confirmation/no_catalog_hit/low_confidence_item).
+    approx = any(
+        w.get("code") in ("needs_confirmation", "no_catalog_hit", "low_confidence_item")
+        for w in payload.warnings
+    )
+
+    log_date_str = payload.date.strftime("%d/%m/%Y")
     status_label = "encerrado" if payload.status == "closed" else "em aberto"
-    lines = [
-        f"Resumo de {log_date} ({status_label}):",
-        (
-            f"Consumidas: {int(totals['kcal_in'])} kcal · "
-            f"Gastas: {int(totals['kcal_out'])} kcal · "
-            f"Saldo: {int(totals['kcal_balance'])} kcal."
-        ),
-        (
-            f"Macros — P {int(totals['protein_g'])}g · "
-            f"C {int(totals['carbs_g'])}g · G {int(totals['fat_g'])}g · "
-            f"Fib {int(totals['fiber_g'])}g."
-        ),
-        (
-            f"Água {int(totals['water_ml'])} ml · "
-            f"Outros líquidos {int(totals['other_liquids_ml'])} ml."
-        ),
-    ]
+
+    header = f"Resumo de {log_date_str} ({status_label})."
+    totals_table = message_formatter._daily_totals_table(snap, payload.date, approx)
+
+    parts = [header, "", totals_table, "", _DISCLAIMER]
     if payload.warnings:
-        lines.append(f"Ainda há {len(payload.warnings)} itens que podem ser confirmados.")
-    lines.append(_DISCLAIMER)
-    return "\n".join(lines)
+        n = len(payload.warnings)
+        parts.append("")
+        parts.append(
+            "**Confirma estes itens?** — "
+            + f"{n} {'item ainda pode ser confirmado' if n == 1 else 'itens ainda podem ser confirmados'}."
+        )
+    return "\n".join(parts)
 
 
 _CLARIFY_TEMPLATES = {

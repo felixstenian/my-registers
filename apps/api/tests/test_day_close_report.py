@@ -585,6 +585,60 @@ async def test_query_day_intent_returns_totals_via_chat(
         m for m in (await db_session.execute(select(Message))).scalars() if m.role == "assistant"
     )
     assert assistant.llm_intent == "query_day"
-    # 238 kcal aparece no resumo (int truncado).
-    assert "238" in assistant.content
+    # SP-118/SP-90: resposta em formato tabular padrão.
+    assert "Resumo de" in assistant.content
+    assert "(em aberto)" in assistant.content
+    # Tabela `Total acumulado — DD/MM/YYYY` presente.
+    assert "**Total acumulado —" in assistant.content
+    assert "| Indicador | Total |" in assistant.content
+    # 238 kcal aparece na linha da tabela (int truncado).
+    assert "238 kcal" in assistant.content
     assert DISCLAIMER in assistant.content
+
+
+async def test_query_day_shows_approx_when_pending_items(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """SP-118: se houver food_items com needs_confirmation, as linhas
+    nutricionais viram `≈ N kcal`."""
+    await _seed(db_session)
+    dl = await _day_log(db_session, admin_user)
+    # Cria item com nome que não bate no catálogo → needs_confirmation=True.
+    await _create_food(
+        db_session,
+        admin_user,
+        dl.id,
+        "sushi ninja",
+        "sushi_ninja_desconhecido",
+        200,
+    )
+    await DailyRecomputeService(db_session).recompute(dl.id)
+    await db_session.commit()
+
+    await _login(client)
+    fake_anthropic.queue(
+        make_llm_result(
+            make_envelope(
+                intent="query_day",
+                confidence=0.9,
+                user_text_summary=".",
+                needs_clarification=False,
+            )
+        )
+    )
+    await client.post("/chat/messages", json={"text": "qual o resumo do dia?"})
+
+    assistant = next(
+        m
+        for m in (await db_session.execute(select(Message))).scalars()
+        if m.role == "assistant" and m.llm_intent == "query_day"
+    )
+    # Linha nutricional marcada como aproximada.
+    assert "≈" in assistant.content
+    # Bloco de warnings menciona quantos itens.
+    assert "Confirma estes itens" in assistant.content
