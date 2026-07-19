@@ -61,6 +61,7 @@ from app.services.intent_dispatcher import (
 )
 from app.services.meal import MealResult, MealService
 from app.services.profile import ProfileService, ProfileUpdateResult
+from app.services.weekly_report import WeeklyReportService
 
 logger = logging.getLogger("app.message_processor")
 
@@ -148,6 +149,10 @@ class MessageProcessor:
         # SP-90..92 consulta do dia por chat.
         if result.envelope.intent == "query_day":
             return await self._handle_query_day(user_message, result)
+
+        # SP-110..113 resumo semanal por chat.
+        if result.envelope.intent == "weekly_summary":
+            return await self._handle_weekly_summary(user_message, result)
 
         try:
             dispatch = self.dispatcher.dispatch(result.envelope)
@@ -559,6 +564,45 @@ class MessageProcessor:
             tokens_output=result.tokens_output,
         )
 
+    async def _handle_weekly_summary(self, user_message: Message, result: LLMCallResult) -> Message:
+        envelope = result.envelope
+        if envelope is None:
+            return await self._record_error(user_message, result)
+
+        user = await self.session.get(User, user_message.user_id)
+        if user is None:
+            return await self._record_error(user_message, result)
+
+        outcome = await WeeklyReportService(self.session, anthropic=self.anthropic).generate(
+            user=user, message_id=user_message.id
+        )
+        report = outcome.report
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "weekly_summary",
+            "report_id": str(report.id),
+            "window_start": (report.window_start.isoformat() if report.window_start else None),
+            "window_end": (report.window_end.isoformat() if report.window_end else None),
+            "days_included": report.days_included,
+            "reused": outcome.reused,
+            "version": report.version,
+        }
+        content = _compose_weekly_summary(report)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="weekly_summary",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
     async def _record_clarify(
         self,
         user_message: Message,
@@ -847,6 +891,24 @@ def _compose_activity_summary(activity: ActivityResult, recompute: RecomputeResu
     lines.append(_totals_line(recompute.snapshot))
     lines.append(_DISCLAIMER)
     return "\n".join(lines)
+
+
+def _compose_weekly_summary(report) -> str:
+    """SP-110/113: cabeçalho curto + narrative (que já traz o disclaimer)."""
+    if report.days_included == 0:
+        head = (
+            "Ainda não há dias encerrados para gerar um resumo semanal. "
+            'Encerre um dia primeiro ("encerrar dia") e tente de novo.'
+        )
+    else:
+        start = report.window_start.strftime("%d/%m") if report.window_start else "?"
+        end = report.window_end.strftime("%d/%m") if report.window_end else "?"
+        head = (
+            f"Resumo semanal ({start} → {end}) com {report.days_included} "
+            f"{'dia' if report.days_included == 1 else 'dias'} encerrados."
+        )
+    body = report.narrative or ""
+    return f"{head}\n\n{body}".strip()
 
 
 def _compose_confirmation_summary(outcome: ConfirmationResult) -> str:

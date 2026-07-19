@@ -230,9 +230,9 @@ async def test_validation_exhausted_treated_as_error(
     "intent",
     # log_food (Fase 4), log_water/log_beverage/log_activity (Fase 5),
     # correct_record/delete_record (Fase 6), query_day/close_day
-    # (Fase 7) foram implementados. Ficam aqui apenas os que ainda
-    # dependem de fases futuras.
-    ["weekly_summary"],
+    # (Fase 7), weekly_summary (Fase 8) foram implementados. Ficam aqui
+    # apenas os que ainda dependem de fases futuras.
+    ["log_nutrition_label"],
 )
 async def test_not_implemented_intents_fall_back_to_reformulation(
     client: AsyncClient,

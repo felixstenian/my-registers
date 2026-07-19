@@ -12,6 +12,7 @@ from app.models.nutrient_fact import NutrientFact
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.models.water_record import WaterRecord
+from app.models.weekly_report import WeeklyReport
 
 __all__ = [
     "ActivityRecord",
@@ -28,4 +29,5 @@ __all__ = [
     "RefreshToken",
     "User",
     "WaterRecord",
+    "WeeklyReport",
 ]

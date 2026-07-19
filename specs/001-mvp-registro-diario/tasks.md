@@ -168,17 +168,17 @@ Meta: fechar o dia por chat, gerar narrative sobre totais calculados.
 
 ---
 
-## Fase 8 — Relatório semanal
+## Fase 8 — Relatório semanal ✅
 
 Meta: janela dos últimos 7 dias encerrados com totais, médias e narrative.
 
-- [ ] **T-801** — Migration `weekly_reports`. (S)
-- [ ] **T-802** — `WeeklyReportService.generate(user)`: seleciona 7 dias fechados mais recentes, agrega SQL, gera narrative, upsert por `(user_id, window_start, window_end)`. (M) — SP-110, SP-111, SP-112, SP-113, INV-8.
-- [ ] **T-803** — `GET /weekly` + dispatcher `weekly_summary`. (S)
-- [ ] **T-804** — Frontend `/weekly` com tabela cronológica. (M) — SP-113.
-- [ ] **T-805** — Testes: SP-110 a SP-113, INV-8. (M) — gate.
+- [x] **T-801** — Migration `0007_weekly_reports.py`: `weekly_reports` com `totals`/`averages`/`per_day`/`warnings`/`snapshot_versions` JSONB, `UNIQUE(user_id, window_start, window_end)`, trigger `set_updated_at`. `window_start`/`window_end` nullable para permitir report transiente quando o usuário ainda não fechou nenhum dia. (S)
+- [x] **T-802** — `WeeklyReportService.generate(user)`: seleciona até 7 dias fechados mais recentes, agrega totals/averages sobre `daily_snapshots`, ordena `per_day` ASC (SP-113), reusa row existente se `snapshot_versions` bater (SP-112), gera narrativa via `AnthropicClient.call_weekly_narrative` (T-802) e concatena disclaimer. Upsert por `(user_id, window_start, window_end)`. Sem dias fechados → devolve report transiente com warning `insufficient_history` (não persiste). (M) — SP-110, SP-111, SP-112, SP-113, INV-8.
+- [x] **T-803** — `GET /weekly` + dispatcher `weekly_summary`. Rota registra a rota `weekly.router` no `main.py`; `MessageProcessor._handle_weekly_summary` roteia o intent para o `WeeklyReportService`. `IntentDispatcher` removeu `weekly_summary` de `_STRUCTURED_INTENTS`. (S)
+- [ ] **T-804** — Frontend `/weekly` com tabela cronológica. (M) — SP-113. **Deferred** para PR de UI separada (padrão das Fases 4-7).
+- [x] **T-805** — `tests/test_weekly_report.py` (14 casos): SP-110 (empty + <7 + 9→7), SP-111 (totais determinísticos + LLM lies ignoradas), SP-112 (2ª call reusa mesmo id + version bump quando snapshot muda), SP-113 (per_day ordenado ASC), INV-8 (open days ignorados), disclaimer sempre presente, endpoint `GET /weekly`, chat via intent `weekly_summary`, chat sem dias fechados, isolamento cross-user. (M) — gate.
 
-**Gate Fase 8:** semanal funcional; agrega apenas dias fechados.
+**Gate Fase 8 — cumprido:** semanal funcional; agrega apenas dias fechados (INV-8). Const. Art. II §5 (LLM não soma), §10 (recompute), §26 (disclaimer), §30 (janela 7 dias). Frontend permanece para PR separada.
 
 ---
 

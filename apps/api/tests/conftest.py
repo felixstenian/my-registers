@@ -184,6 +184,9 @@ class FakeAnthropicClient:
         # Fase 7: fila separada para `call_narrative` (T-702).
         self.narratives: list = []
         self.narrative_calls: list[dict] = []
+        # Fase 8: fila separada para `call_weekly_narrative` (T-802).
+        self.weekly_narratives: list = []
+        self.weekly_narrative_calls: list[dict] = []
 
     def queue(self, result) -> None:
         self.results.append(result)
@@ -230,6 +233,23 @@ class FakeAnthropicClient:
             tokens_output=0,
             model=self.model,
             prompt_version="narrative_v1",
+            error=None if text else "empty_narrative",
+        )
+
+    def queue_weekly_narrative(self, text: str | None) -> None:
+        self.weekly_narratives.append(text)
+
+    async def call_weekly_narrative(self, totals_payload):
+        from app.integrations.anthropic.client import NarrativeResult
+
+        self.weekly_narrative_calls.append({"totals_payload": totals_payload})
+        text = self.weekly_narratives.pop(0) if self.weekly_narratives else None
+        return NarrativeResult(
+            text=text,
+            tokens_input=0,
+            tokens_output=0,
+            model=self.model,
+            prompt_version="weekly_narrative_v1",
             error=None if text else "empty_narrative",
         )
 
