@@ -34,6 +34,10 @@ class MessageOut(BaseModel):
     llm_confidence: Decimal | None = None
     media: list[MediaRef] = Field(default_factory=list)
     created_at: datetime
+    # SP-33: quando `llm_intent='log_nutrition_label'`, o cliente usa este
+    # campo para renderizar o cartão de confirmação inline com botão que
+    # chama `PATCH /nutrient-facts/{id}`.
+    nutrient_fact_id: uuid.UUID | None = None
 
 
 class MessagesListResponse(BaseModel):

@@ -226,43 +226,14 @@ async def test_validation_exhausted_treated_as_error(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "intent",
-    # log_food (Fase 4), log_water/log_beverage/log_activity (Fase 5),
-    # correct_record/delete_record (Fase 6), query_day/close_day
-    # (Fase 7), weekly_summary (Fase 8) foram implementados. Ficam aqui
-    # apenas os que ainda dependem de fases futuras.
-    ["log_nutrition_label"],
-)
-async def test_not_implemented_intents_fall_back_to_reformulation(
-    client: AsyncClient,
-    admin_user,
-    fake_anthropic,
-    make_envelope,
-    make_llm_result,
-    db_session: AsyncSession,
-    intent: str,
-):
-    await _login(client)
-    envelope = make_envelope(
-        intent=intent,
-        confidence=0.9,
-        user_text_summary="Registro estruturado (Fase futura).",
-    )
-    fake_anthropic.queue(make_llm_result(envelope))
+# Todos os intents estruturados estão implementados após Fase 4.b.
+# Deixamos o placeholder abaixo (skipado) para lembrar o padrão caso um
+# novo intent apareça e ainda esteja pendente.
 
-    resp = await client.post("/chat/messages", json={"text": f"testando {intent}"})
-    assert resp.status_code == 202
 
-    assistant = next(
-        m
-        for m in list((await db_session.execute(select(Message))).scalars())
-        if m.role == "assistant"
-    )
-    assert assistant.llm_intent == intent
-    assert "não está disponível" in assistant.content
-    raw = assistant.raw_llm_response
-    assert raw and raw["dispatch"] == {"not_implemented": intent}
+@pytest.mark.skip(reason="nenhum structured intent pendente após Fase 4.b")
+async def test_not_implemented_intents_fall_back_to_reformulation():  # pragma: no cover
+    ...
 
 
 # ---------------------------------------------------------------------------
