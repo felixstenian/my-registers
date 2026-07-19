@@ -25,8 +25,6 @@ from app.integrations.anthropic.client import (
     _compress_image,
 )
 
-pytestmark = pytest.mark.asyncio
-
 
 def _big_png_bytes(size=(2500, 1800)) -> bytes:
     img = Image.new("RGB", size, color=(200, 100, 50))
@@ -141,6 +139,7 @@ def test_router_no_fallback_configured_falls_back_to_primary():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_call_logs_cache_metrics(caplog: pytest.LogCaptureFixture):
     """Após a chamada, um log estruturado deve conter os campos de cache."""
     c = _client()
@@ -188,6 +187,7 @@ async def test_call_logs_cache_metrics(caplog: pytest.LogCaptureFixture):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_default_max_semantic_retries_is_1():
     """Antes eram 2 retries. Agora 1 — economiza tokens no pior caso."""
     from inspect import signature
