@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.middleware import RequestContextMiddleware
-from app.api.routes import auth, chat, days, health, media, records, weekly
+from app.api.routes import auth, chat, days, health, media, nutrient_facts, records, weekly
 from app.core.config import get_settings
 from app.core.exceptions import AppError
 from app.core.logging import configure_logging
@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(records.router)
     app.include_router(days.router)
     app.include_router(weekly.router)
+    app.include_router(nutrient_facts.router)
 
     @app.exception_handler(AppError)
     async def handle_app_error(_: Request, exc: AppError) -> JSONResponse:

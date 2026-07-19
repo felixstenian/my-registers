@@ -61,6 +61,7 @@ from app.services.intent_dispatcher import (
     IntentDispatcher,
     IntentNotImplemented,
 )
+from app.services.label_catalog import LabelCatalogService, LabelResult
 from app.services.meal import MealResult, MealService
 from app.services.profile import ProfileService, ProfileUpdateResult
 from app.services.weekly_report import WeeklyReportService
@@ -155,6 +156,10 @@ class MessageProcessor:
         # SP-110..113 resumo semanal por chat.
         if result.envelope.intent == "weekly_summary":
             return await self._handle_weekly_summary(user_message, result)
+
+        # SP-30..35 cadastro de produto por foto de rótulo.
+        if result.envelope.intent == "log_nutrition_label":
+            return await self._handle_nutrition_label(user_message, result)
 
         try:
             dispatch = self.dispatcher.dispatch(result.envelope)
@@ -590,6 +595,87 @@ class MessageProcessor:
             tokens_output=result.tokens_output,
         )
 
+    async def _handle_nutrition_label(
+        self, user_message: Message, result: LLMCallResult
+    ) -> Message:
+        envelope = result.envelope
+        if envelope is None or envelope.nutrition_label is None:
+            return await self._record_error(user_message, result)
+
+        user = await self.session.get(User, user_message.user_id)
+        if user is None:
+            return await self._record_error(user_message, result)
+
+        # SP-30: `label_media_id` = a primeira mídia da user message, se houver.
+        label_media_id = await self._first_media_id(user_message.id)
+
+        service = LabelCatalogService(self.session)
+        label_result = await service.upsert_from_label(
+            user=user,
+            label=envelope.nutrition_label,
+            label_media_id=label_media_id,
+            message_id=user_message.id,
+        )
+
+        # SP-31: se `also_consumed`, cria food_record + food_item + recompute.
+        recompute = None
+        consumed_item = None
+        if envelope.nutrition_label.also_consumed is not None:
+            if user_message.day_log_id is None:
+                # Sem day_log não dá para registrar consumo — retorna só o cadastro.
+                pass
+            else:
+                _, item = await service.register_consumption(
+                    user=user,
+                    day_log_id=user_message.day_log_id,
+                    message_id=user_message.id,
+                    fact=label_result.fact,
+                    consumed=envelope.nutrition_label.also_consumed,
+                    meal_slot=envelope.meal_slot or "unspecified",
+                )
+                consumed_item = item
+                recompute = await DailyRecomputeService(self.session).recompute(
+                    user_message.day_log_id
+                )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "log_nutrition_label",
+            "nutrient_fact_id": str(label_result.fact.id),
+            "verified_by_user": label_result.fact.verified_by_user,
+            "warnings": label_result.warnings,
+        }
+        if consumed_item is not None:
+            raw["dispatch"]["consumed_item_id"] = str(consumed_item.id)
+        if recompute is not None:
+            raw["dispatch"]["snapshot_version"] = recompute.snapshot.version
+
+        content = _compose_label_summary(
+            envelope.nutrition_label, label_result, consumed_item, recompute
+        )
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="log_nutrition_label",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _first_media_id(self, message_id: uuid.UUID) -> uuid.UUID | None:
+        stmt = (
+            select(MessageMedia.media_id)
+            .where(MessageMedia.message_id == message_id)
+            .order_by(MessageMedia.media_id)
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def _handle_weekly_summary(self, user_message: Message, result: LLMCallResult) -> Message:
         envelope = result.envelope
         if envelope is None:
@@ -917,6 +1003,60 @@ def _compose_activity_summary(activity: ActivityResult, recompute: RecomputeResu
     lines.append(_totals_line(recompute.snapshot))
     lines.append(_DISCLAIMER)
     return "\n".join(lines)
+
+
+def _compose_label_summary(
+    label,
+    label_result: LabelResult,
+    consumed_item,
+    recompute,
+) -> str:
+    """SP-30/31: cabeçalho do cadastro + consumo opcional + disclaimer."""
+    fact = label_result.fact
+    brand = f" ({label.brand})" if label.brand else ""
+    lines: list[str] = [
+        f"Cadastrei o produto {label.product_name}{brand} com base no rótulo.",
+    ]
+    if fact.kcal is not None:
+        lines.append(
+            f"Valores por 100{'g' if fact.basis == 'per_100g' else 'ml'}: "
+            f"{int(fact.kcal)} kcal · P {_maybe_int(fact.protein_g)}g · "
+            f"C {_maybe_int(fact.carbs_g)}g · G {_maybe_int(fact.fat_g)}g."
+        )
+    if label_result.warnings:
+        micros = next(
+            (w for w in label_result.warnings if w["code"] == "micros_missing_for_product"),
+            None,
+        )
+        if micros:
+            lines.append(
+                "Cálcio, ferro e potássio não vieram no rótulo — aparecerão como "
+                "zerados nos totais até você preencher no cartão."
+            )
+    lines.append(
+        "Confirme os valores no cartão abaixo (ou peça para eu ajustar) — "
+        "isso melhora a precedência do catálogo quando o mesmo produto for lido de novo."
+    )
+    if consumed_item is not None and recompute is not None:
+        lines.append("")
+        amount = _amount_label(
+            consumed_item.grams,
+            consumed_item.ml,
+            consumed_item.quantity,
+            consumed_item.unit,
+        )
+        lines.append(
+            f"Consumo registrado: {consumed_item.detected_name} — {amount}."
+        )
+        lines.append(_totals_line(recompute.snapshot))
+    lines.append(_DISCLAIMER)
+    return "\n".join(lines)
+
+
+def _maybe_int(value) -> str:
+    if value is None:
+        return "0"
+    return str(int(value))
 
 
 def _compose_weekly_summary(report) -> str:

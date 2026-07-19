@@ -103,19 +103,19 @@ Status: **done** (branch `feat/fase-4-food-registry`). 79 testes verdes (28 novo
 
 ---
 
-## Fase 4.b — Leitura de tabela nutricional
+## Fase 4.b — Leitura de tabela nutricional ✅
 
 Meta: cadastrar produtos via foto de rótulo; opcionalmente registrar consumo na mesma mensagem.
 
-- [ ] **T-421** — Migration acrescentando `barcode`, `label_media_id`, `verified_by_user` a `nutrient_facts`; source enum recebe `label_ocr`. (S) — SP-30, SP-35.
-- [ ] **T-422** — Atualizar prompt para v2 + schema `NutritionLabelIn` (regras 16-18 do plano §8.3). (S) — SP-30 a SP-32. Ver `app_plan.md` §8.
-- [ ] **T-423** — `app/services/label_catalog.py`: `upsert_from_label`. Normaliza `per_serving` → `per_100g|ml` deterministicamente. Nunca sobrescreve `TBCA_2023`. Bloqueia sem `serving_size_*` se `basis='per_serving'`. (M) — SP-30, SP-32, SP-35. `blocked_by: T-421`.
-- [ ] **T-424** — `IntentDispatcher` roteia `log_nutrition_label`. Se `also_consumed` presente: chama `MealService` reusando `catalog_ref_id`. (S) — SP-31. `blocked_by: T-423, T-405`.
-- [ ] **T-425** — `PATCH /nutrient-facts/{id}` para confirmar/editar valores, seta `verified_by_user=true`. (S) — SP-33.
-- [ ] **T-426** — Frontend: cartão de confirmação inline no chat com botão "Confirmar" que chama `PATCH`. (M) — SP-33 UI. `blocked_by: T-425`.
-- [ ] **T-427** — Testes: SP-30 a SP-35, precedência de lookup, `warnings` com micros ausentes (SP-34). (M) — gate.
+- [x] **T-421** — Migration acrescentando `barcode`, `label_media_id`, `verified_by_user` a `nutrient_facts`; source enum já inclui `label_ocr`. **Já entregue na Fase 4 (migration 0003)** — sem migration nova.
+- [x] **T-422** — Prompt `system_v2.md` já traz regras 16-18 para `log_nutrition_label` + `NutritionLabelIn` no `app/schemas/llm.py`. **Já entregue na Fase 3**.
+- [x] **T-423** — `app/services/label_catalog.py::LabelCatalogService.upsert_from_label`. Escala `per_serving` (via `serving_size_g|ml`) para `per_100g|ml` deterministicamente. Idempotência: mesmo `barcode` (ou `canonical_name`+`brand`) → UPDATE. `verified_by_user=true` nunca é rebaixado por reupload. Warning `micros_missing_for_product` quando Ca/Fe/K nulls (SP-34). (M) — SP-30, SP-32, SP-34.
+- [x] **T-424** — `MessageProcessor._handle_nutrition_label`. Se `also_consumed` presente: `LabelCatalogService.register_consumption` cria `food_record` + `food_item` apontando pro fact recém-criado + dispara recompute. `IntentDispatcher._STRUCTURED_INTENTS` fica vazio. (M) — SP-31.
+- [x] **T-425** — `PATCH /nutrient-facts/{id}` (`app/api/routes/nutrient_facts.py`). Rejeita fatos com `source='TBCA_2023'` ou `USDA_FDC` (não editáveis) com 422 `not_editable`. Sempre marca `verified_by_user=true`, mesmo sem valor novo (confirmação implícita). Audit event `action='update'`, `actor='user'`. (S) — SP-33.
+- [x] **T-426** — Frontend: `MessageOut` expõe `nutrient_fact_id`; botão "Confirmar cadastro do produto" aparece só sob assistant messages com `llm_intent='log_nutrition_label'`. Após clique vira "Confirmado ✓" (state local; refresh mostra novos cards se houver). (S) — SP-33 UI.
+- [x] **T-427** — `tests/test_label_catalog.py` (17 casos): upsert cria + idempotência por barcode + preserva `verified` no reupload; normalização `per_serving` 34g → per_100g; `per_serving` sem serving_size rejeitado no schema; `micros_missing_for_product` emitido/omisso; `also_consumed` cria food_record; `PATCH` marca verified + audit; PATCH rejeita TBCA/USDA; PATCH 404; precedência de lookup TBCA vs label_ocr; `MessageOut.nutrient_fact_id` populado só quando aplicável. (M) — gate.
 
-**Gate Fase 4.b:** upload de foto de rótulo cadastra produto reutilizável; consumo opcional funciona; precedência TBCA > label_ocr enforced.
+**Gate Fase 4.b — cumprido:** upload de foto de rótulo cadastra produto reutilizável; consumo opcional funciona; precedência TBCA > label_ocr respeitada; usuário confirma via UI. Const. Art. II §5 (LLM só interpreta), §22 (audit), §35 (precedência).
 
 ---
 
@@ -196,6 +196,21 @@ Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 - [ ] **T-908** — Deploy real numa VPS de staging; smoke test manual do cenário-âncora. (L) — gate MVP.
 
 **Gate Fase 9:** MVP em produção; §19 do plano (critérios de aceite) todos verdes.
+
+---
+
+## Bloco 1 — Composer/envio (chat quality-of-life) ✅
+
+Meta: melhorar UX do compositor de mensagens no `/chat`. Todas SPs `may` (pós-MVP), zero impacto no backend.
+
+- [x] **T-B101** — SP-15: `Enter` envia, `Shift+Enter` quebra linha, tecla é ignorada durante envio em curso ou compositor vazio. Considera composição IME (`event.nativeEvent.isComposing`).
+- [x] **T-B102** — SP-16: `capture="environment"` no `<input type="file">` para sugerir câmera traseira no mobile (ignorado em desktop, comportamento continua sendo file picker).
+- [x] **T-B103** — SP-17: cap client-side de 4 anexos com feedback por nome. `mergeFiles(incoming, mode)` — `replace` para o input file, `append` para drop. Nomes excedentes listados em bloco de erro amigável.
+- [x] **T-B104** — SP-18: erros por-arquivo (`file_too_large`, `invalid_image`, `unsupported_media_type`, `empty_upload`) traduzidos para pt-BR com o nome do arquivo. Batch de upload não aborta por causa de um item — anexos válidos continuam. Compositor não perde o texto digitado. Cap de 8 MB validado também no `mergeFiles` (client-side) para feedback imediato antes do upload.
+- [x] **T-B105** — SP-19: drag-and-drop com feedback visual (borda tracejada + fundo), contador de dragenter/leave para evitar flicker. Aplica mesmas regras de MIME/cap.
+- [x] **T-B106** — Lista de chips por arquivo com botão remover (`×`) e reset do `input.value` após seleção para permitir re-selecionar o mesmo arquivo.
+
+**Gate Bloco 1 — cumprido:** `pnpm typecheck` verde; smoke manual (Felix) das cinco SPs.
 
 ---
 
