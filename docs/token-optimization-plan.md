@@ -31,7 +31,7 @@ ephemeral (5 min TTL), reduzindo custo em ~90% desse pedaço nas mensagens
 seguidas. Onde **não funciona**: imagens (não são cacheáveis) e texto novo
 do usuário.
 
-## Tier 1 — Fazer nas próximas fases (alto impacto, baixo esforço)
+## Tier 1 — Fazer nas próximas fases (alto impacto, baixo esforço) ✅
 
 ### 1. Confirmar que o prompt caching está *realmente* dando cache hit
 
