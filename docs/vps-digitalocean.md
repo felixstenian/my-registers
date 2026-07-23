@@ -465,7 +465,41 @@ Off-VPS (rclone → B2 Backblaze): ~$0.005/GB/mês. Se seus dumps ficam
 
 ---
 
-## 19. Debug do primeiro deploy
+## 19. Radiografia rápida (script de saúde)
+
+Depois de subir, rode a qualquer momento pra ver como a VPS está indo:
+
+```bash
+./scripts/vps-check.sh
+```
+
+O script faz um dashboard em <5s cobrindo:
+
+- **Capacidade** — CPU load, RAM (com swap), disco raiz + footprint do Docker.
+- **Containers** — estado + health de nginx, api, web, postgres, minio, certbot.
+- **Endpoints** — `GET /api/health` no localhost e via `$DOMAIN` público.
+- **Backups** — idade e tamanho do último dump do Postgres e do último
+  espelho do MinIO. Alarme se > 30h; falha se > 48h.
+- **TLS** — dias até expirar o cert (alerta em 14d, falha em 5d).
+- **LLM (últimas 24h)** — quantas mensagens caíram no fallback
+  "Não consegui interpretar…". Ajuda a pegar regressões cedo.
+
+Saída colorida com `✓ / ! / ✗`, exit code `0`/`1`/`2` (bom pra plugar em
+healthchecks.io como check secundário, ou usar num cron semanal).
+
+Thresholds configuráveis via env (ex.: `MEM_WARN_PCT=90 ./scripts/vps-check.sh`).
+
+Sinais que valem upgrade do droplet:
+- **CPU load** com WARN sustentado por > 1 semana.
+- **Memória RAM** em WARN + swap ativo.
+- **Disco** em WARN e crescendo mais que 5% ao mês (fotos acumulando).
+
+Se aparecer, considera pular pro plano $18/mês (2 vCPU / 2 GB) ou
+$24/mês (2 vCPU / 4 GB). Resize a quente na DO leva ~5 min.
+
+---
+
+## 20. Debug do primeiro deploy
 
 Se `https://app.seudominio.com` não abrir:
 
@@ -500,9 +534,10 @@ Erros comuns:
 
 ---
 
-## 20. Referências
+## 21. Referências
 
 - Runbook geral (não-DO): `docs/deploy.md`.
 - Certbot: `infra/certbot/README.md`.
 - Compose de produção: `docker-compose.production.yml`.
 - Checklist §16 de segurança: `docs/deploy.md` §12.
+- Script de saúde: `scripts/vps-check.sh`.

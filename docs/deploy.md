@@ -120,6 +120,11 @@ sudo crontab -e -u felix
 
 Se o backend cair, healthchecks.io alerta por email/Telegram em 10 min.
 
+**Complementar com o script local `scripts/vps-check.sh`:** roda em <5s e
+cobre load/RAM/disco/containers/backups/TLS/fallbacks do LLM. Bom pra
+`crontab` semanal ou pra dar `./scripts/vps-check.sh` no SSH sempre que
+quiser um radar rápido do estado da VPS.
+
 ## 10. Deploy de novas versões
 
 ```bash
