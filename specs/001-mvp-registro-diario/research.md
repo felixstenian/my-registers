@@ -226,6 +226,42 @@ Alternativas descartadas: com motivo objetivo.
 
 ---
 
+## ADR-012 — CI/CD com GitHub Actions em duas etapas (validação em PR + deploy SSH em merge)
+
+**Status:** accepted
+**Data:** 2026-07-26
+
+**Contexto.** MVP foi entregue sem pipeline automatizado (Fase 9 fechada). Deploy é manual via SSH + `git pull` + `docker compose up -d`. Enquanto Felix é o único dev/operador, o custo do manual é baixo (~30s por deploy, controle total). Isso deixa de escalar se: (a) um segundo colaborador entrar; (b) frequência de deploy passar de ~2/semana; (c) algum teste local for esquecido antes de mergear e quebrar produção. A pergunta é qual pipeline adotar quando um desses gatilhos disparar.
+
+**Decisão.** Quando o momento chegar, adotar **GitHub Actions em dois workflows separados**:
+
+1. **`ci.yml`** — dispara em `pull_request` para `dev` e `main`. Sobe Postgres 16 como service, roda `uv sync`, `uv run ruff check`, `uv run pytest -q`, `pnpm --filter web typecheck`. Gate para merge (branch protection).
+2. **`deploy.yml`** — dispara em `push` para `main`. Faz SSH numa chave `deploy-only` da VPS (sem sudo, restrita a `~/my-registers/`), roda `git pull && ./scripts/bootstrap.sh .env.production && docker compose -f docker-compose.production.yml --env-file .env.production up -d api web`.
+
+**Consequências.**
+- ✔ CI é grátis pra repo público, ~2000 min/mês grátis pra privado — nosso build é ~2-3 min, cabe folgado.
+- ✔ Deploy fica auditável (`gh run list --workflow=deploy.yml`).
+- ✔ Chave SSH restrita à conta e ao subcomando esperado (via `command="..."` no `authorized_keys`).
+- ✔ Rollback: `git revert` + merge — pipeline reroda com o hash anterior.
+- ✘ Dependência de GitHub disponível pra deployar. Se GitHub cair, deploy manual continua funcionando (script `bootstrap.sh` é o mesmo).
+- ✘ Segredo `ANTHROPIC_API_KEY` **NÃO** vai como Secret do Actions — fica só no `.env.production` da VPS. O deploy nunca reescreve `.env.production`; se precisar rotacionar segredo, edição manual seguida de `docker compose up -d` (o script bootstrap não toca em vars).
+
+**Alternativas descartadas.**
+- **Webhook + agente na VPS.** Precisa manter um daemon receptor, autenticar payload do GitHub, tratar retries — sem benefício sobre SSH direto.
+- **Watchtower** (polla registry e atualiza containers). Elegante mas requer publicar imagens no GHCR a cada merge (2 imagens, ~150 MB + 300 MB), adicionando etapa de build+push no CI e crescimento de storage no registry.
+- **ArgoCD / Flux (GitOps).** Requer Kubernetes; violaria ADR de single-VPS.
+- **Docker Compose `pull` remoto via Docker context.** Precisa docker daemon exposto na VPS (mesmo que via SSH) — resolve o mesmo problema com mais fricção.
+- **Deixar sem CI/CD indefinidamente.** OK enquanto for solo, quebra na primeira vez que um segundo dev abrir PR.
+
+**Não inclui no MVP:**
+- Testes E2E (Playwright) — carga adicional de tempo/manutenção; unit + integration cobrem os invariantes críticos.
+- Signed commits gate — Felix é único committer.
+- Preview environments por PR — infra dedicada, complexo pra 1 dev.
+- Cache de imagens Docker no GHCR — otimização; build de 2 min é aceitável.
+
+---
+
 ## Histórico
 
 - **2026-07-15** — v1.0. 10 ADRs iniciais registrando decisões da Fase 0 e do plano.
+- **2026-07-26** — v1.1. ADR-012 aceito: CI/CD com GitHub Actions em dois workflows (validação em PR + deploy SSH em merge para `main`). Escolha registrada; implementação pendente na Fase 10. (ADR-011 é reservado para o PR de workout-tracking; se este PR mergear primeiro haverá um buraco de numeração até ele.)
