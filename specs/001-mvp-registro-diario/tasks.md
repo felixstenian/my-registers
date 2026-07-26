@@ -182,20 +182,20 @@ Meta: janela dos últimos 7 dias encerrados com totais, médias e narrative.
 
 ---
 
-## Fase 9 — Hardening e deploy
+## Fase 9 — Hardening e deploy ✅ (parcial)
 
 Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 
-- [ ] **T-901** — `docker-compose.production.yml` finalizado (§14 do plano). (S)
-- [ ] **T-902** — `infra/nginx/nginx.conf` + `conf.d/app.conf` com HSTS/CSP. (S)
-- [ ] **T-903** — Certbot webroot + cronjob de renovação. (S)
-- [ ] **T-904** — `scripts/backup-postgres.sh`, `scripts/backup-minio.sh`, `scripts/restore-postgres.sh` testados em dry-run. (M)
-- [ ] **T-905** — `scripts/bootstrap.sh` de deploy (migration + bootstrap idempotentes). (S)
-- [ ] **T-906** — Health check externo (healthchecks.io) + doc. (S)
-- [ ] **T-907** — Checklist de segurança §16 do plano executado; issues abertas para pendências. (M)
-- [ ] **T-908** — Deploy real numa VPS de staging; smoke test manual do cenário-âncora. (L) — gate MVP.
+- [x] **T-901** — `docker-compose.production.yml`: nginx (portas 80/443), certbot loop de renovação, postgres/minio em rede interna, `minio-init` idempotente para bucket, `env_file: .env.production`, healthchecks em todos os serviços, `json-file` logs com rotação (`max-size=10m, max-file=5`). (S)
+- [x] **T-902** — `infra/nginx/nginx.conf` + `conf.d/app.conf` com HSTS (1 ano), CSP mínimo para Next.js + Tailwind, X-Content-Type-Options, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, OCSP stapling, TLSv1.2+ com `HIGH:!aNULL:!MD5`, `client_max_body_size 15m`. (S)
+- [x] **T-903** — `infra/certbot/README.md` com runbook de emissão inicial (staging → prod), instrução de placeholder HTTP pra 1ª emissão, comandos de renovação forçada e debug comum. (S)
+- [x] **T-904** — `scripts/backup-postgres.sh` (pg_dump -Fc + retenção 14d + rclone opcional off-VPS), `scripts/backup-minio.sh` (mc mirror + retenção + rclone), `scripts/restore-postgres.sh` (destrutivo com confirmação de 5s + DRY_RUN flag). Chmod +x aplicado. (M)
+- [x] **T-905** — `scripts/bootstrap.sh`: `alembic upgrade head` + `python -m app.cli bootstrap` idempotentes; valida `.env.production` antes de rodar. INV-6: runtime da API não roda migrations. (S)
+- [x] **T-906** — Health check externo documentado em `docs/deploy.md` §9 (healthchecks.io + cron `*/5 * * * *` fazendo ping do `/api/health`). (S)
+- [x] **T-907** — Checklist de segurança §16 completo em `docs/deploy.md` §12 (13 itens ✅ + 5 itens ainda para operador validar: rclone, fail2ban, unattended-upgrades, docker prune, auditoria de logs). `.gitignore` atualizado com `.env.production`. `.env.production.example` com todas as variáveis de §14.1 do plano. (M)
+- [ ] **T-908** — Deploy real numa VPS de staging; smoke test manual do cenário-âncora. **Pendente** — depende do operador (Felix) provisionar VPS, DNS e rodar o runbook em `docs/deploy.md`.
 
-**Gate Fase 9:** MVP em produção; §19 do plano (critérios de aceite) todos verdes.
+**Gate Fase 9 — parcial:** todos os artefatos de código e docs prontos. Falta apenas a execução do runbook por humano na VPS real (T-908) — não é possível automatizar sem SSH nas máquinas.
 
 ---
 
