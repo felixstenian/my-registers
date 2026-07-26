@@ -1,0 +1,162 @@
+# Ambiente de PRODUÇÃO em VPS. app_plan.md §14.3.
+#
+# Somente `nginx` expõe portas ao host (80/443). Postgres/MinIO ficam na
+# rede interna, sem acesso público. Runtime da API NÃO roda migrations
+# — usar `scripts/bootstrap.sh` antes de subir os serviços (INV-6).
+#
+# Comandos de operação:
+#   cp .env.production.example .env.production && $EDITOR .env.production
+#   ./scripts/bootstrap.sh                    # migrations + admin
+#   docker compose -f docker-compose.production.yml --env-file .env.production up -d
+#   docker compose -f docker-compose.production.yml --env-file .env.production logs -f api
+#
+# Backup:
+#   crontab: veja scripts/backup-postgres.sh e scripts/backup-minio.sh
+#
+# Renovação de cert:
+#   Serviço `certbot` já loopa `certbot renew --webroot` a cada 12h.
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    networks: [web, internal]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  # Renova certificados automaticamente. Para EMITIR pela 1ª vez, veja
+  # infra/certbot/README.md — o container abaixo assume que os certs já
+  # existem em `letsencrypt`.
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    entrypoint: >
+      /bin/sh -c "trap exit TERM;
+      while :; do certbot renew --webroot -w /var/www/certbot --quiet;
+      sleep 12h & wait $${!}; done"
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    networks: [internal]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 3s
+      retries: 6
+    networks: [internal]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  # Bucket é criado uma vez, na primeira subida, e depois o container sai.
+  # Idempotente: `mc mb` retorna erro se já existe (ignoramos via `|| true`).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb -p local/${S3_BUCKET} || true &&
+      mc anonymous set none local/${S3_BUCKET}
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET}
+    networks: [internal]
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    env_file: .env.production
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 6
+    networks: [internal]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    environment:
+      # `/api/*` é reescrito no Nginx para o container `api:8000`. O
+      # frontend só conhece o caminho relativo — nunca vaza URL interna.
+      NEXT_PUBLIC_API_URL: /api
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_ENV: production
+    depends_on:
+      api: { condition: service_healthy }
+    networks: [internal]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+networks:
+  # `web`: para o Nginx conseguir publicar 80/443.
+  web:
+  # `internal`: sem `internal: true` no MVP para permitir que o certbot
+  # webroot resolva DNS + baixe validação. Se a comunicação externa não
+  # for necessária, ligar `internal: true` fecha ainda mais o perímetro.
+  internal:
+
+volumes:
+  pgdata:
+  minio_data:
+  letsencrypt:
+  certbot_www:

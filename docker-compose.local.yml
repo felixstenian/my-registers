@@ -1,0 +1,135 @@
+# Ambiente LOCAL de desenvolvimento.
+# Portas expostas ao host:
+#   3000  -> web (Next.js hot reload)
+#   8000  -> api (FastAPI hot reload)
+#   5432  -> postgres
+#   9000  -> minio S3
+#   9001  -> minio console
+#
+# Fase 0: `alembic upgrade head` roda contra um schema vazio (nenhuma migration
+# criada ainda) e `python -m app.cli bootstrap` é um placeholder idempotente.
+# Ambos passam a fazer trabalho real a partir da Fase 1.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: registers
+      POSTGRES_USER: registers_app
+      POSTGRES_PASSWORD: dev_password
+      TZ: America/Sao_Paulo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registers_app -d registers"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio_dev
+      MINIO_ROOT_PASSWORD: minio_dev_secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data_local:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minio_dev minio_dev_secret &&
+      (mc mb -p local/registers-media || true) &&
+      mc anonymous set none local/registers-media
+      "
+    restart: "no"
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: dev
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://registers_app:dev_password@postgres:5432/registers
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: claude-sonnet-4-6
+      JWT_SECRET: dev-only-secret-do-not-use-in-prod
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: registers-media
+      S3_ACCESS_KEY: minio_dev
+      S3_SECRET_KEY: minio_dev_secret
+      S3_FORCE_PATH_STYLE: "true"
+      DEFAULT_ADMIN_EMAIL: admin@example.com
+      DEFAULT_ADMIN_PASSWORD: adminadmin
+      ALLOWED_ORIGINS: http://localhost:3000
+      TZ: America/Sao_Paulo
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: json
+    volumes:
+      - ./apps/api:/app
+      - api_venv:/app/.venv
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    # `uv sync` na entrada garante que o volume nomeado `api_venv` fique
+    # populado mesmo depois que o bind mount de ./apps/api sobrescreve /app.
+    # É idempotente e cacheado — só reinstala se pyproject.toml mudar.
+    command: >
+      sh -c "
+      uv sync &&
+      uv run alembic -c alembic.ini upgrade head &&
+      uv run python -m app.cli bootstrap &&
+      uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      target: dev
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+      - web_next:/app/.next
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    command: pnpm dev
+
+volumes:
+  pgdata_local:
+  minio_data_local:
+  api_venv:
+  web_node_modules:
+  web_next:

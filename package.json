@@ -1,0 +1,19 @@
+{
+  "name": "my-registers",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "infra:up": "bash scripts/dev-infra.sh",
+    "infra:down": "docker compose -f docker-compose.local.yml down",
+    "infra:reset": "docker compose -f docker-compose.local.yml down -v",
+    "dev:api": "cd apps/api && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:web": "pnpm --filter web dev",
+    "db:migrate": "cd apps/api && uv run alembic -c alembic.ini upgrade head",
+    "db:bootstrap": "cd apps/api && uv run python -m app.cli bootstrap",
+    "build:web": "pnpm --filter web build",
+    "compose:up": "docker compose -f docker-compose.local.yml up --build",
+    "compose:down": "docker compose -f docker-compose.local.yml down"
+  }
+}
+ 

@@ -1,0 +1,307 @@
+"""Aliases pt-BR/EN → canonical activity_type (regressão do bug 0 kcal)."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import ActivityRecord
+from app.schemas.llm import LLMEnvelope
+from app.services.activity import ActivityService
+from app.services.activity_calculator import ActivityCalculator
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("corrida", "cardio_run"),
+        ("Correr", "cardio_run"),
+        ("running", "cardio_run"),
+        ("run", "cardio_run"),
+        ("caminhada", "cardio_walk"),
+        ("walk", "cardio_walk"),
+        ("bicicleta", "bike"),
+        ("ciclismo", "bike"),
+        ("natação", "swim"),
+        ("nadar", "swim"),
+        ("musculação", "strength"),
+        ("academia", "strength"),
+        ("hiit", "cardio"),
+        ("esteira", "cardio"),
+        ("elíptico", "cardio"),
+        ("já_canonical_cardio_run", "ja_canonical_cardio_run"),  # não modifica
+    ],
+)
+def test_canonicalize(raw: str, expected: str):
+    assert ActivityCalculator.canonicalize(raw) == expected
+
+
+def test_lookup_met_accepts_pt_br_alias():
+    """Regressão: LLM manda 'corrida' e obtemos MET 8.3 (moderate)."""
+    assert ActivityCalculator.lookup_met("corrida", "moderate") == Decimal("8.3")
+    assert ActivityCalculator.lookup_met("Corri", "light") == Decimal("6.0")
+    assert ActivityCalculator.lookup_met("caminhada", "moderate") == Decimal("3.8")
+
+
+def test_compute_with_pt_br_activity_type():
+    """Regressão do bug reportado: 40 min corrida moderada + 65 kg → 359.67 kcal."""
+    result = ActivityCalculator.compute(
+        activity_type="corrida",  # pt-BR livre, não canonical
+        intensity="moderate",
+        duration_minutes=Decimal("40"),
+        weight_kg=Decimal("65"),
+    )
+    assert result.kcal_burned == Decimal("359.67")
+    assert result.met_value == Decimal("8.3")
+    assert result.reasons == []
+
+
+@pytest.mark.asyncio
+async def test_activity_service_persists_kcal_when_pt_br_type(db_session: AsyncSession, admin_user):
+    """End-to-end no service: LLM manda activity_type='corrida', service
+    persiste kcal correto (não zero)."""
+    admin_user.weight_kg = Decimal("65")
+    from datetime import UTC, datetime
+
+    from app.repositories.day_log import DayLogRepository
+
+    dl = await DayLogRepository(db_session).get_or_create(
+        user_id=admin_user.id, log_date=datetime.now(UTC).date()
+    )
+    await db_session.commit()
+
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_activity",
+            "confidence": 0.9,
+            "user_text_summary": "Corrida.",
+            "needs_clarification": False,
+            "activity": {
+                "detected_name": "corrida",
+                "activity_type": "corrida",  # pt-BR livre
+                "duration_minutes": 40,
+                "distance_km": None,
+                "intensity": "moderate",
+                "confidence": 0.9,
+            },
+        }
+    )
+    await ActivityService(db_session).create_from_llm(
+        user=admin_user, day_log_id=dl.id, message_id=None, envelope=envelope
+    )
+    await db_session.commit()
+
+    record = (await db_session.execute(select(ActivityRecord))).scalar_one()
+    assert record.kcal_burned == Decimal("359.67")
+    assert record.met_value == Decimal("8.3")
+
+
+# ---------------------------------------------------------------------------
+# Regressão: intensity em pt-BR era rejeitada pelo Literal do Pydantic
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("moderada", "moderate"),
+        ("moderado", "moderate"),
+        ("Moderada", "moderate"),
+        ("MODERADA", "moderate"),
+        ("média", "moderate"),
+        ("leve", "light"),
+        ("baixa", "light"),
+        ("intensa", "vigorous"),
+        ("intenso", "vigorous"),
+        ("forte", "vigorous"),
+        ("alta", "vigorous"),
+        ("vigorosa", "vigorous"),
+        ("pesado", "vigorous"),
+        # canônicos em inglês continuam intactos
+        ("moderate", "moderate"),
+        ("light", "light"),
+        ("vigorous", "vigorous"),
+        ("unknown", "unknown"),
+    ],
+)
+def test_intensity_ptbr_aliases_pass_pydantic(raw: str, expected: str):
+    """Regressão do fallback "Não consegui interpretar sua mensagem agora."
+
+    Antes: LLM emitia `"moderada"` (pt-BR) mesmo com prompt em inglês; o
+    `Literal["light","moderate","vigorous","unknown"]` do Pydantic
+    rejeitava, retry esgotava, e o assistant caía no fallback genérico.
+    Agora o `field_validator(mode="before")` normaliza pt-BR → canônico
+    antes da validação.
+    """
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_activity",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "activity": {
+                "detected_name": "corrida",
+                "activity_type": "cardio_run",
+                "duration_minutes": 40,
+                "distance_km": None,
+                "intensity": raw,
+                "confidence": 0.9,
+            },
+        }
+    )
+    assert envelope.activity is not None
+    assert envelope.activity.intensity == expected
+
+
+def test_intensity_unknown_string_falls_through():
+    """String sem alias conhecido continua sendo rejeitada — não vamos
+    silenciosamente aceitar `"chinelo"` como intensity."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        LLMEnvelope.model_validate(
+            {
+                "intent": "log_activity",
+                "confidence": 0.95,
+                "user_text_summary": ".",
+                "needs_clarification": False,
+                "activity": {
+                    "detected_name": "corrida",
+                    "activity_type": "cardio_run",
+                    "duration_minutes": 40,
+                    "intensity": "chinelo",
+                    "confidence": 0.9,
+                },
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# Regressão: LLM inventa campos extras que causavam validation_exhausted
+# ---------------------------------------------------------------------------
+
+
+def test_activity_in_ignores_extra_fields_from_llm():
+    """LLM tende a inventar `pace`, `heart_rate_avg`, `calories`, etc. Antes
+    do fix, esses campos rejeitavam via `extra="forbid"`, o retry esgotava,
+    e o assistant caía em "Não consegui interpretar sua mensagem agora."
+    Agora extras são silenciosamente descartados."""
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_activity",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "activity": {
+                "detected_name": "corrida",
+                "activity_type": "cardio_run",
+                "duration_minutes": 40,
+                "intensity": "moderate",
+                "confidence": 0.9,
+                # Extras comuns que a LLM emite:
+                "pace": "5:30/km",
+                "heart_rate_avg": 152,
+                "calories": 359,
+                "elevation_gain": 45,
+                "notes": "corrida no parque",
+            },
+        }
+    )
+    assert envelope.activity is not None
+    assert envelope.activity.duration_minutes == 40
+    # Nenhum extra viaja no objeto — só os declarados.
+    assert not hasattr(envelope.activity, "pace")
+    assert not hasattr(envelope.activity, "calories")
+
+
+def test_beverage_in_ignores_extra_fields():
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_beverage",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "beverage": {
+                "detected_name": "café",
+                "volume_ml": 200,
+                "beverage_kind": "other",
+                "confidence": 0.9,
+                # LLM comumente adiciona:
+                "sugars_g": 5.0,
+                "caffeine_mg": 80,
+                "temperature": "quente",
+            },
+        }
+    )
+    assert envelope.beverage is not None
+    assert envelope.beverage.volume_ml == 200
+
+
+def test_food_item_in_ignores_extra_fields():
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_food",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "meal_slot": "lunch",
+            "food_items": [
+                {
+                    "detected_name": "arroz",
+                    "grams_estimate": 150,
+                    "confidence": 0.9,
+                    # LLM às vezes tenta:
+                    "kcal": 186,
+                    "protein_g": 4.5,
+                    "cooking_method": "cozido",
+                }
+            ],
+        }
+    )
+    assert len(envelope.food_items) == 1
+    assert envelope.food_items[0].grams_estimate == 150
+
+
+def test_duration_minutes_accepts_numeric_string():
+    """LLM ocasionalmente emite duração como string. Coerção antes da
+    validação de tipo float."""
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_activity",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "activity": {
+                "detected_name": "corrida",
+                "activity_type": "cardio_run",
+                "duration_minutes": "40",  # string em vez de float
+                "intensity": "moderate",
+                "confidence": 0.9,
+            },
+        }
+    )
+    assert envelope.activity is not None
+    assert envelope.activity.duration_minutes == 40.0
+
+
+def test_duration_minutes_accepts_string_with_unit():
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_activity",
+            "confidence": 0.95,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "activity": {
+                "detected_name": "corrida",
+                "activity_type": "cardio_run",
+                "duration_minutes": "40 min",  # com unidade
+                "intensity": "moderate",
+                "confidence": 0.9,
+            },
+        }
+    )
+    assert envelope.activity is not None
+    assert envelope.activity.duration_minutes == 40.0
