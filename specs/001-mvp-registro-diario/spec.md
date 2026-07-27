@@ -480,6 +480,47 @@ Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push
 
 ---
 
+### 3.13 Progressive Web App (pós-MVP, escopo básico)
+
+Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push (B-05) nem cache de dados de negócio.
+
+**SP-128** (`must`) — Manifest publicado em `/manifest.webmanifest`.
+- Campos obrigatórios: `name`, `short_name` (≤12 chars), `icons` (192, 512, maskable), `theme_color`, `background_color`, `display: standalone`, `start_url: /chat`, `scope: /`, `orientation: portrait`.
+- MIME type correto (`application/manifest+json`) — Next.js já resolve via convenção de arquivo em `src/app/manifest.ts`.
+
+**SP-129** (`must`) — Meta tags para instalação em iOS Safari.
+- `apple-mobile-web-app-capable=yes`, `apple-mobile-web-app-status-bar-style=default`, `apple-mobile-web-app-title=my-registers`, `apple-touch-icon` 180×180.
+- Sem essas tags, iOS Safari não trata a app como instalável em standalone.
+
+**SP-130** (`must`) — Service worker com estratégia por rota.
+- Shell estático (`/_next/static/*`, ícones, manifest, fonts): **cache-first** com revalidação em background.
+- HTML de rotas (`/chat`, `/login`, `/weekly`): **network-first** com fallback pra cache offline.
+- API (`/api/*`): **network-only, nunca cachear.** Ver `INV-11`.
+- Registro no client após hidratação (não bloqueia render inicial).
+
+**SP-131** (`must`) — Assets de ícone em 4 tamanhos mínimos.
+- `192×192` (Android padrão), `512×512` (Android hi-res / splash), `180×180` (apple-touch), `512×512 maskable` (Android adaptativo).
+- Formato PNG. Cor de fundo compatível com `background_color` do manifest.
+
+**SP-132** (`should`) — Update flow visível.
+- Quando SW detecta versão nova disponível (`updatefound` + `installed` state), exibir toast persistente "Nova versão disponível" com botão "Recarregar" que dispara `postMessage({type: 'SKIP_WAITING'})` seguido de `window.location.reload()`.
+- Sem esse fluxo, usuário fica preso em versão antiga até fechar todas as abas.
+
+**SP-133** (`should`) — Botão "Instalar" no header.
+- Escuta `beforeinstallprompt` (Chrome/Edge Android+desktop), guarda evento, exibe botão que chama `.prompt()`.
+- Oculto em navegadores sem o evento (Safari desktop/iOS — nesses, install é via "Adicionar à tela de início" do menu do browser).
+- Após install (`appinstalled` event), botão some.
+
+**SP-134** (`may`) — Splash iOS via `apple-touch-startup-image`.
+- Set mínimo: iPhone SE/8, iPhone 15/16 Pro (3 sizes). iPad opcional.
+- Sem isso, iOS mostra tela branca de ~500ms na abertura standalone.
+
+**SP-135** (`must`) — Comportamento offline previsível.
+- Rota carregada offline (sem cache do dia) exibe página `/offline` com mensagem: "Sem conexão. Algumas ações ficam indisponíveis até você reconectar." + link "Tentar novamente".
+- Aviso legal (Constituição Art. VII §26) presente na `/offline`.
+
+---
+
 ## 4. Requisitos não-funcionais
 
 ### 4.1 Segurança
