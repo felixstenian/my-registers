@@ -244,3 +244,122 @@ Cobrir antes de considerar o MVP "em produção".
 
 Todos esperando o MVP validar o produto antes de investir em complexidade
 extra (Const. §31 — YAGNI).
+
+## 14. CI/CD (Fase 10 — GitHub Actions)
+
+Registrado em **ADR-012** (`specs/001-mvp-registro-diario/research.md`).
+Dois workflows em `.github/workflows/`:
+
+- **`ci.yml`** — dispara em `pull_request` para `dev`/`main`. Dois jobs
+  em paralelo:
+  - `api`: Postgres 16 service + `uv sync` + `ruff check` + `ruff format
+    --check` + `pytest -q`.
+  - `web`: `pnpm install --frozen-lockfile` + `typecheck` + `build`
+    (webpack) + `verify:sw` (garante INV-11).
+- **`deploy.yml`** — dispara ao concluir `ci.yml` com sucesso em `main`.
+  Faz SSH pra VPS usando chave restrita e roda smoke test em
+  `https://$DEPLOY_DOMAIN/api/health`.
+
+### 14.1 Fluxo de trabalho
+
+```
+feature branch → PR pra dev → ci.yml (bloqueante) → merge
+release: dev → PR pra main → ci.yml → merge → deploy.yml → prod
+```
+
+Não há mais `git pull` + `docker compose up -d --build` manual — o
+deploy é feito pelo próprio GitHub Actions ao mergear em `main`.
+
+### 14.2 Configuração da VPS (uma vez só)
+
+**Chave SSH `deploy-only`:**
+
+```bash
+# No seu laptop (não na VPS):
+ssh-keygen -t ed25519 -f ~/.ssh/deploy_myregisters -N "" -C "deploy-only"
+
+# A public key vai pro authorized_keys da VPS com command="..." restringindo
+# o que essa chave pode fazer. NÃO é uma chave shell normal — se você
+# tentar `ssh -i deploy_myregisters felix@vps` interativamente, ele roda
+# o comando de deploy e desconecta.
+DEPLOY_CMD='cd ~/my-registers && git pull && ./scripts/bootstrap.sh .env.production && docker compose -f docker-compose.production.yml --env-file .env.production up -d --build api web'
+
+# Na VPS, como usuário felix:
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+# Prepend `command="…",restrictions` ANTES da chave pública em authorized_keys:
+echo "command=\"$DEPLOY_CMD\",no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-pty $(cat ~/.ssh/deploy_myregisters.pub)" \
+  >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+**Segredos e variáveis no GitHub:**
+
+Repo → Settings → Secrets and variables → Actions.
+
+**Secrets** (criptografados; usados só pelo runner):
+| Nome | Valor |
+|--|--|
+| `DEPLOY_SSH_KEY` | Conteúdo da **private key** (`~/.ssh/deploy_myregisters`, o arquivo sem `.pub`). |
+
+**Variables** (visíveis em logs; ok pra dados não-sensíveis):
+| Nome | Valor exemplo |
+|--|--|
+| `DEPLOY_HOST` | `myregister.felix.dev.br` (ou IP se DNS ainda não propagou) |
+| `DEPLOY_DOMAIN` | `myregister.felix.dev.br` (usado no smoke test HTTPS) |
+
+O `ANTHROPIC_API_KEY`, `POSTGRES_PASSWORD`, etc. **não** vão pro GitHub —
+continuam só em `.env.production` na VPS. Rotação é operação manual no
+host.
+
+**Branch protection em `main`:**
+
+Repo → Settings → Branches → Add rule → `main`:
+- [x] Require a pull request before merging
+- [x] Require status checks to pass before merging:
+  - [x] `api (ruff + pytest)`
+  - [x] `web (typecheck + build)`
+- [x] Require branches to be up to date before merging
+- [x] Require linear history (opcional; evita merge commits noise)
+- [x] Do not allow bypassing the above settings
+
+### 14.3 Debug de deploy que falhou
+
+```bash
+# Lista os últimos runs do deploy.yml:
+gh run list --workflow=deploy.yml --limit 10
+
+# Ver logs do último:
+gh run view --log
+
+# Se o smoke test falhou mas containers estão de pé, o app pode estar
+# funcional — verifique manualmente:
+curl -sSI https://$DOMAIN/api/health
+docker compose -f docker-compose.production.yml --env-file .env.production ps
+```
+
+### 14.4 Rollback
+
+Sem workflow dedicado (evita complexidade). Padrão git:
+
+```bash
+# No laptop, na branch main:
+git revert <hash-que-quebrou>
+git push origin main
+# O deploy.yml roda de novo com o commit anterior.
+```
+
+Se o rollback também depende de banco (migration destrutiva), primeiro
+`alembic downgrade -1` na VPS antes de mergear o revert.
+
+### 14.5 Quando pausar o CD
+
+Situações que exigem override manual:
+- **GitHub Actions fora do ar** — deploy pela via tradicional na VPS:
+  `git pull && ./scripts/bootstrap.sh && docker compose ... up -d --build`.
+- **Mudança urgente em `.env.production`** (rotação de segredo) —
+  editar no host, `docker compose ... up -d --force-recreate <service>`.
+- **Migration não-reversível chegando com bug** — segure o merge em
+  `main`, aplique correção em outro PR, mergeie o combo.
+
+Não desabilite o `deploy.yml` — em vez disso feche a PR ou marque
+com label `do-not-deploy` (comportamento não é impedido, mas sinaliza).
