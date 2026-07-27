@@ -161,10 +161,10 @@ Meta: fechar o dia por chat, gerar narrative sobre totais calculados.
 - [x] **T-701** — `POST /days/{date}/close` idempotente + recompute forçado + snapshot com `warnings` agregados (via `DayCloseService`). (M) — SP-100, SP-101, SP-102.
 - [x] **T-702** — Geração de `narrative` via `AnthropicClient.call_narrative` alimentada por totais já calculados (segunda chamada, temperature=0.3, sem tool_use). `narrative` é armazenada em `daily_snapshots.narrative` (migration 0005) e o disclaimer é concatenado por `_with_disclaimer` no service. (M) — SP-103, SP-104, Const. §26.
 - [x] **T-703** — Dispatcher `close_day` e `query_day` movidos para o `MessageProcessor` (fora do `IntentDispatcher` estruturado); chamam `DayCloseService.close_today` / `DayQueryService.get_today`. (S)
-- [ ] **T-704** — Frontend: botão "Encerrar dia" na barra do chat + tela de resumo pós-fechamento. (M) — mantido pendente para PR separada de UI (padrão das Fases 4-6).
+- [x] **T-704** — Frontend: botão "Encerrar dia" no `DayTotalsBar` (aparece só se `status='open'`; badge "Dia encerrado" quando `status='closed'`). Modal `CloseDayModal` em 4 fases (confirm → submitting → done | error). No estado `done`, renderiza os `totals` finais + `narrative` da LLM + contador de warnings + link "Ver semana". Idempotência SP-101 tratada com título "Este dia já estava encerrado" quando `was_already_closed=true`. (M)
 - [x] **T-705** — `tests/test_day_close_report.py` (17 casos): SP-90 (empty + records), SP-91 (404 + open), SP-92 (timezone), SP-100 (close via chat), SP-101 (idempotência preserva `closed_at`/`snapshot_version`/`narrative`), SP-102 (recompute pré-close reflete records tardios), SP-103 (payload de totals sem IDs para a LLM), SP-104 (disclaimer sempre presente + fallback LLM + não-duplicação), INV-5 (correction/deletion bloqueados + leitura congelada), INV-10 (audit event `action='close'`), `query_day` via chat. (M) — gate.
 
-**Gate Fase 7 — cumprido:** fechamento gera relatório correto e idempotente; dia fechado é imutável. Const. Art. III §10 (INV-4), Art. VIII §28 (INV-5), §26 (disclaimer) e §22 (audit) verificadas.
+**Gate Fase 7 — cumprido:** fechamento gera relatório correto e idempotente; dia fechado é imutável; UI de encerramento entregue em T-704. Const. Art. III §10 (INV-4), Art. VIII §28 (INV-5), §26 (disclaimer) e §22 (audit) verificadas.
 
 ---
 
@@ -175,10 +175,10 @@ Meta: janela dos últimos 7 dias encerrados com totais, médias e narrative.
 - [x] **T-801** — Migration `0007_weekly_reports.py`: `weekly_reports` com `totals`/`averages`/`per_day`/`warnings`/`snapshot_versions` JSONB, `UNIQUE(user_id, window_start, window_end)`, trigger `set_updated_at`. `window_start`/`window_end` nullable para permitir report transiente quando o usuário ainda não fechou nenhum dia. (S)
 - [x] **T-802** — `WeeklyReportService.generate(user)`: seleciona até 7 dias fechados mais recentes, agrega totals/averages sobre `daily_snapshots`, ordena `per_day` ASC (SP-113), reusa row existente se `snapshot_versions` bater (SP-112), gera narrativa via `AnthropicClient.call_weekly_narrative` (T-802) e concatena disclaimer. Upsert por `(user_id, window_start, window_end)`. Sem dias fechados → devolve report transiente com warning `insufficient_history` (não persiste). (M) — SP-110, SP-111, SP-112, SP-113, INV-8.
 - [x] **T-803** — `GET /weekly` + dispatcher `weekly_summary`. Rota registra a rota `weekly.router` no `main.py`; `MessageProcessor._handle_weekly_summary` roteia o intent para o `WeeklyReportService`. `IntentDispatcher` removeu `weekly_summary` de `_STRUCTURED_INTENTS`. (S)
-- [ ] **T-804** — Frontend `/weekly` com tabela cronológica. (M) — SP-113. **Deferred** para PR de UI separada (padrão das Fases 4-7).
+- [x] **T-804** — Frontend `/weekly` (rota protegida no proxy) com: header + janela `window_start` a `window_end`; banner `insufficient_history` quando <7 dias fechados; grid "Totais da semana" e grid "Médias diárias"; tabela `per_day` ordenada ASC (SP-113) com colunas Dia/Cal.in/Cal.out/Saldo/P/C/G/Água; narrativa da LLM; disclaimer Art. VII §26. Link "Semana" adicionado ao header do `(app)/layout`. Fetch client-side pra evitar SSR obsoleto quando o usuário mudar sessão. Estado vazio (`days_included=0`) mostra CTA amigável. (M) — SP-113.
 - [x] **T-805** — `tests/test_weekly_report.py` (14 casos): SP-110 (empty + <7 + 9→7), SP-111 (totais determinísticos + LLM lies ignoradas), SP-112 (2ª call reusa mesmo id + version bump quando snapshot muda), SP-113 (per_day ordenado ASC), INV-8 (open days ignorados), disclaimer sempre presente, endpoint `GET /weekly`, chat via intent `weekly_summary`, chat sem dias fechados, isolamento cross-user. (M) — gate.
 
-**Gate Fase 8 — cumprido:** semanal funcional; agrega apenas dias fechados (INV-8). Const. Art. II §5 (LLM não soma), §10 (recompute), §26 (disclaimer), §30 (janela 7 dias). Frontend permanece para PR separada.
+**Gate Fase 8 — cumprido:** semanal funcional; agrega apenas dias fechados (INV-8); UI `/weekly` entregue em T-804. Const. Art. II §5 (LLM não soma), §10 (recompute), §26 (disclaimer), §30 (janela 7 dias).
 
 ---
 

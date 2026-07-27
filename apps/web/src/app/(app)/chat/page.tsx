@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { api } from '@/lib/api-client';
 import { AssistantContent } from './AssistantContent';
+import { CloseDayModal } from './CloseDayModal';
 import { DayTotalsBar, type FoodItemRef } from './DayTotalsBar';
 import { PendingItemsModal } from './PendingItemsModal';
 
@@ -120,6 +121,8 @@ export default function ChatPage() {
   const [totalsRevalidateKey, setTotalsRevalidateKey] = useState(0);
   // SP-117: modal de pending items aberto quando != null.
   const [pendingItems, setPendingItems] = useState<FoodItemRef[] | null>(null);
+  // T-704: modal de encerramento aberto com a data-alvo (`YYYY-MM-DD`).
+  const [closingDate, setClosingDate] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartRef = useRef<number | null>(null);
@@ -388,6 +391,7 @@ export default function ChatPage() {
       <DayTotalsBar
         revalidateKey={totalsRevalidateKey}
         onPendingClick={(items) => setPendingItems(items)}
+        onCloseDayClick={(date) => setClosingDate(date)}
       />
       {pendingItems !== null && (
         <PendingItemsModal
@@ -397,6 +401,13 @@ export default function ChatPage() {
             setTotalsRevalidateKey((k) => k + 1);
             setPendingItems(null);
           }}
+        />
+      )}
+      {closingDate !== null && (
+        <CloseDayModal
+          date={closingDate}
+          onClose={() => setClosingDate(null)}
+          onClosed={() => setTotalsRevalidateKey((k) => k + 1)}
         />
       )}
       <div className="flex-1 space-y-3 overflow-y-auto rounded border border-slate-200 p-4 dark:border-slate-800">

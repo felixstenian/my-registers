@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { InstallButton } from './InstallButton';
 import { LogoutButton } from './logout-button';
@@ -34,7 +35,22 @@ export default async function ProtectedLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex items-center justify-between border-b border-slate-200 px-6 py-3 text-sm dark:border-slate-800">
-        <span className="font-medium">my-registers</span>
+        <div className="flex items-center gap-4">
+          <Link href="/chat" className="font-medium hover:opacity-80">
+            my-registers
+          </Link>
+          <nav className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
+            <Link href="/chat" className="hover:text-slate-900 dark:hover:text-slate-100">
+              Chat
+            </Link>
+            <Link
+              href="/weekly"
+              className="hover:text-slate-900 dark:hover:text-slate-100"
+            >
+              Semana
+            </Link>
+          </nav>
+        </div>
         <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
           <span>{me.email}</span>
           <InstallButton />
