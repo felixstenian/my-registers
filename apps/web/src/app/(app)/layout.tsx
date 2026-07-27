@@ -12,7 +12,7 @@ type Me = {
 async function fetchMe(): Promise<Me | null> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
-  const backend = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+  const backend = process.env.INTERNAL_API_URL ?? 'http://localhost:8000';
   const res = await fetch(`${backend}/auth/me`, {
     headers: { cookie: cookieHeader },
     cache: 'no-store',

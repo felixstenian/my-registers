@@ -138,6 +138,10 @@ services:
       # `/api/*` é reescrito no Nginx para o container `api:8000`. O
       # frontend só conhece o caminho relativo — nunca vaza URL interna.
       NEXT_PUBLIC_API_URL: /api
+      # Server components e route handlers do Next rodam no Node do
+      # container `web` — precisam de URL absoluta para chamar a API.
+      # Não vaza pro browser (não tem prefixo NEXT_PUBLIC_).
+      INTERNAL_API_URL: http://api:8000
       NEXT_TELEMETRY_DISABLED: "1"
       NODE_ENV: production
     depends_on:
