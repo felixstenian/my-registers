@@ -228,6 +228,33 @@ Meta: transformar as respostas do assistant em cards estruturados legíveis + ba
 
 ---
 
+## Bloco 4 — PWA básico (SP-128..SP-135) — pendente
+
+Meta: app instalável em iOS/Android/Desktop com shell offline. **Não** cobre offline de dados de negócio (contradiria INV-11), fila de mensagens (B-08) nem push (B-05). Zero mudança no backend.
+
+Pré-requisitos: Fase 9 concluída (app em prod com HTTPS válido — PWA exige TLS pra instalar).
+
+- [ ] **T-B401** — `src/app/manifest.ts` (convenção do Next 15) devolvendo o manifest com name, short_name, icons (192/512/maskable), theme_color, background_color, display=standalone, start_url=/chat, scope=/, orientation=portrait. Ver SP-128. (S)
+- [ ] **T-B402** — Assets em `public/icons/`: `icon-192.png`, `icon-512.png`, `icon-512-maskable.png`, `apple-touch-icon.png` (180×180), favicon.ico. Gerar via ferramenta ou design manual — cor base compatível com theme_color. SP-131. (S)
+- [ ] **T-B403** — Meta tags iOS Safari no root layout (`src/app/layout.tsx`): apple-mobile-web-app-capable, status-bar-style, title, apple-touch-icon link. SP-129. (XS)
+- [ ] **T-B404** — Service worker via **Serwist** (sucessor moderno do next-pwa, oficial pra Next 15+). Config: cache-first pra `/_next/static/*` + `/icons/*` + `/manifest.webmanifest`; network-first pra HTML de rotas; **NetworkOnly** pra `/api/*` (INV-11). Register client-side após hidratação. SP-130. (M)
+- [ ] **T-B405** — Página `src/app/offline/page.tsx` (server component estático) exibindo "Sem conexão", aviso legal Art. VII §26, botão "Tentar novamente" (`window.location.reload()`). SP-135. (S)
+- [ ] **T-B406** — Update flow: componente client `<SwUpdatePrompt />` no root layout. Escuta `serviceWorker.controller` + `updatefound`; quando novo SW em `installed`, mostra toast persistente com botão "Recarregar" que faz `postMessage({type: 'SKIP_WAITING'})` + `location.reload()`. SP-132. (M)
+- [ ] **T-B407** — Botão "Instalar app" no header: componente client `<InstallButton />` que escuta `beforeinstallprompt`, guarda o evento em state, exibe botão que chama `.prompt()`. Some após `appinstalled`. Oculto em navegadores sem o evento. SP-133. (S)
+- [ ] **T-B408** — Splash iOS opcional (SP-134): 3 tamanhos de `apple-touch-startup-image` (iPhone SE/8, iPhone 15/16 Pro, iPad 11). Adia se for muito trabalho de asset. (S, opcional)
+- [ ] **T-B409** — Testes: (a) unit da estratégia do SW (mock de fetch → confirma que `/api/foo` não passa pelo cache); (b) Lighthouse PWA score ≥ 90 rodado local via `pnpm --filter web build && lighthouse http://localhost:3000 --only-categories=pwa`. (M) — gate.
+- [ ] **T-B410** — Docs em `docs/pwa.md`: como instalar em iOS Safari (share → "Adicionar à Tela de Início"), Android Chrome (banner automático ou menu), Desktop Chrome/Edge (ícone na barra). Screenshots opcionais. (XS)
+
+**Gate Bloco 4:** app é instalável em iOS + Android + Desktop com HTTPS; Lighthouse PWA ≥ 90; SW **não** cacheia respostas de `/api/*` (INV-11); update flow visível quando nova versão sai.
+
+**Não inclui (por design):**
+- Fila offline de mensagens (B-08 no backlog — envolve idempotência de envio + IndexedDB).
+- Push notifications (B-05 no backlog — envolve VAPID + backend novo).
+- Cache offline dos totais do dia (contradiz INV-11; se um dia formos fazer, precisa de estratégia estale-while-revalidate específica com invalidação por evento).
+- Background Sync API (parte do B-08).
+
+---
+
 ## Backlog (pós-MVP, `may`)
 
 - **B-01** — Persistência agregada de `sugars_g`, `added_sugars_g`, `saturated_fat_g`, `trans_fat_g`.
@@ -237,7 +264,7 @@ Meta: transformar as respostas do assistant em cards estruturados legíveis + ba
 - **B-05** — Notificações (push/email/Telegram) sobre encerramento pendente.
 - **B-06** — Exportação CSV/PDF do diário e semanal.
 - **B-07** — Multi-usuário + cadastro público (envolve emenda constitucional).
-- **B-08** — PWA offline com fila de mensagens.
+- **B-08** — PWA offline **completo** (fila de mensagens em IndexedDB, envio idempotente, Background Sync). Complementa o Bloco 4 (instalabilidade + shell) com capacidade de trabalhar sem conexão.
 - **B-09** — Migrar fila para RQ/Dramatiq quando >1 usuário concorrente.
 
 ---
