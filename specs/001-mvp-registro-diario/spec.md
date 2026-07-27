@@ -439,6 +439,47 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 
 ---
 
+### 3.13 Progressive Web App (pós-MVP, escopo básico)
+
+Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push (B-05) nem cache de dados de negócio.
+
+**SP-128** (`must`) — Manifest publicado em `/manifest.webmanifest`.
+- Campos obrigatórios: `name`, `short_name` (≤12 chars), `icons` (192, 512, maskable), `theme_color`, `background_color`, `display: standalone`, `start_url: /chat`, `scope: /`, `orientation: portrait`.
+- MIME type correto (`application/manifest+json`) — Next.js já resolve via convenção de arquivo em `src/app/manifest.ts`.
+
+**SP-129** (`must`) — Meta tags para instalação em iOS Safari.
+- `apple-mobile-web-app-capable=yes`, `apple-mobile-web-app-status-bar-style=default`, `apple-mobile-web-app-title=my-registers`, `apple-touch-icon` 180×180.
+- Sem essas tags, iOS Safari não trata a app como instalável em standalone.
+
+**SP-130** (`must`) — Service worker com estratégia por rota.
+- Shell estático (`/_next/static/*`, ícones, manifest, fonts): **cache-first** com revalidação em background.
+- HTML de rotas (`/chat`, `/login`, `/weekly`): **network-first** com fallback pra cache offline.
+- API (`/api/*`): **network-only, nunca cachear.** Ver `INV-11`.
+- Registro no client após hidratação (não bloqueia render inicial).
+
+**SP-131** (`must`) — Assets de ícone em 4 tamanhos mínimos.
+- `192×192` (Android padrão), `512×512` (Android hi-res / splash), `180×180` (apple-touch), `512×512 maskable` (Android adaptativo).
+- Formato PNG. Cor de fundo compatível com `background_color` do manifest.
+
+**SP-132** (`should`) — Update flow visível.
+- Quando SW detecta versão nova disponível (`updatefound` + `installed` state), exibir toast persistente "Nova versão disponível" com botão "Recarregar" que dispara `postMessage({type: 'SKIP_WAITING'})` seguido de `window.location.reload()`.
+- Sem esse fluxo, usuário fica preso em versão antiga até fechar todas as abas.
+
+**SP-133** (`should`) — Botão "Instalar" no header.
+- Escuta `beforeinstallprompt` (Chrome/Edge Android+desktop), guarda evento, exibe botão que chama `.prompt()`.
+- Oculto em navegadores sem o evento (Safari desktop/iOS — nesses, install é via "Adicionar à tela de início" do menu do browser).
+- Após install (`appinstalled` event), botão some.
+
+**SP-134** (`may`) — Splash iOS via `apple-touch-startup-image`.
+- Set mínimo: iPhone SE/8, iPhone 15/16 Pro (3 sizes). iPad opcional.
+- Sem isso, iOS mostra tela branca de ~500ms na abertura standalone.
+
+**SP-135** (`must`) — Comportamento offline previsível.
+- Rota carregada offline (sem cache do dia) exibe página `/offline` com mensagem: "Sem conexão. Algumas ações ficam indisponíveis até você reconectar." + link "Tentar novamente".
+- Aviso legal (Constituição Art. VII §26) presente na `/offline`.
+
+---
+
 ## 4. Requisitos não-funcionais
 
 ### 4.1 Segurança
@@ -502,6 +543,7 @@ Espelham os artigos I-IX da Constituição. Cada um tem teste automatizado obrig
 - **INV-8** — `weekly_reports` só considera dias fechados (Const. §30).
 - **INV-9** — LLM só via `tool_use` (Const. §7).
 - **INV-10** — Toda mutação grava `audit_events` (Const. §11).
+- **INV-11** — Service Worker nunca cacheia respostas de `/api/*`. Dados de negócio (kcal, água, atividade) precisam ser sempre frescos; cache SW dos totais do dia contradiz Art. III §10 (snapshots vêm sempre do DB).
 
 ---
 
@@ -517,7 +559,7 @@ Registrado aqui para não voltar como dúvida durante execução.
 - Metas de kcal/macros e avaliações qualitativas.
 - Integração com wearables, Apple Health, Google Fit.
 - Exportação CSV/PDF.
-- App nativo, PWA offline.
+- App nativo. **PWA básico está no escopo (seção 3.13);** offline de dados de negócio e fila de mensagens continuam fora.
 - Streaming SSE.
 - Sugestões dietéticas.
 - Persistência agregada de `sugars_g`, `added_sugars_g`, `saturated_fat_g`, `trans_fat_g`.
@@ -550,3 +592,4 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-15** — v1.0. Spec inicial extraída de `docs/specs.md`; alinhada com `constitution.md` v1.0.0 e `app_plan.md` 20 seções.
 - **2026-07-19** — v1.5. SP-24 detalha chat-side (SP-24a): intent `confirm_items` com scopes `all`/`specific`. Sem novo SP-ID — é implementação faltante do SP-24 original que já previa "aguarda confirmação por chat".
 - **2026-07-26** — v1.6. Adicionada seção 3.13 "Registro estruturado de treino" com SP-120..SP-127 (todos `may`, pós-MVP). Modelo hierárquico sessão → exercícios → séries, coexistência com `log_activity` via consolidação em `activity_record` no encerramento (ADR-004 em `research.md`). Novos invariantes INV-11, INV-12, INV-13. Não bloqueia MVP; implementação após Fase 9.
+- **2026-07-27** — v1.7. Nova seção 3.13: PWA básico (SP-128..SP-135). Escopo: instalabilidade + shell offline, sem fila de mensagens nem cache de dados de negócio. Nova INV-11 proíbe SW de cachear `/api/*`. Item correspondente removido de "Fora do escopo". (Se PR de workout-tracking mergear primeiro, essa seção vira 3.14 no rebase; sem conflito de SP porque as faixas SP-120..127 e SP-128..135 são disjuntas.)

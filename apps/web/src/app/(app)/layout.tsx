@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { InstallButton } from './InstallButton';
 import { LogoutButton } from './logout-button';
 
 type Me = {
@@ -12,7 +13,7 @@ type Me = {
 async function fetchMe(): Promise<Me | null> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
-  const backend = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+  const backend = process.env.INTERNAL_API_URL ?? 'http://localhost:8000';
   const res = await fetch(`${backend}/auth/me`, {
     headers: { cookie: cookieHeader },
     cache: 'no-store',
@@ -36,6 +37,7 @@ export default async function ProtectedLayout({
         <span className="font-medium">my-registers</span>
         <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
           <span>{me.email}</span>
+          <InstallButton />
           <LogoutButton />
         </div>
       </header>

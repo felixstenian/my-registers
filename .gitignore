@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+.env.production
 
 # Node
 node_modules/
@@ -9,6 +10,7 @@ node_modules/
 .next/
 next-env.d.ts
 .turbo/
+tsconfig.tsbuildinfo
 
 # Python
 __pycache__/
@@ -34,6 +36,11 @@ Thumbs.db
 
 # Docker
 *.pid
+
+# Service Worker (gerado no build por Serwist)
+apps/web/public/sw.js
+apps/web/public/swe-worker-*.js
+apps/web/public/workbox-*.js
 
 # Backups & runtime data
 /var/backups/

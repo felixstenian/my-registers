@@ -182,20 +182,45 @@ Meta: janela dos últimos 7 dias encerrados com totais, médias e narrative.
 
 ---
 
-## Fase 9 — Hardening e deploy
+## Fase 9 — Hardening e deploy ✅ (parcial)
 
 Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 
-- [ ] **T-901** — `docker-compose.production.yml` finalizado (§14 do plano). (S)
-- [ ] **T-902** — `infra/nginx/nginx.conf` + `conf.d/app.conf` com HSTS/CSP. (S)
-- [ ] **T-903** — Certbot webroot + cronjob de renovação. (S)
-- [ ] **T-904** — `scripts/backup-postgres.sh`, `scripts/backup-minio.sh`, `scripts/restore-postgres.sh` testados em dry-run. (M)
-- [ ] **T-905** — `scripts/bootstrap.sh` de deploy (migration + bootstrap idempotentes). (S)
-- [ ] **T-906** — Health check externo (healthchecks.io) + doc. (S)
-- [ ] **T-907** — Checklist de segurança §16 do plano executado; issues abertas para pendências. (M)
-- [ ] **T-908** — Deploy real numa VPS de staging; smoke test manual do cenário-âncora. (L) — gate MVP.
+- [x] **T-901** — `docker-compose.production.yml`: nginx (portas 80/443), certbot loop de renovação, postgres/minio em rede interna, `minio-init` idempotente para bucket, `env_file: .env.production`, healthchecks em todos os serviços, `json-file` logs com rotação (`max-size=10m, max-file=5`). (S)
+- [x] **T-902** — `infra/nginx/nginx.conf` + `conf.d/app.conf` com HSTS (1 ano), CSP mínimo para Next.js + Tailwind, X-Content-Type-Options, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, OCSP stapling, TLSv1.2+ com `HIGH:!aNULL:!MD5`, `client_max_body_size 15m`. (S)
+- [x] **T-903** — `infra/certbot/README.md` com runbook de emissão inicial (staging → prod), instrução de placeholder HTTP pra 1ª emissão, comandos de renovação forçada e debug comum. (S)
+- [x] **T-904** — `scripts/backup-postgres.sh` (pg_dump -Fc + retenção 14d + rclone opcional off-VPS), `scripts/backup-minio.sh` (mc mirror + retenção + rclone), `scripts/restore-postgres.sh` (destrutivo com confirmação de 5s + DRY_RUN flag). Chmod +x aplicado. (M)
+- [x] **T-905** — `scripts/bootstrap.sh`: `alembic upgrade head` + `python -m app.cli bootstrap` idempotentes; valida `.env.production` antes de rodar. INV-6: runtime da API não roda migrations. (S)
+- [x] **T-906** — Health check externo documentado em `docs/deploy.md` §9 (healthchecks.io + cron `*/5 * * * *` fazendo ping do `/api/health`). (S)
+- [x] **T-907** — Checklist de segurança §16 completo em `docs/deploy.md` §12 (13 itens ✅ + 5 itens ainda para operador validar: rclone, fail2ban, unattended-upgrades, docker prune, auditoria de logs). `.gitignore` atualizado com `.env.production`. `.env.production.example` com todas as variáveis de §14.1 do plano. (M)
+- [ ] **T-908** — Deploy real numa VPS de staging; smoke test manual do cenário-âncora. **Pendente** — depende do operador (Felix) provisionar VPS, DNS e rodar o runbook em `docs/deploy.md`.
 
-**Gate Fase 9:** MVP em produção; §19 do plano (critérios de aceite) todos verdes.
+**Gate Fase 9 — parcial:** todos os artefatos de código e docs prontos. Falta apenas a execução do runbook por humano na VPS real (T-908) — não é possível automatizar sem SSH nas máquinas.
+
+---
+
+## Fase 10 — CI/CD — pendente
+
+Meta: eliminar o deploy manual + garantir que nenhum PR quebrado entre em `dev`/`main`. Decisão registrada em **ADR-012**: GitHub Actions em dois workflows separados. **Não bloqueia MVP** — sem sofrimento enquanto Felix for solo dev; começa a doer quando: (a) segundo colaborador entra, (b) frequência de deploy > 2/semana, ou (c) algum teste local for esquecido antes de mergear.
+
+Pré-requisitos: T-908 concluído (VPS de produção rodando) e `docs/deploy.md` §10 funcionando manualmente end-to-end.
+
+- [ ] **T-1001** — `.github/workflows/ci.yml`: gatilho `pull_request` para `dev`/`main`. Service container Postgres 16. Steps: checkout, setup Python 3.12 + uv, `uv sync`, `uv run ruff check app tests`, `uv run pytest -q`. Concurrency por PR (cancela runs antigos ao push). Cache do `~/.cache/uv`. (S)
+- [ ] **T-1002** — `.github/workflows/ci.yml` estendido para o web: setup Node 20 + pnpm 10, `pnpm install --frozen-lockfile`, `pnpm --filter web typecheck`. Roda em paralelo com o job Python (matrix ou jobs separados). (S)
+- [ ] **T-1003** — Branch protection em `main`: require status checks `ci / python`, `ci / web`; require PR reviews = 0 (single dev) mas exige `linear history` e `no direct pushes to main`. Documentar em `docs/deploy.md` como configurar via UI do GitHub. (S)
+- [ ] **T-1004** — Chave SSH `deploy-only` na VPS: gerar par `ed25519`, adicionar a public key ao `~/.ssh/authorized_keys` do usuário `felix` com prefixo `command="cd ~/my-registers && git pull && ./scripts/bootstrap.sh .env.production && docker compose -f docker-compose.production.yml --env-file .env.production up -d api web",no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-pty`. Doc de rotação em `docs/deploy.md`. (S)
+- [ ] **T-1005** — `.github/workflows/deploy.yml`: gatilho `push` para `main` **após** `ci.yml` passar (via `workflow_run: workflows: [ci]  types: [completed]  branches: [main]`). Steps: install ssh-agent, adiciona a chave via Secret `DEPLOY_SSH_KEY`, faz `ssh felix@$DEPLOY_HOST 'true'` (dispara o command restringido acima). Timeout de 10 min. Concurrency single-in-progress-per-branch. (M)
+- [ ] **T-1006** — Documentar em `docs/deploy.md` §14 (novo): como o CI/CD encaixa no workflow (git commit → PR → checks → merge → deploy automático), como debugar deploy que falhou (`gh run list --workflow=deploy.yml`, `gh run view --log`), como fazer rollback (revert + push). Adicionar seção "quando pausar o CD" (força override manual via `docker compose ...` no SSH tradicional se GitHub estiver fora do ar). (S)
+- [ ] **T-1007** — Smoke test pós-deploy dentro do `deploy.yml`: após `up -d`, aguardar 30s e bater em `curl -fsS https://$DOMAIN/api/health`. Se falhar, workflow marca como fail (mas containers ficam de pé — rollback manual pelo dev). (S)
+
+**Gate Fase 10:** PR bloqueado se testes falharem; merge em `main` sobe versão nova sem SSH manual; deploy audível em `gh run list`. Decisões dependentes já estão em ADR-012.
+
+**Não inclui (registrado no ADR-012 como "não inclui no MVP"):**
+- Testes E2E (Playwright) — carga de manutenção alta pra 1 dev.
+- Signed commits gate.
+- Preview environments por PR.
+- Cache de imagens Docker no GHCR (build atual é ~2 min, aceitável).
+- Watchtower / ArgoCD / GitOps sofisticado.
 
 ---
 
@@ -244,6 +269,30 @@ Meta: rastrear treinos de força de forma granular (sessão → exercícios → 
 - [ ] **T-B308** — Frontend: renderização especial de assistant messages `workout_*` com destaque visual (peso PR em amber, série atual em verde). Novo `WorkoutHistoryCard` no chat. (M) — opcional, backend em markdown já é usável.
 
 **Gate Bloco 3:** treino registrado por chat com histórico contextual; encerramento gera activity_record que aparece no snapshot; INV-11/12/13 verificadas.
+## Bloco 4 — PWA básico (SP-128..SP-135) ✅ (parcial)
+
+Meta: app instalável em iOS/Android/Desktop com shell offline. **Não** cobre offline de dados de negócio (contradiria INV-11), fila de mensagens (B-08) nem push (B-05). Zero mudança no backend.
+
+Pré-requisitos: Fase 9 concluída (app em prod com HTTPS válido — PWA exige TLS pra instalar).
+
+- [x] **T-B401** — `src/app/manifest.ts` com name, short_name (`my-reg`), icons (192/512/maskable), theme_color `#0f172a`, background_color `#0f172a`, display=standalone, start_url=/chat, scope=/, orientation=portrait, lang=pt-BR. (S)
+- [x] **T-B402** — Ícones em `public/icons/`: `icon.svg` (source), `icon-192.png`, `icon-512.png`, `icon-512-maskable.png`, `apple-touch-icon.png` (180×180). Gerados via `sharp` a partir do SVG placeholder (mr em fundo `#0f172a`). Script inline; substituir por assets de design real depois. SP-131. (S)
+- [x] **T-B403** — Meta tags iOS Safari + Viewport no root layout: `appleWebApp` da Metadata API do Next 15 (capable, status-bar-style, title), `formatDetection.telephone=false`, `apple-touch-icon`, `viewportFit=cover`, `themeColor`. SP-129. (XS)
+- [x] **T-B404** — Service worker via **Serwist** em `src/app/sw.ts`: `NetworkOnly` para `/api/*` (INV-11), `NetworkFirst` com timeout 5s para HTML de rotas, `StaleWhileRevalidate` para `/_next/static/*`, `navigationPreload` on, `clientsClaim` on. Serwist injetado no `next.config.mjs` via `@serwist/next` (config `disable` em dev). Build usa `--webpack` porque Serwist ainda não suporta Turbopack. SP-130. (M)
+- [x] **T-B405** — `src/app/offline/page.tsx` (server) + `OfflineRetryButton.tsx` (client) exibindo "Sem conexão" + aviso legal Art. VII §26 + botão que faz `window.location.reload()`. SP-135. (S)
+- [x] **T-B406** — `src/app/sw-update-prompt.tsx` no root layout: escuta `updatefound` + `installed` state + `controllerchange`; toast fixo no rodapé com botão "Recarregar" que dispara `SKIP_WAITING` e recarrega quando o novo SW assume. SP-132. (M)
+- [x] **T-B407** — `src/app/(app)/InstallButton.tsx` no header do layout protegido: escuta `beforeinstallprompt` (preventDefault + guarda o evento), botão que chama `.prompt()` e some após `appinstalled` OU quando já está em `display-mode: standalone`. Oculto em navegadores sem o evento (Safari/Firefox). SP-133. (S)
+- [ ] **T-B408** — Splash iOS opcional (SP-134). **Adiado** — precisa 3 sizes de asset de design real; volta quando ícone final chegar. (S, opcional)
+- [x] **T-B409** — `apps/web/scripts/verify-sw.mjs` roda em `pnpm --filter web verify:sw`: sanity checks estáticos de sw.ts (matcher /api/, NetworkOnly no handler, fallback /offline, listener SKIP_WAITING) + bundle contém /api/ e /offline. **Sem vitest** — evita adicionar framework de teste no web só por 1 assertion; Lighthouse PWA rodado manualmente conforme `docs/pwa.md` (gate ≥ 90 pendente de rodar em prod). (M)
+- [x] **T-B410** — `docs/pwa.md` cobre instalação em iOS Safari (share → Adicionar à Tela de Início), Android Chrome (banner ou menu), Desktop (ícone na barra), diagnóstico, arquivos-chave, e como rodar Lighthouse. SP-133/135 documentados. (XS)
+
+**Gate Bloco 4:** app é instalável em iOS + Android + Desktop com HTTPS; Lighthouse PWA ≥ 90 (rodar em prod após deploy); SW **não** cacheia respostas de `/api/*` (INV-11) — garantido por `verify-sw.mjs`; update flow visível quando nova versão sai. **T-B408 adiado** por depender de asset de design.
+
+**Não inclui (por design):**
+- Fila offline de mensagens (B-08 no backlog — envolve idempotência de envio + IndexedDB).
+- Push notifications (B-05 no backlog — envolve VAPID + backend novo).
+- Cache offline dos totais do dia (contradiz INV-11; se um dia formos fazer, precisa de estratégia estale-while-revalidate específica com invalidação por evento).
+- Background Sync API (parte do B-08).
 
 ---
 
@@ -256,7 +305,7 @@ Meta: rastrear treinos de força de forma granular (sessão → exercícios → 
 - **B-05** — Notificações (push/email/Telegram) sobre encerramento pendente.
 - **B-06** — Exportação CSV/PDF do diário e semanal.
 - **B-07** — Multi-usuário + cadastro público (envolve emenda constitucional).
-- **B-08** — PWA offline com fila de mensagens.
+- **B-08** — PWA offline **completo** (fila de mensagens em IndexedDB, envio idempotente, Background Sync). Complementa o Bloco 4 (instalabilidade + shell) com capacidade de trabalhar sem conexão.
 - **B-09** — Migrar fila para RQ/Dramatiq quando >1 usuário concorrente.
 
 ---

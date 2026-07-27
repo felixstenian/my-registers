@@ -7,7 +7,7 @@ const ACCESS_COOKIE = 'access_token';
 // no backend (SP-06): se o cookie for inválido, o app recebe 401 e faz redirect.
 const PROTECTED_PREFIXES = ['/chat', '/days', '/weekly'];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isProtected = PROTECTED_PREFIXES.some(
