@@ -492,6 +492,125 @@ async def test_patch_food_item_recomputes_macros(
 
 
 # ---------------------------------------------------------------------------
+# POST /records/food-items/{id}/confirm — modal PWA (fix bug 2 do PR #37)
+# ---------------------------------------------------------------------------
+
+
+async def test_confirm_food_item_clears_needs_confirmation(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """Modal `PendingItemsModal` chama POST /confirm; endpoint só desmarca
+    a flag (sem recompute), grava audit action='confirm' actor='user'."""
+    from sqlalchemy import select
+
+    from app.models import AuditEvent
+
+    await _seed(db_session)
+    dl = await _day_log(db_session, admin_user)
+    item = await _create_food(
+        db_session,
+        admin_user,
+        dl.id,
+        "arroz",
+        "arroz_branco_cozido",
+        150,
+    )
+    # Força needs_confirmation=True para simular estado pendente.
+    item.needs_confirmation = True
+    await db_session.commit()
+
+    await _login(client)
+    resp = await client.post(f"/records/food-items/{item.id}/confirm")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["needs_confirmation"] is False
+    assert body["already_confirmed"] is False
+
+    await db_session.refresh(item)
+    assert item.needs_confirmation is False
+    # Macros NÃO foram recomputados — kcal continua igual (150 × 130/100).
+    assert item.kcal == Decimal("195.00")
+
+    # Audit gravado com action='confirm', actor='user'.
+    audits = list(
+        (
+            await db_session.execute(
+                select(AuditEvent).where(
+                    AuditEvent.entity_id == item.id, AuditEvent.action == "confirm"
+                )
+            )
+        ).scalars()
+    )
+    assert len(audits) == 1
+    assert audits[0].actor == "user"
+    assert audits[0].before == {"needs_confirmation": True}
+    assert audits[0].after == {"needs_confirmation": False}
+
+
+async def test_confirm_food_item_idempotent(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """2ª chamada não muda estado e retorna `already_confirmed=true`."""
+    from sqlalchemy import func, select
+
+    from app.models import AuditEvent
+
+    await _seed(db_session)
+    dl = await _day_log(db_session, admin_user)
+    item = await _create_food(db_session, admin_user, dl.id, "arroz", "arroz_branco_cozido", 150)
+    item.needs_confirmation = True
+    await db_session.commit()
+
+    await _login(client)
+    resp1 = await client.post(f"/records/food-items/{item.id}/confirm")
+    resp2 = await client.post(f"/records/food-items/{item.id}/confirm")
+    assert resp1.status_code == 200 and resp1.json()["already_confirmed"] is False
+    assert resp2.status_code == 200 and resp2.json()["already_confirmed"] is True
+
+    # Só 1 audit event de confirm (a 2ª chamada é no-op).
+    count = (
+        await db_session.execute(
+            select(func.count(AuditEvent.id)).where(
+                AuditEvent.entity_id == item.id, AuditEvent.action == "confirm"
+            )
+        )
+    ).scalar_one()
+    assert count == 1
+
+
+async def test_confirm_food_item_blocked_on_closed_day(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """INV-5: dia fechado → 409 conflict_closed_day."""
+    from datetime import UTC, datetime
+
+    await _seed(db_session)
+    dl = await _day_log(db_session, admin_user)
+    item = await _create_food(db_session, admin_user, dl.id, "arroz", "arroz_branco_cozido", 150)
+    item.needs_confirmation = True
+    dl.status = "closed"
+    dl.closed_at = datetime.now(UTC)
+    await db_session.commit()
+
+    await _login(client)
+    resp = await client.post(f"/records/food-items/{item.id}/confirm")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "conflict_closed_day"
+
+
+async def test_confirm_food_item_404_when_not_owned(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """Isolamento cross-user (Const. §21) — item de outro user não vaza."""
+    import uuid as _uuid
+
+    await _seed(db_session)
+    await _login(client)
+    resp = await client.post(f"/records/food-items/{_uuid.uuid4()}/confirm")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # INV-4 — recompute pós correção/deleção
 # ---------------------------------------------------------------------------
 
