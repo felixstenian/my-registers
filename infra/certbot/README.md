@@ -16,6 +16,19 @@ O Nginx precisa estar servindo `/.well-known/acme-challenge/` na porta 80
 o container quebra. Solução: subir num modo temporário só com o Nginx +
 uma config mínima HTTP.
 
+> ⚠️ **Armadilha do entrypoint em daemon-mode.**
+>
+> O serviço `certbot` do compose declara um `entrypoint` custom que roda
+> um loop `while :; do certbot renew; sleep 12h; done` — perfeito pra
+> renovação automática, mas **ignora silenciosamente qualquer comando
+> que você passar via `run`**. Sem `--entrypoint certbot`, o comando
+> `certonly` da primeira emissão é descartado e o container só executa
+> o loop de renovação (que não faz nada porque não tem cert ainda).
+>
+> **Solução:** passe `--entrypoint certbot` em toda invocação `run`,
+> como nos comandos abaixo. Isso substitui o entrypoint só naquela
+> execução; o daemon continua funcionando pro renew automático.
+
 Passo a passo (uma vez só na vida da VPS):
 
 ```bash
@@ -43,14 +56,21 @@ docker compose -f docker-compose.production.yml --env-file .env.production \
 
 # 5. Testar (staging Let's Encrypt primeiro — não bate rate limit)
 docker compose -f docker-compose.production.yml --env-file .env.production run --rm \
-  certbot certonly --webroot -w /var/www/certbot \
+  --entrypoint certbot certbot \
+  certonly --webroot -w /var/www/certbot \
   --staging --agree-tos --no-eff-email \
   -m "$LETSENCRYPT_EMAIL" -d "$DOMAIN"
 
-# Se voltou "Successfully received certificate" na staging, rode a prod:
+# Se voltou "Successfully received certificate" na staging, apaga
+# o cert de teste e emite o REAL (sem --staging):
 docker compose -f docker-compose.production.yml --env-file .env.production run --rm \
-  certbot certonly --webroot -w /var/www/certbot \
-  --force-renewal --agree-tos --no-eff-email \
+  --entrypoint certbot certbot \
+  delete --cert-name "$DOMAIN"
+
+docker compose -f docker-compose.production.yml --env-file .env.production run --rm \
+  --entrypoint certbot certbot \
+  certonly --webroot -w /var/www/certbot \
+  --agree-tos --no-eff-email \
   -m "$LETSENCRYPT_EMAIL" -d "$DOMAIN"
 
 # 6. Restaurar a config real (com HTTPS)
@@ -74,19 +94,31 @@ docker compose -f docker-compose.production.yml --env-file .env.production \
   exec certbot certbot certificates
 ```
 
-Para forçar renovação (ex.: rotação de chave):
+Para forçar renovação (ex.: rotação de chave) — atenção ao
+`--entrypoint certbot` explicando acima:
 
 ```bash
 docker compose -f docker-compose.production.yml --env-file .env.production run --rm \
-  certbot renew --force-renewal --webroot -w /var/www/certbot
+  --entrypoint certbot certbot \
+  renew --force-renewal --webroot -w /var/www/certbot
 docker compose -f docker-compose.production.yml --env-file .env.production restart nginx
 ```
 
 ## Debug comum
 
+- **Certbot "silencioso" — container só imprime `Created` e sai sem output.**
+  Você esqueceu de `--entrypoint certbot` no `run`. O entrypoint daemon
+  descartou seu `certonly` e rodou o loop de renew. Ver aviso acima.
 - **`Connection refused`** no acme-challenge → nginx caiu ou porta 80
   não está aberta no firewall.
 - **`too many failed authorizations`** → você bateu rate limit no
   staging. Espere 1h ou use `--dry-run`.
 - **`unauthorized`** → DNS não propagou ainda. `dig +short A $DOMAIN`
   deve retornar o IP da VPS.
+- **`cannot load certificate ... No such file or directory`** no nginx
+  após restaurar a config real → o cert real não foi emitido (só o
+  staging), ou o staging foi mantido e não deletado antes do prod.
+  Confira com `openssl s_client -connect $DOMAIN:443 -servername $DOMAIN
+  </dev/null 2>/dev/null | openssl x509 -noout -issuer` — se aparecer
+  "Fake LE" no issuer, reemita o real (delete staging + certonly sem
+  `--staging`).
