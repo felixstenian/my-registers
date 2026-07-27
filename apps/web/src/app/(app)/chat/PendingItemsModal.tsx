@@ -6,10 +6,11 @@
  * Chamado a partir do badge do `DayTotalsBar` quando existem
  * `food_items` com `needs_confirmation=true`. Para cada item:
  *
- * - **Confirmar** — re-envia a mesma grama (ou ml) via
- *   `PATCH /records/food-items/{id}`. O backend recomputa macros pelo
- *   catálogo E marca `needs_confirmation=false` na mesma transação. (Ver
- *   `records.patch_food_item` no backend.)
+ * - **Confirmar** — `POST /records/food-items/{id}/confirm`. Endpoint
+ *   dedicado que só desmarca `needs_confirmation` sem exigir mudança
+ *   de grams/ml. (Antes usava PATCH re-enviando o valor atual, mas
+ *   items só com `quantity` viravam no-op — modal fechava sem sair
+ *   do estado pendente.)
  * - **Descartar** — `DELETE /records/food-items/{id}` (soft delete + recompute).
  *
  * Após qualquer ação bem-sucedida, o modal sinaliza `onChanged()` para o
@@ -42,15 +43,11 @@ export function PendingItemsModal({
 
   async function confirm(item: FoodItemRef) {
     setBusyId(item.id);
-    // SP-117: confirmar = re-enviar o valor atual, o backend recomputa
-    // catálogo e limpa `needs_confirmation`.
-    const patch: Record<string, number> = {};
-    if (item.grams && item.grams > 0) patch.grams = item.grams;
-    else if (item.ml && item.ml > 0) patch.ml = item.ml;
-    else if (item.quantity && item.quantity > 0) patch.quantity = item.quantity;
-    const result = await api(`/records/food-items/${item.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
+    // SP-117: endpoint dedicado só desmarca `needs_confirmation` (sem
+    // recompute de macros — o item já tem os valores computados quando
+    // foi criado). Idempotente.
+    const result = await api(`/records/food-items/${item.id}/confirm`, {
+      method: 'POST',
     });
     setBusyId(null);
     if (result.ok) onChanged();
