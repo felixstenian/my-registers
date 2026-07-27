@@ -145,6 +145,61 @@ Rollback: `git checkout <hash-anterior>` + repetir. Se a migration for
 irreversível, primeiro rode `alembic downgrade -1` (ver
 `apps/api/alembic/versions/*.py::downgrade()`).
 
+### 10.1 O que rebuildar em cada deploy
+
+Nem todo PR mexe em todo serviço. Rebuildar tudo custa tempo e reinicia
+containers sem necessidade. Use a tabela abaixo pra decidir escopo:
+
+| O que mudou no PR | O que rebuildar |
+|--|--|
+| Só `apps/web/` | `up -d --build web` |
+| Só `apps/api/` (sem migration) | `up -d --build api` |
+| `apps/api/` **com** migration nova | `./scripts/bootstrap.sh .env.production` + `up -d --build api` |
+| `docker-compose.production.yml` | `up -d` (recria containers afetados; adicione `--build` se `build:` mudou) |
+| `infra/nginx/` (config) | `exec nginx nginx -s reload` (ou restart se mudou volume/binding) |
+| `.env.production` | `up -d --force-recreate <service>` (nomear os que consomem a var) |
+| Sem certeza / múltiplas áreas | `up -d --build` sem nome — rebuilda tudo. Custa tempo mas nunca deixa serviço com imagem stale. |
+
+**Como confirmar escopo antes do deploy** (do host, após `git fetch origin`):
+
+```bash
+# Diff em arquivos que mudam a imagem web:
+git diff --stat HEAD..origin/main -- apps/web/ next.config.mjs docker-compose.production.yml
+
+# Diff em arquivos que mudam a imagem api:
+git diff --stat HEAD..origin/main -- apps/api/ docker-compose.production.yml
+
+# Existe migration nova?
+git diff --name-only HEAD..origin/main -- apps/api/alembic/versions/
+```
+
+Vazio nos três = deploy pode ser só docs/spec, provavelmente `git pull`
+sem `up -d` já basta.
+
+### 10.2 Verificação pós-deploy
+
+Após qualquer `up -d`, uma bateria rápida de checks:
+
+```bash
+# 1. Todos os containers healthy?
+docker compose -f docker-compose.production.yml --env-file .env.production ps
+# Coluna STATUS: espera "Up X seconds (healthy)" em todos.
+
+# 2. Endpoint público OK?
+curl -sSI https://$DOMAIN/api/health | head -3
+# Espera HTTP/2 200.
+
+# 3. Web serve rota protegida sem quebrar?
+curl -sSI https://$DOMAIN/login | head -3
+
+# 4. Logs sem stack traces recentes?
+docker compose -f docker-compose.production.yml --env-file .env.production logs --since=2m api web | grep -iE "traceback|error " | head -10
+```
+
+Se um container ficar em `Restarting` por mais de 30s, `logs <serviço>`
+mostra o motivo real — a maioria das vezes é config errada em
+`.env.production` ou cert ausente.
+
 ## 11. Restore de um dia ruim
 
 ```bash
