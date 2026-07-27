@@ -296,6 +296,33 @@ Pré-requisitos: Fase 9 concluída (app em prod com HTTPS válido — PWA exige 
 
 ---
 
+## Bloco 5 — Recuperação de itens sem catálogo (SP-140..SP-142) — pendente
+
+Meta: fechar o loop pra o usuário quando `catalog.lookup` devolve `None`. Hoje o item entra zerado + `needs_confirmation`, e o usuário só sabe recuperar via caminhos escondidos. Feature adiciona (a) prompt visível na assistant message com as opções, (b) cadastro manual sem foto, (c) promoção opcional do item legado no mesmo POST.
+
+Pré-requisitos:
+- Fase 4.b (SP-30..35) concluída (LabelCatalogService disponível como referência).
+- Hotfix do PATCH aceitar lookup dinâmico já em `main` (PR #37) — permite testar a promoção via chat também.
+
+- [ ] **T-B501** — `message_formatter.compose_meal` detecta warnings `code='no_catalog_hit'` e anexa bloco "Sem catálogo para: X, Y" com 3 CTAs (SP-140). Muda apenas o composer + adiciona teste em `test_message_formatter.py`. Sem mudança de dados. (S)
+- [ ] **T-B502** — Migration `0008_nutrient_facts_source_user_manual.py`: adiciona valor `user_manual` ao CHECK constraint de `nutrient_facts.source` (se ainda não existir). Confirma que `verified_by_user` já é boolean com default false. Não muda dados existentes. (S)
+- [ ] **T-B503** — `POST /nutrient-facts/manual` em `apps/api/app/api/routes/nutrient_facts.py` conforme SP-141. Novo schema `ManualNutrientFactIn` em `app/schemas/nutrient_facts.py`. Reaproveita `LabelCatalogService.upsert_from_label` como referência de shape (mas cria helper distinto porque source é diferente). Isolamento por `user_id` (Const. §21). Audit `entity_type='nutrient_fact', action='create', actor='user'`. (M) — SP-141.
+- [ ] **T-B504** — Suporte a `promote_food_item_id` no mesmo endpoint conforme SP-142: transação única cria fact + recalcula item + recompute snapshot + audit `action='correct'`. Warnings quando promoção falha (item de outro user, deletado, etc.) — devolve fact criado + warning; não faz rollback. (M) — SP-142.
+- [ ] **T-B505** — Testes de integração em `tests/test_manual_nutrient_facts.py` (12 casos): happy path per_100g, happy path per_100ml, canonical_name inválido → 422, kcal negativa → 422, isolamento cross-user (user A não vê fact de user B), audit event gravado, promoção com item válido, promoção com item de outro user (warning + fact criado), promoção com item deletado (warning), promoção sobrescrevendo catalog_ref_id existente (audit registrado), snapshot recomputado após promoção, dia fechado bloqueia promoção (INV-5, mas cadastro do fact prossegue). (L) — gate.
+- [ ] **T-B506** — Frontend: componente `ManualCatalogForm.tsx` (client) — formulário curto exibido ao clicar no CTA "Cadastrar manualmente" do prompt SP-140. Campos mínimos: nome + kcal + P/C/G (+ opcionais escondidos em accordion). Submit chama `POST /nutrient-facts/manual` com `promote_food_item_id` do item que originou o `no_catalog_hit`. Após 201, revalida `DayTotalsBar` + fecha form. (M) — SP-141, SP-142.
+- [ ] **T-B507** — Integração: assistant message renderiza CTAs do SP-140 como componentes clicáveis (não só texto). Botão "Cadastrar manualmente" abre `ManualCatalogForm`; botão "Enviar foto" foca o input file do chat; botão "Descartar" envia mensagem `apaga {nome}` pré-preenchida. Requer estender `AssistantContent.tsx` pra detectar bloco de recovery e renderizar botões. (M) — SP-140.
+- [ ] **T-B508** — Docs: seção em `docs/pwa.md` (ou novo `docs/manual-catalog.md`) explicando o fluxo do usuário: quando aparece, o que fazer, quando usar cada opção. (XS)
+
+**Gate Bloco 5:** usuário que registra "pão de queijo congelado" pela primeira vez (fora do seed) vê CTA claro, escolhe "Cadastrar manualmente", preenche form curto, e o item volta pro diário com macros corretos + `needs_confirmation=false`, tudo sem sair do chat.
+
+**Não inclui:**
+- Delete de nutrient_fact manual (adiar até haver necessidade real).
+- Sugestão automática de kcal pela LLM (Const. §5 — LLM não gera macros).
+- Compartilhamento de facts entre users (single-user por design).
+- Formulário com micros completos (opcional na v1; usuário pode omitir).
+
+---
+
 ## Backlog (pós-MVP, `may`)
 
 - **B-01** — Persistência agregada de `sugars_g`, `added_sugars_g`, `saturated_fat_g`, `trans_fat_g`.
