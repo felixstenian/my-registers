@@ -253,6 +253,22 @@ Meta: transformar as respostas do assistant em cards estruturados legíveis + ba
 
 ---
 
+## Bloco 3 — Registro estruturado de treino (SP-120..SP-127) — pendente
+
+Meta: rastrear treinos de força de forma granular (sessão → exercícios → séries), coexistindo com `log_activity`. Consolida em `activity_record` no encerramento. Ver seção 3.13 da spec e ADR-011.
+
+**Todas `may` — implementação após Fase 9 concluída.** Não bloqueia MVP.
+
+- [ ] **T-B301** — Migration nova: `workout_sessions` (id, user_id, day_log_id FK, workout_type enum, detected_name, started_at, ended_at nullable, status enum `active|ended`, end_reason enum), `workout_exercises` (id, session_id FK, name, normalized_name, sequence_index, started_at), `workout_sets` (id, exercise_id FK, sequence_index, weight_kg NUMERIC, reps INT, notes nullable). Índices: `(user_id, status)` parcial em session; `(normalized_name, user_id, ended_at DESC)` em exercise pra lookup histórico rápido. FK opcional `activity_records.workout_session_id`. (M) — SP-120, INV-11.
+- [ ] **T-B302** — `Intent` enum ganha `workout_start`, `workout_add_exercise`, `workout_log_set`, `workout_end`, `workout_history`. Novos payloads `WorkoutStartIn`, `WorkoutExerciseIn`, `WorkoutSetIn`, `WorkoutEndIn`, `WorkoutHistoryQueryIn` em `app/schemas/llm.py`, tudo `_LenientBase`. Tool schema `record_intent` estendido. Prompt `system_v2.md` ganha regra 19 explicando os intents. (M) — SP-120..SP-127.
+- [ ] **T-B303** — `app/services/workout.py::WorkoutService`: `start_session`, `add_exercise` (com lookup histórico + PR), `log_set`, `end_session`, `history`. Métodos autônomos, sem dependência do MessageProcessor — testáveis isoladamente. (L) — SP-120..SP-124, SP-127.
+- [ ] **T-B304** — `WorkoutService.consolidate_to_activity`: cria `activity_record` com `activity_type='strength'`, `calc_method='workout_session'`, kcal via MET fixo × weight_kg × horas. Chamado por `end_session` (SP-124) e por `_handle_close_day` quando há sessão ativa (SP-125). (M) — SP-126, INV-13.
+- [ ] **T-B305** — `MessageProcessor` ganha 5 handlers: `_handle_workout_start`, `_handle_workout_add_exercise`, `_handle_workout_log_set`, `_handle_workout_end`, `_handle_workout_history`. `IntentDispatcher` roteia os 5 diretamente (não passam pelo `_STRUCTURED_INTENTS`). Cada handler compõe assistant message via novo `message_formatter.compose_workout_*` — tabelas markdown pra consistência com SP-118. (M)
+- [ ] **T-B306** — `_handle_close_day` chama `WorkoutService.end_session` **antes** do recompute quando há sessão ativa (SP-125). Ordem crítica: `activity_record` precisa estar persistido pra entrar no snapshot. (S)
+- [ ] **T-B307** — Testes: `tests/test_workout.py` cobrindo SP-120 (start + auto-encerra anterior), SP-121 (lookup histórico + PR), SP-122 (parser de peso pt-BR + múltiplas séries em 1 msg), SP-123 (encerramento implícito de exercício), SP-124 (end explícito → consolidate), SP-125 (close_day auto-encerra), SP-126 (activity_record correto), SP-127 (history query), INV-11 (única sessão ativa), INV-12 (set no último exercício), INV-13 (delete de activity_record não apaga sessão). (L)
+- [ ] **T-B308** — Frontend: renderização especial de assistant messages `workout_*` com destaque visual (peso PR em amber, série atual em verde). Novo `WorkoutHistoryCard` no chat. (M) — opcional, backend em markdown já é usável.
+
+**Gate Bloco 3:** treino registrado por chat com histórico contextual; encerramento gera activity_record que aparece no snapshot; INV-11/12/13 verificadas.
 ## Bloco 4 — PWA básico (SP-128..SP-135) ✅ (parcial)
 
 Meta: app instalável em iOS/Android/Desktop com shell offline. **Não** cobre offline de dados de negócio (contradiria INV-11), fila de mensagens (B-08) nem push (B-05). Zero mudança no backend.

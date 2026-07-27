@@ -226,6 +226,27 @@ Alternativas descartadas: com motivo objetivo.
 
 ---
 
+## ADR-011 — Registro estruturado de treino agrega ao `log_activity`
+
+**Data:** 2026-07-26
+**Status:** aceito
+**Contexto:** SP-120..SP-127 (seção 3.13 da spec) introduzem um novo modelo hierárquico para treinos de força — sessão → exercícios → séries — que é fundamentalmente mais granular que o `log_activity` atual (uma linha em `activity_records` = uma atividade inteira).
+
+**Decisão:** manter as duas representações. `log_activity` continua sendo o registro flat para cardio genérico ("corri 40 min moderado", "natação 30 min"). O novo módulo (`workout_sessions`, `workout_exercises`, `workout_sets`) rastreia treinos de força com detalhamento. **No encerramento da sessão (SP-124 ou SP-125), o backend consolida o treino em 1 `activity_record`** com `activity_type='strength'`, `calc_method='workout_session'`, kcal estimados via MET fixo por `workout_type`. Assim:
+
+- Snapshot diário e relatório semanal continuam agnósticos — enxergam `activity_record` como fonte única de `kcal_out`.
+- Detalhamento (peso × reps por exercício) fica nas novas tabelas, consultável para histórico (SP-121, SP-127) mas não impacta os totais nutricionais.
+- Correção/deleção do `activity_record` gerado **não** propaga para as tabelas de treino — INV-13. Se um dia isso incomodar (usuário apaga séries e espera kcal recalcular), abrir feature nova; fora do MVP-de-treino.
+
+**Alternativas descartadas:**
+- **Substituir `log_activity` por sessão para tudo.** Complexidade desnecessária para cardio simples ("corri 40 min" não precisa de sessão + exercício + série).
+- **Duas tabelas totalmente separadas, sem consolidação.** Snapshot e semanal precisariam saber sobre duas fontes de `kcal_out`, adicionando complexidade ao recompute e ao formatter — quebra INV-1 (única fonte de verdade para totais).
+- **Consolidação em tempo real (a cada série adicionada).** Cada série disparando recompute é caro; o dado só faz sentido total quando a sessão fecha. Consolidar no encerramento é o momento natural.
+
+**Consequências:**
+- Migration nova cria 3 tabelas + FK opcional `activity_records.workout_session_id` para trilha reversa (dado `activity_record`, achar a sessão original).
+- MET fixo por tipo é aproximado (musculação varia muito com carga/descanso). Aceito como MVP; refinamento pode vir com "volume total × densidade" no futuro.
+- Sessões que ficam abertas por dias (usuário esqueceu de encerrar) são fechadas automaticamente por SP-125 quando o dia é fechado. Se o usuário nunca fechar o dia, sessão fica órfã indefinidamente — aceito por ora.
 ## ADR-012 — CI/CD com GitHub Actions em duas etapas (validação em PR + deploy SSH em merge)
 
 **Status:** accepted
@@ -264,4 +285,5 @@ Alternativas descartadas: com motivo objetivo.
 ## Histórico
 
 - **2026-07-15** — v1.0. 10 ADRs iniciais registrando decisões da Fase 0 e do plano.
+- **2026-07-26** — v1.1. ADR-011 aceito: registro estruturado de treino agrega ao `log_activity` via consolidação no encerramento (contexto da seção 3.13 da spec).
 - **2026-07-26** — v1.1. ADR-012 aceito: CI/CD com GitHub Actions em dois workflows (validação em PR + deploy SSH em merge para `main`). Escolha registrada; implementação pendente na Fase 10. (ADR-011 é reservado para o PR de workout-tracking; se este PR mergear primeiro haverá um buraco de numeração até ele.)
