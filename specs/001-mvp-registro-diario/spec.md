@@ -352,6 +352,132 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 **SP-113** (`should`) — Ordenação.
 - `per_day` do mais antigo para o mais recente.
 
+### 3.13 Registro estruturado de treino (pós-MVP)
+
+**Não faz parte do MVP.** Toda esta seção está marcada `may` — implementação após Fase 9 concluída. Rastreia treinos de força de forma granular (sessão → exercícios → séries), coexistindo com o `log_activity` genérico.
+
+**Modelo mental:** o usuário abre uma sessão de treino ("iniciando treino de push"), lista o exercício que vai fazer ("supino reto com barra") e reporta cada série ("20 kg da barra + 20 kg de cada lado × 10 reps"). Ao mandar outro nome de exercício, o anterior é implicitamente encerrado. Ao mandar "finalizar treino" ou encerrar o dia, a sessão inteira é consolidada em um `activity_record` com kcal totais estimados.
+
+**Design de coexistência com `log_activity` (SP-60..SP-64):**
+- Cardio genérico e atividades sem séries (corrida, natação, caminhada) continuam usando `log_activity` como hoje.
+- Treinos de força/musculação usam este novo módulo. No encerramento da sessão, o backend **agrega** os dados estruturados em 1 `activity_record` (com `calc_method='workout_session'`, `activity_type='strength'`) — o snapshot diário e o relatório semanal enxergam como qualquer outra atividade. Ver ADR-004 em `research.md`.
+
+**Estado conversacional:** a única fonte de "sessão ativa" e "exercício atual" é o banco (`workout_sessions.status='active'`, exercício mais recente da sessão). Nenhum estado em memória — o LLM não precisa "lembrar" do contexto entre mensagens; o backend consulta o DB a cada mensagem.
+
+**SP-120** (`may`) — Início de sessão de treino.
+- **Given** usuário sem `workout_sessions.status='active'`.
+- **When** LLM detecta `intent=workout_start` (ex.: "iniciando treino de push", "vou treinar leg", "começando treino").
+- **Then** cria `workout_sessions` com `started_at=now()`, `status='active'`, `workout_type` classificado pela LLM em enum canônico (`push`, `pull`, `legs`, `upper`, `lower`, `full_body`, `cardio`, `other`) e `detected_name` livre para o usuário.
+- Se já existe sessão ativa, **encerra a anterior automaticamente** (INV-11) com `ended_at=now()`, `end_reason='auto_new_session'` — assistente avisa e mostra resumo curto.
+- Backend responde com cabeçalho + "Nenhum exercício ainda — mande o nome do primeiro".
+
+**SP-121** (`may`) — Adicionar exercício + histórico contextual.
+- **Given** sessão ativa existente.
+- **When** LLM detecta `intent=workout_add_exercise` com `exercise_name` extraído (ex.: "supino reto com barra", "agachamento livre 4x8", "leg press").
+- **Then** cria `workout_exercises` ligado à sessão ativa, com `sequence_index` auto-incrementado. `normalized_name` para lookup histórico.
+- Backend consulta histórico via `normalized_name` (fuzzy match; ex.: "supino reto" casa com "supino reto barra" e "supino reto halteres") e devolve na assistant message:
+  - **Última sessão** que teve esse exercício: data + todas as séries no formato "peso × reps".
+  - **PR pessoal** (Personal Record): maior peso registrado × maior número de reps naquele peso, com data.
+  - Se nunca fez, mensagem neutra: "Primeira vez registrando esse exercício."
+- Se a sessão ativa já tem outro exercício em andamento, ele é implicitamente considerado encerrado (não muda estado, só semântica — SP-123).
+
+**SP-122** (`may`) — Registro de séries.
+- **Given** sessão ativa com pelo menos um exercício.
+- **When** LLM detecta `intent=workout_log_set` com payload contendo `weight_kg`, `reps` e opcionalmente `notes`.
+- **Then** cria `workout_sets` ligado ao último exercício da sessão ativa (INV-12), com `sequence_index` auto-incrementado.
+- Parser de peso em pt-BR (feito pela LLM, backend só valida `weight_kg > 0`):
+  - "20 kg" → 20
+  - "20 kg da barra + 20 kg de cada lado" → 20 + 2×20 = 60
+  - "60 kg" → 60
+  - "só a barra" → 20 (default olympic bar; se ambíguo, LLM confirma)
+- Parser de reps:
+  - "10 reps" / "10 repetições" / "10x" → 10
+  - Múltiplas séries em uma mensagem: "3×8 60 kg" → cria 3 sets iguais.
+- Se `weight_kg` ou `reps` estiver ambíguo, LLM emite `clarify` — nenhum set é criado.
+- Resposta do assistant: "Série 3 registrada: 60 kg × 10 (última vez você fez 55 kg × 10)".
+
+**SP-123** (`may`) — Encerramento implícito de exercício.
+- **Given** sessão ativa com exercício A em andamento.
+- **When** usuário adiciona novo exercício B (SP-121).
+- **Then** A é considerado encerrado (nenhuma mudança de estado explícita — o simples fato de B existir e ter `sequence_index > A.sequence_index` estabelece isso). Séries subsequentes ligam-se ao B (SP-122).
+- Nenhum `ended_at` no exercício — a sessão inteira que tem `started_at/ended_at`.
+
+**SP-124** (`may`) — Encerramento explícito de sessão.
+- **Given** sessão ativa.
+- **When** LLM detecta `intent=workout_end` (ex.: "finalizar treino", "encerrar treino", "acabou o treino").
+- **Then** marca `workout_sessions.status='ended'`, `ended_at=now()`, `end_reason='user'`. Dispara **SP-125** (consolidação em `activity_record`).
+- Assistant devolve resumo: "Treino de push encerrado (58 min). 4 exercícios · 14 séries · ~380 kcal estimados." + tabela markdown com exercícios e séries totais por exercício.
+
+**SP-125** (`may`) — Encerramento automático ao fechar dia.
+- **Given** sessão ativa quando `intent=close_day` (SP-100) é processado.
+- **Then** antes do recompute do snapshot, sessão é encerrada com `end_reason='auto_close_day'` e SP-125 (consolidação) roda.
+- Isso garante que o `activity_record` gerado apareça no snapshot do dia que está sendo fechado.
+
+**SP-126** (`may`) — Consolidação em `activity_record`.
+- **Given** sessão sendo encerrada (SP-124 ou SP-125).
+- **Then** backend calcula:
+  - `duration_minutes = ended_at - started_at` (em minutos, sem contar pausas — MVP simples).
+  - `kcal_burned` estimado via MET fixo por tipo de treino (`push/pull/upper` → 5.0 MET; `legs/lower` → 6.0; `full_body` → 5.5) × `weight_kg` (do perfil) × horas.
+- Cria 1 `activity_record` com `activity_type='strength'`, `calc_method='workout_session'`, `met_value=<usado>`, `detected_name="Treino de {workout_type}"`, `notes=` JSON com IDs dos exercícios e séries.
+- Se o usuário não tem `weight_kg` no perfil, `activity_record` é criado com `kcal_burned=NULL` e warning `weight_kg_required_for_kcal` — treino é registrado, kcal fica pendente.
+
+**SP-127** (`may`) — Consulta de histórico via chat.
+- **When** LLM detecta `intent=workout_history` com `exercise_name` (ex.: "qual peso fiz no supino reto?", "meu histórico de agachamento", "PR do deadlift").
+- **Then** backend responde com as **últimas 3 sessões** que continham o exercício + **PR pessoal**, mesmo formato do SP-121 mas sem criar registro novo.
+- Se `exercise_name` ausente, LLM emite `clarify` pedindo qual exercício.
+
+**Invariantes adicionais:**
+- **INV-11** — No máximo uma `workout_sessions` por usuário com `status='active'`. Adicionar nova sessão auto-encerra a anterior.
+- **INV-12** — Todo `workout_sets` pertence ao **último** `workout_exercises` da sessão ativa (por `sequence_index`). Não existe "adicionar série ao exercício X que já não é o último".
+- **INV-13** — `activity_record` gerado por SP-126 tem `calc_method='workout_session'` — nunca é criado manualmente por outro fluxo. Correção/deleção desse `activity_record` NÃO afeta os `workout_sessions/exercises/sets` associados (idem: apagar séries não apaga o `activity_record` já gerado; consistência é responsabilidade de recompute manual, fora do MVP).
+
+**Dependências de dados:**
+- Novas tabelas: `workout_sessions`, `workout_exercises`, `workout_sets`. Alembic migration nova.
+- Estende `Intent` enum do `LLMEnvelope` com `workout_start`, `workout_add_exercise`, `workout_log_set`, `workout_end`, `workout_history`.
+- Prompt `system_v2.md` ganha nova regra 19 explicando os 5 novos intents.
+- Reutiliza `MessageProcessor` + `IntentDispatcher` — cada intent vira um novo `_handle_workout_*` handler.
+
+---
+
+### 3.13 Progressive Web App (pós-MVP, escopo básico)
+
+Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push (B-05) nem cache de dados de negócio.
+
+**SP-128** (`must`) — Manifest publicado em `/manifest.webmanifest`.
+- Campos obrigatórios: `name`, `short_name` (≤12 chars), `icons` (192, 512, maskable), `theme_color`, `background_color`, `display: standalone`, `start_url: /chat`, `scope: /`, `orientation: portrait`.
+- MIME type correto (`application/manifest+json`) — Next.js já resolve via convenção de arquivo em `src/app/manifest.ts`.
+
+**SP-129** (`must`) — Meta tags para instalação em iOS Safari.
+- `apple-mobile-web-app-capable=yes`, `apple-mobile-web-app-status-bar-style=default`, `apple-mobile-web-app-title=my-registers`, `apple-touch-icon` 180×180.
+- Sem essas tags, iOS Safari não trata a app como instalável em standalone.
+
+**SP-130** (`must`) — Service worker com estratégia por rota.
+- Shell estático (`/_next/static/*`, ícones, manifest, fonts): **cache-first** com revalidação em background.
+- HTML de rotas (`/chat`, `/login`, `/weekly`): **network-first** com fallback pra cache offline.
+- API (`/api/*`): **network-only, nunca cachear.** Ver `INV-11`.
+- Registro no client após hidratação (não bloqueia render inicial).
+
+**SP-131** (`must`) — Assets de ícone em 4 tamanhos mínimos.
+- `192×192` (Android padrão), `512×512` (Android hi-res / splash), `180×180` (apple-touch), `512×512 maskable` (Android adaptativo).
+- Formato PNG. Cor de fundo compatível com `background_color` do manifest.
+
+**SP-132** (`should`) — Update flow visível.
+- Quando SW detecta versão nova disponível (`updatefound` + `installed` state), exibir toast persistente "Nova versão disponível" com botão "Recarregar" que dispara `postMessage({type: 'SKIP_WAITING'})` seguido de `window.location.reload()`.
+- Sem esse fluxo, usuário fica preso em versão antiga até fechar todas as abas.
+
+**SP-133** (`should`) — Botão "Instalar" no header.
+- Escuta `beforeinstallprompt` (Chrome/Edge Android+desktop), guarda evento, exibe botão que chama `.prompt()`.
+- Oculto em navegadores sem o evento (Safari desktop/iOS — nesses, install é via "Adicionar à tela de início" do menu do browser).
+- Após install (`appinstalled` event), botão some.
+
+**SP-134** (`may`) — Splash iOS via `apple-touch-startup-image`.
+- Set mínimo: iPhone SE/8, iPhone 15/16 Pro (3 sizes). iPad opcional.
+- Sem isso, iOS mostra tela branca de ~500ms na abertura standalone.
+
+**SP-135** (`must`) — Comportamento offline previsível.
+- Rota carregada offline (sem cache do dia) exibe página `/offline` com mensagem: "Sem conexão. Algumas ações ficam indisponíveis até você reconectar." + link "Tentar novamente".
+- Aviso legal (Constituição Art. VII §26) presente na `/offline`.
+
 ---
 
 ### 3.13 Progressive Web App (pós-MVP, escopo básico)
@@ -506,4 +632,5 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-16** — v1.1. Adicionados SP-15 (envio por Enter) e SP-16 (captura direta pela câmera em mobile) como `may` (pós-MVP). Melhorias de UX no chat que não bloqueiam o MVP; entram no backlog para depois da Fase 9.
 - **2026-07-15** — v1.0. Spec inicial extraída de `docs/specs.md`; alinhada com `constitution.md` v1.0.0 e `app_plan.md` 20 seções.
 - **2026-07-19** — v1.5. SP-24 detalha chat-side (SP-24a): intent `confirm_items` com scopes `all`/`specific`. Sem novo SP-ID — é implementação faltante do SP-24 original que já previa "aguarda confirmação por chat".
+- **2026-07-26** — v1.6. Adicionada seção 3.13 "Registro estruturado de treino" com SP-120..SP-127 (todos `may`, pós-MVP). Modelo hierárquico sessão → exercícios → séries, coexistência com `log_activity` via consolidação em `activity_record` no encerramento (ADR-004 em `research.md`). Novos invariantes INV-11, INV-12, INV-13. Não bloqueia MVP; implementação após Fase 9.
 - **2026-07-27** — v1.7. Nova seção 3.13: PWA básico (SP-128..SP-135). Escopo: instalabilidade + shell offline, sem fila de mensagens nem cache de dados de negócio. Nova INV-11 proíbe SW de cachear `/api/*`. Item correspondente removido de "Fora do escopo". (Se PR de workout-tracking mergear primeiro, essa seção vira 3.14 no rebase; sem conflito de SP porque as faixas SP-120..127 e SP-128..135 são disjuntas.)
