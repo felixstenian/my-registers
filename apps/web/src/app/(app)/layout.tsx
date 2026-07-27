@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { InstallButton } from './InstallButton';
 import { LogoutButton } from './logout-button';
 
 type Me = {
@@ -36,6 +37,7 @@ export default async function ProtectedLayout({
         <span className="font-medium">my-registers</span>
         <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
           <span>{me.email}</span>
+          <InstallButton />
           <LogoutButton />
         </div>
       </header>

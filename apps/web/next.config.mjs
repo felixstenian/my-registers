@@ -1,3 +1,14 @@
+import withSerwistInit from '@serwist/next';
+
+const withSerwist = withSerwistInit({
+  swSrc: 'src/app/sw.ts',
+  swDest: 'public/sw.js',
+  // Só ativa em produção; em dev fica desligado pra não interferir no HMR.
+  disable: process.env.NODE_ENV === 'development',
+  cacheOnNavigation: true,
+  reloadOnOnline: true,
+});
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
@@ -16,4 +27,4 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSerwist(nextConfig);

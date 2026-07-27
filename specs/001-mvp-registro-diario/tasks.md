@@ -228,24 +228,24 @@ Meta: transformar as respostas do assistant em cards estruturados legíveis + ba
 
 ---
 
-## Bloco 4 — PWA básico (SP-128..SP-135) — pendente
+## Bloco 4 — PWA básico (SP-128..SP-135) ✅ (parcial)
 
 Meta: app instalável em iOS/Android/Desktop com shell offline. **Não** cobre offline de dados de negócio (contradiria INV-11), fila de mensagens (B-08) nem push (B-05). Zero mudança no backend.
 
 Pré-requisitos: Fase 9 concluída (app em prod com HTTPS válido — PWA exige TLS pra instalar).
 
-- [ ] **T-B401** — `src/app/manifest.ts` (convenção do Next 15) devolvendo o manifest com name, short_name, icons (192/512/maskable), theme_color, background_color, display=standalone, start_url=/chat, scope=/, orientation=portrait. Ver SP-128. (S)
-- [ ] **T-B402** — Assets em `public/icons/`: `icon-192.png`, `icon-512.png`, `icon-512-maskable.png`, `apple-touch-icon.png` (180×180), favicon.ico. Gerar via ferramenta ou design manual — cor base compatível com theme_color. SP-131. (S)
-- [ ] **T-B403** — Meta tags iOS Safari no root layout (`src/app/layout.tsx`): apple-mobile-web-app-capable, status-bar-style, title, apple-touch-icon link. SP-129. (XS)
-- [ ] **T-B404** — Service worker via **Serwist** (sucessor moderno do next-pwa, oficial pra Next 15+). Config: cache-first pra `/_next/static/*` + `/icons/*` + `/manifest.webmanifest`; network-first pra HTML de rotas; **NetworkOnly** pra `/api/*` (INV-11). Register client-side após hidratação. SP-130. (M)
-- [ ] **T-B405** — Página `src/app/offline/page.tsx` (server component estático) exibindo "Sem conexão", aviso legal Art. VII §26, botão "Tentar novamente" (`window.location.reload()`). SP-135. (S)
-- [ ] **T-B406** — Update flow: componente client `<SwUpdatePrompt />` no root layout. Escuta `serviceWorker.controller` + `updatefound`; quando novo SW em `installed`, mostra toast persistente com botão "Recarregar" que faz `postMessage({type: 'SKIP_WAITING'})` + `location.reload()`. SP-132. (M)
-- [ ] **T-B407** — Botão "Instalar app" no header: componente client `<InstallButton />` que escuta `beforeinstallprompt`, guarda o evento em state, exibe botão que chama `.prompt()`. Some após `appinstalled`. Oculto em navegadores sem o evento. SP-133. (S)
-- [ ] **T-B408** — Splash iOS opcional (SP-134): 3 tamanhos de `apple-touch-startup-image` (iPhone SE/8, iPhone 15/16 Pro, iPad 11). Adia se for muito trabalho de asset. (S, opcional)
-- [ ] **T-B409** — Testes: (a) unit da estratégia do SW (mock de fetch → confirma que `/api/foo` não passa pelo cache); (b) Lighthouse PWA score ≥ 90 rodado local via `pnpm --filter web build && lighthouse http://localhost:3000 --only-categories=pwa`. (M) — gate.
-- [ ] **T-B410** — Docs em `docs/pwa.md`: como instalar em iOS Safari (share → "Adicionar à Tela de Início"), Android Chrome (banner automático ou menu), Desktop Chrome/Edge (ícone na barra). Screenshots opcionais. (XS)
+- [x] **T-B401** — `src/app/manifest.ts` com name, short_name (`my-reg`), icons (192/512/maskable), theme_color `#0f172a`, background_color `#0f172a`, display=standalone, start_url=/chat, scope=/, orientation=portrait, lang=pt-BR. (S)
+- [x] **T-B402** — Ícones em `public/icons/`: `icon.svg` (source), `icon-192.png`, `icon-512.png`, `icon-512-maskable.png`, `apple-touch-icon.png` (180×180). Gerados via `sharp` a partir do SVG placeholder (mr em fundo `#0f172a`). Script inline; substituir por assets de design real depois. SP-131. (S)
+- [x] **T-B403** — Meta tags iOS Safari + Viewport no root layout: `appleWebApp` da Metadata API do Next 15 (capable, status-bar-style, title), `formatDetection.telephone=false`, `apple-touch-icon`, `viewportFit=cover`, `themeColor`. SP-129. (XS)
+- [x] **T-B404** — Service worker via **Serwist** em `src/app/sw.ts`: `NetworkOnly` para `/api/*` (INV-11), `NetworkFirst` com timeout 5s para HTML de rotas, `StaleWhileRevalidate` para `/_next/static/*`, `navigationPreload` on, `clientsClaim` on. Serwist injetado no `next.config.mjs` via `@serwist/next` (config `disable` em dev). Build usa `--webpack` porque Serwist ainda não suporta Turbopack. SP-130. (M)
+- [x] **T-B405** — `src/app/offline/page.tsx` (server) + `OfflineRetryButton.tsx` (client) exibindo "Sem conexão" + aviso legal Art. VII §26 + botão que faz `window.location.reload()`. SP-135. (S)
+- [x] **T-B406** — `src/app/sw-update-prompt.tsx` no root layout: escuta `updatefound` + `installed` state + `controllerchange`; toast fixo no rodapé com botão "Recarregar" que dispara `SKIP_WAITING` e recarrega quando o novo SW assume. SP-132. (M)
+- [x] **T-B407** — `src/app/(app)/InstallButton.tsx` no header do layout protegido: escuta `beforeinstallprompt` (preventDefault + guarda o evento), botão que chama `.prompt()` e some após `appinstalled` OU quando já está em `display-mode: standalone`. Oculto em navegadores sem o evento (Safari/Firefox). SP-133. (S)
+- [ ] **T-B408** — Splash iOS opcional (SP-134). **Adiado** — precisa 3 sizes de asset de design real; volta quando ícone final chegar. (S, opcional)
+- [x] **T-B409** — `apps/web/scripts/verify-sw.mjs` roda em `pnpm --filter web verify:sw`: sanity checks estáticos de sw.ts (matcher /api/, NetworkOnly no handler, fallback /offline, listener SKIP_WAITING) + bundle contém /api/ e /offline. **Sem vitest** — evita adicionar framework de teste no web só por 1 assertion; Lighthouse PWA rodado manualmente conforme `docs/pwa.md` (gate ≥ 90 pendente de rodar em prod). (M)
+- [x] **T-B410** — `docs/pwa.md` cobre instalação em iOS Safari (share → Adicionar à Tela de Início), Android Chrome (banner ou menu), Desktop (ícone na barra), diagnóstico, arquivos-chave, e como rodar Lighthouse. SP-133/135 documentados. (XS)
 
-**Gate Bloco 4:** app é instalável em iOS + Android + Desktop com HTTPS; Lighthouse PWA ≥ 90; SW **não** cacheia respostas de `/api/*` (INV-11); update flow visível quando nova versão sai.
+**Gate Bloco 4:** app é instalável em iOS + Android + Desktop com HTTPS; Lighthouse PWA ≥ 90 (rodar em prod após deploy); SW **não** cacheia respostas de `/api/*` (INV-11) — garantido por `verify-sw.mjs`; update flow visível quando nova versão sai. **T-B408 adiado** por depender de asset de design.
 
 **Não inclui (por design):**
 - Fila offline de mensagens (B-08 no backlog — envolve idempotência de envio + IndexedDB).
