@@ -521,6 +521,51 @@ Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push
 
 ---
 
+### 3.15 Visão detalhada do dia — página `/day` (pós-MVP)
+
+**Motivador.** `DayTotalsBar` só mostra totais agregados; `/weekly` mostra 7 dias agregados. Nenhum lugar hoje mostra **item por item** do dia com macros/micros específicos — o usuário precisa confiar no total sem conseguir validar se cada alimento foi persistido com o valor esperado. Em prod isso ficou explícito no bug do catálogo vazio (item aparece com kcal=0 no total, mas usuário só descobre indiretamente). Uma página de detalhamento fecha esse loop de confiança.
+
+Revive parcialmente a intenção do T-409 original ("DayTable renderiza totals + records"), que foi conscientemente deixado de fora do MVP. Não substitui `/weekly`; complementa.
+
+**Escopo v1:** leitura. Ações (editar, deletar, corrigir) continuam via chat na v1 — mantém a interface de mutação única e simplifica esta feature.
+
+**SP-150** (`should`) — Rota `/day` renderiza o dia atual (fuso do usuário — SP-92).
+- Server component protegido. Fetch server-side de `GET /days/today` via `INTERNAL_API_URL` (padrão do PR #25 hotfix).
+- Header: data formatada em pt-BR (`domingo, 27 de julho de 2026`), badge `status='open'|'closed'`, link "Encerrar dia" (dispara mesmo modal do `CloseDayModal` do chat) — só quando `status='open'`.
+- Link "Semana" no header do `(app)/layout` ganha peer "Detalhes" apontando pra `/day`.
+
+**SP-151** (`should`) — Refeições agrupadas por `meal_slot`.
+- Seções na ordem: `breakfast` → `lunch` → `snack` → `dinner` → `unspecified`. Slots vazios não são renderizados.
+- Cada seção tem: cabeçalho com nome pt-BR do slot + kcal parcial do slot. Lista de `food_items` como linhas de tabela.
+- Colunas: **Item** (`detected_name` + brand em cinza se houver) · **Quantidade** (`{grams}g` ou `{ml}ml` ou `{quantity} {unit}`) · **Calorias** · **P** · **C** · **G** · **Fibras**.
+- Badge amarelo "confirmar" quando `needs_confirmation=true` (link abre `PendingItemsModal` ou envia pra `/chat` — decisão de implementação).
+- Badge "sem catálogo" quando `catalog_ref_id=null` — indica item que veio zerado do bug do seed vazio (recuperável via chat).
+
+**SP-152** (`should`) — Detalhamento por item via expansão.
+- Cada linha de food_item pode ser expandida (`<details>` ou click) revelando micros básicos: sódio (mg), cálcio (mg), ferro (mg), potássio (mg).
+- Valores zero → renderiza `—` em vez de `0` (menos ruído visual).
+- Também mostra `source` (`llm`, `user_corrected`, `label_ocr`, `user_manual`) e `confidence` (LLM) — útil pra saber a origem do valor.
+
+**SP-153** (`should`) — Seções auxiliares: hidratação, bebidas, atividade.
+- **Hidratação (água pura):** lista com horário + volume; totalizador `Água: N ml`.
+- **Bebidas calóricas:** mesma tabela reduzida das refeições (item, volume, kcal + macros; sem micros — mais raro cadastrar).
+- **Atividade:** linha por registro com tipo pt-BR, duração, intensidade, kcal gastas + método (`met_estimate`, `reported_by_device`, `workout_session` quando Bloco 3 chegar).
+
+**SP-154** (`may`) — Rota `/day/[date]` para dias passados.
+- Server component idêntico ao `/day`, com `GET /days/{date}` em vez de `/today`.
+- 404 amigável se `day_log` não existe (nenhum registro naquele dia).
+- Read-only mesmo pra dias abertos passados (edição via chat cria confusão sobre "data efetiva" da mutação).
+- Fica `may` porque uso primário é o dia atual; historico via `/weekly` já cobre visão agregada.
+
+**Fora do escopo desta feature:**
+- Edição/deleção inline (v2 — hoje é via chat).
+- Filtros/ordenação (só a ordem natural: meal_slot → occurred_at).
+- Exportação CSV/PDF do dia (feature B-06 do backlog).
+- Gráficos de distribuição de macros (v2+).
+- Comparação com dias anteriores (v2+).
+
+---
+
 ## 4. Requisitos não-funcionais
 
 ### 4.1 Segurança
@@ -634,3 +679,4 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-19** — v1.5. SP-24 detalha chat-side (SP-24a): intent `confirm_items` com scopes `all`/`specific`. Sem novo SP-ID — é implementação faltante do SP-24 original que já previa "aguarda confirmação por chat".
 - **2026-07-26** — v1.6. Adicionada seção 3.13 "Registro estruturado de treino" com SP-120..SP-127 (todos `may`, pós-MVP). Modelo hierárquico sessão → exercícios → séries, coexistência com `log_activity` via consolidação em `activity_record` no encerramento (ADR-004 em `research.md`). Novos invariantes INV-11, INV-12, INV-13. Não bloqueia MVP; implementação após Fase 9.
 - **2026-07-27** — v1.7. Nova seção 3.13: PWA básico (SP-128..SP-135). Escopo: instalabilidade + shell offline, sem fila de mensagens nem cache de dados de negócio. Nova INV-11 proíbe SW de cachear `/api/*`. Item correspondente removido de "Fora do escopo". (Se PR de workout-tracking mergear primeiro, essa seção vira 3.14 no rebase; sem conflito de SP porque as faixas SP-120..127 e SP-128..135 são disjuntas.)
+- **2026-07-27** — v1.9. Nova seção 3.15 "Visão detalhada do dia" (SP-150..SP-154, todos `should`/`may`): página `/day` server-rendered com refeições agrupadas por meal_slot, food_items com macros + micros expansíveis, seções auxiliares de hidratação/bebidas/atividade, rota opcional `/day/[date]` para dias passados. Motivador: bug do catálogo vazio em prod expôs que faltava lugar pro usuário validar item-por-item. Revive parcialmente a intenção do T-409 original. Escopo v1 é read-only; mutações continuam via chat. Faixa SP-150..154 escolhida pra reservar espaço acima de SP-140..142 (§3.14 de recuperação de catálogo, ainda em PR aberta) — sem conflito.
