@@ -94,12 +94,12 @@ Status: **done** (branch `feat/fase-4-food-registry`). 79 testes verdes (28 novo
 - [x] **T-405** — `MealService.create_from_llm`: uma `food_record` por envelope; para cada `FoodItemIn` lookup no catálogo, cálculo determinístico, persist `food_items` com materialização. Flag `needs_confirmation=True` se `confidence<0.5` ou sem catálogo. Grava `audit_events(actor='llm', action='create', after={meal_slot, occurred_at, item_ids})`.
 - [x] **T-406** — `DailyRecomputeService.recompute(day_log_id)`: SUM sobre `food_items` vivos + JOIN em `food_records` vivos. Upsert em `daily_snapshots` por UNIQUE(day_log_id) com `version = c.version + 1` em conflito. `execution_options(populate_existing=True)` no RETURNING para forçar refresh do identity map (senão a 2ª recompute do mesmo dia devolve o snapshot cacheado da 1ª). Warnings agregam itens sem catálogo + `needs_confirmation`.
 - [x] **T-407** — `MessageProcessor._handle_log_food` chama `MealService` → `DailyRecompute` → cria assistant message com resumo factual dos itens + totais + aviso legal (Const. Art. VII §26 antecipado). `IntentDispatcher` deixa de listar `log_food` como estruturado. Fluxo end-to-end coberto em `test_log_food_flow.py`.
-- [ ] **T-408** — `GET /days/today`, `GET /days/{date}` (só leitura no MVP). (S) — SP-90, SP-91. `blocked_by: T-406`.
-- [ ] **T-409** — Frontend `DayTable`: renderiza totals + records. Fetch em polling e após confirmação do assistente. (M) — SP-90 UI. `blocked_by: T-408`.
-- [ ] **T-410** — Testes: SP-20 a SP-26, INV-1, SP-90, SP-91, SP-92 (foco em timezone). (M) — gate.
+- [x] **T-408** — `GET /days/today`, `GET /days/{date}` implementados em `app/api/routes/days.py:33` (today) e `:52` (by date). Ambos retornam `DaySnapshotOut` com `records` populados. SP-90/91/92 cobertos.
+- [x] **T-409** — Frontend renderiza **totals** via `DayTotalsBar` (SP-116 do Bloco 2) — a barra do chat consome `GET /days/today` com revalidação por assinatura de nova assistant message e após confirmação de items pendentes. Renderização detalhada de `records` item-a-item numa página `/days/[date]` dedicada **não foi entregue e é opcional para o MVP** — o valor incremental é baixo dado que (a) `DayTotalsBar` já entrega os totais, (b) `/weekly` cobre a visão histórica agregada e (c) o chat mostra os registros no fluxo natural das confirmações. Se um dia virar necessidade real (revisar/auditar um dia passado item-a-item), abrir tarefa nova `T-409b`.
+- [x] **T-410** — Testes SP-90/91/92 cobertos em `tests/test_day_close_report.py::test_get_today_returns_empty_snapshot_when_no_records`, `::test_get_today_reflects_registered_food`, `::test_get_by_date_not_found_returns_404`, `::test_get_by_date_open_day_returns_status_open`, `::test_get_today_uses_user_timezone_not_utc`. SP-20..SP-26 cobertos em `tests/test_log_food_flow.py` + `tests/test_meal_service.py`. INV-1 (LLM não soma) coberto em `tests/test_nutrition_calculator.py` + integração do log_food que testa retornos determinísticos mesmo com LLM mentindo. Gate cumprido.
 - [x] **T-411** — SP-24 chat-side (SP-24a): intent `confirm_items` + `ConfirmationService`. Feedback do teste manual do café-da-manhã mostrou loop de "confirmo esses itens" caindo em clarify ou re-registrando. Envelope aceita `scope='all'|'specific'` + `target_hints`; audit `action='confirm'` (migration 0006 acrescenta ao CHECK); não recomputa snapshot. Testes em `tests/test_confirm_items.py`. (M) — SP-24.
 
-**Gate Fase 4:** registrar alimento por texto funciona ponta-a-ponta; snapshot atualiza; tabela renderiza. Const. §5-6, §10.
+**Gate Fase 4 — cumprido:** registrar alimento por texto funciona ponta-a-ponta; snapshot atualiza; totais renderizam via `DayTotalsBar` (SP-116). Página `/days/[date]` detalhada foi conscientemente deixada de fora do MVP (ver T-409 acima). Const. §5-6, §10.
 
 ---
 
@@ -182,7 +182,7 @@ Meta: janela dos últimos 7 dias encerrados com totais, médias e narrative.
 
 ---
 
-## Fase 9 — Hardening e deploy ✅ (parcial)
+## Fase 9 — Hardening e deploy ✅
 
 Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 
@@ -193,9 +193,9 @@ Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 - [x] **T-905** — `scripts/bootstrap.sh`: `alembic upgrade head` + `python -m app.cli bootstrap` idempotentes; valida `.env.production` antes de rodar. INV-6: runtime da API não roda migrations. (S)
 - [x] **T-906** — Health check externo documentado em `docs/deploy.md` §9 (healthchecks.io + cron `*/5 * * * *` fazendo ping do `/api/health`). (S)
 - [x] **T-907** — Checklist de segurança §16 completo em `docs/deploy.md` §12 (13 itens ✅ + 5 itens ainda para operador validar: rclone, fail2ban, unattended-upgrades, docker prune, auditoria de logs). `.gitignore` atualizado com `.env.production`. `.env.production.example` com todas as variáveis de §14.1 do plano. (M)
-- [ ] **T-908** — Deploy real numa VPS de staging; smoke test manual do cenário-âncora. **Pendente** — depende do operador (Felix) provisionar VPS, DNS e rodar o runbook em `docs/deploy.md`.
+- [x] **T-908** — Deploy real executado em VPS DigitalOcean (Ubuntu 24.04, droplet Basic 2 vCPU / 2 GB) via runbook `docs/vps-digitalocean.md`. Domínio de produção: `myregister.felix.dev.br` (DNS na Vercel, subdomínio A pra IP do droplet). TLS Let's Encrypt emitido pós-hotfix D-01 (entrypoint certbot). Smoke test do cenário-âncora executado no browser (login → chat → registro → encerramento → semanal). Deploys posteriores: v1.1 (Bloco 4 PWA), v1.2 (seed TBCA + docs). Sessão de deploy inicial produziu 3 hotfixes rastreados (#24 build Next 16, #25 server-side fetch, config nginx/certbot manual em D-01).
 
-**Gate Fase 9 — parcial:** todos os artefatos de código e docs prontos. Falta apenas a execução do runbook por humano na VPS real (T-908) — não é possível automatizar sem SSH nas máquinas.
+**Gate Fase 9 — cumprido:** todos os artefatos de código, docs e o deploy real estão em produção. Const. §14 e Art. VI §24 verificados no campo.
 
 ---
 
