@@ -100,10 +100,10 @@ async def test_sp20_explicit_quantities_resolve_from_catalog(db_session: AsyncSe
         assert item.catalog_ref_id is not None
         assert item.kcal is not None and item.kcal > 0
         assert not item.needs_confirmation
-    # arroz 150g × 124kcal/100 = 186; feijão 90g × 77 = 69.3; frango 180g × 159 = 286.2
+    # arroz 150g × 130kcal/100 = 195; feijão 90g × 77 = 69.3; frango 180g × 165 = 297
     kcal_by_name = {i.normalized_name: i.kcal for i in result.items}
-    assert kcal_by_name["arroz_branco_cozido"].compare(186) == 0
-    assert kcal_by_name["peito_de_frango_grelhado"].compare(Decimal("286.20")) == 0
+    assert kcal_by_name["arroz_branco_cozido"].compare(195) == 0
+    assert kcal_by_name["peito_de_frango_grelhado"].compare(Decimal("297.00")) == 0
 
 
 async def test_sp21_domestic_unit_marks_estimate_and_low_confidence(

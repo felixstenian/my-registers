@@ -244,8 +244,8 @@ async def test_correction_updates_grams_and_recomputes_macros(db_session: AsyncS
     await db_session.refresh(item)
     assert item.grams == Decimal("220")
     assert item.kcal != old_kcal
-    # 220 × 159 / 100 = 349.80
-    assert item.kcal == Decimal("349.80")
+    # 220 × 165 / 100 = 363.00 (seed TBCA: peito_de_frango_grelhado = 165 kcal/100g)
+    assert item.kcal == Decimal("363.00")
     assert item.source == "user_corrected"
     assert "grams" in result.changed_fields
 
@@ -487,8 +487,8 @@ async def test_patch_food_item_recomputes_macros(
     resp = await client.patch(f"/records/food-items/{item.id}", json={"grams": 250})
     assert resp.status_code == 200
     body = resp.json()
-    # 250 × 159 / 100 = 397.50
-    assert body["kcal"] == pytest.approx(397.50)
+    # 250 × 165 / 100 = 412.50 (seed TBCA: peito_de_frango_grelhado = 165 kcal/100g)
+    assert body["kcal"] == pytest.approx(412.50)
 
 
 # ---------------------------------------------------------------------------
@@ -542,9 +542,9 @@ async def test_snapshot_recomputes_after_correction(
     await client.post("/chat/messages", json={"text": "corrija frango 250g"})
 
     await db_session.refresh(snap_before)
-    # 250 × 159/100 = 397.50 (era 238.50 = 150×159/100)
+    # 250 × 165/100 = 412.50 (era 247.50 = 150×165/100)
     assert snap_before.kcal_in > kcal_before
-    assert snap_before.kcal_in == Decimal("397.50")
+    assert snap_before.kcal_in == Decimal("412.50")
     assert snap_before.version > version_before
 
 

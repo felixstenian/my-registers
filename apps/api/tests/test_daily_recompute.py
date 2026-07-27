@@ -79,9 +79,9 @@ async def test_snapshot_sums_food_items(db_session: AsyncSession, admin_user):
     await db_session.commit()
 
     snap = result.snapshot
-    # arroz 150g × 124 = 186; frango 180g × 159 = 286.2 → 472.2
-    assert snap.kcal_in.compare(Decimal("472.20")) == 0
-    assert snap.kcal_balance.compare(Decimal("472.20")) == 0
+    # arroz 150g × 130 = 195; frango 180g × 165 = 297 → 492.00
+    assert snap.kcal_in.compare(Decimal("492.00")) == 0
+    assert snap.kcal_balance.compare(Decimal("492.00")) == 0
     assert snap.version == 1
 
 
@@ -166,8 +166,8 @@ async def test_recompute_new_items_reflect_immediately(db_session: AsyncSession,
     await db_session.commit()
 
     assert r2.snapshot.kcal_in > first_kcal
-    # totais devem bater com soma dos dois: 124 + 159 = 283
-    assert r2.snapshot.kcal_in.compare(283) == 0
+    # totais devem bater com soma dos dois: 130 + 165 = 295
+    assert r2.snapshot.kcal_in.compare(295) == 0
 
 
 async def test_deleted_items_excluded_from_snapshot(db_session: AsyncSession, admin_user):

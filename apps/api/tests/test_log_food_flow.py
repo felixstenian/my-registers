@@ -84,8 +84,8 @@ async def test_log_food_end_to_end_persists_and_recomputes(
     assert len(records) == 1
     assert len(items) == 2
     assert len(snapshots) == 1
-    # arroz 150g × 124 = 186; frango 180g × 159 = 286.2 → 472.2
-    assert snapshots[0].kcal_in.compare(Decimal("472.20")) == 0
+    # arroz 150g × 130 = 195; frango 180g × 165 = 297 → 492.00
+    assert snapshots[0].kcal_in.compare(Decimal("492.00")) == 0
 
     # assistant response includes summary + disclaimer
     assistant = next(
@@ -138,8 +138,8 @@ async def test_llm_kcal_lies_ignored_backend_calculates(
     await client.post("/chat/messages", json={"text": "100g de arroz"})
 
     snap = (await db_session.execute(select(DailySnapshot))).scalar_one()
-    # 100g × 124kcal/100 = exatamente 124.00; sem influência da LLM
-    assert snap.kcal_in.compare(124) == 0
+    # 100g × 130kcal/100 = exatamente 130.00; sem influência da LLM
+    assert snap.kcal_in.compare(130) == 0
 
 
 async def test_unknown_food_creates_zero_kcal_with_warning(
