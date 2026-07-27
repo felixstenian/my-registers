@@ -177,10 +177,16 @@ async def patch_food_item(
         changed = True
 
     if changed and (payload.grams is not None or payload.ml is not None):
-        hit = None
-        if item.catalog_ref_id is not None:
-            catalog = LocalTBCACatalog(session)
-            hit = await catalog.lookup(LookupQuery(name=item.normalized_name, brand=item.brand))
+        # Sempre tenta lookup no catálogo (não só quando `catalog_ref_id` já
+        # existe). Isso permite recuperar itens antigos criados com
+        # catalog_ref_id=NULL — cenário típico é o item que foi criado antes
+        # do seed TBCA rodar em prod (bug corrigido em scripts/bootstrap.sh).
+        # Se o lookup achar agora, promovemos o item pra "com catálogo" +
+        # tiramos o needs_confirmation.
+        catalog = LocalTBCACatalog(session)
+        hit = await catalog.lookup(LookupQuery(name=item.normalized_name, brand=item.brand))
+        if hit is not None and item.catalog_ref_id is None:
+            item.catalog_ref_id = uuid.UUID(hit.fact_id)
         computed = NutritionCalculator.compute(hit=hit, grams=item.grams, ml=item.ml)
         for field in (
             "kcal",
@@ -231,4 +237,85 @@ async def patch_food_item(
         kcal=float(item.kcal) if item.kcal else None,
         grams=float(item.grams) if item.grams else None,
         ml=float(item.ml) if item.ml else None,
+    )
+
+
+class ConfirmationOut(BaseModel):
+    id: uuid.UUID
+    needs_confirmation: bool
+    already_confirmed: bool
+    kcal: float | None = None
+
+
+@router.post(
+    "/food-items/{entity_id}/confirm",
+    response_model=ConfirmationOut,
+    status_code=status.HTTP_200_OK,
+)
+async def confirm_food_item(
+    entity_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> ConfirmationOut:
+    """SP-24 chat-side análogo para o modal PWA — desmarca
+    `needs_confirmation` sem exigir mudança de grams/ml.
+
+    Racional: o PATCH `/food-items/{id}` só desmarca a flag quando o
+    payload traz `grams`/`ml` novos (senão vira no-op). O modal
+    `PendingItemsModal` do frontend às vezes só tem `quantity` (unit
+    doméstica) — o PATCH sem grams/ml não desmarca a flag e o item fica
+    preso em pending. Este endpoint quebra o loop.
+
+    Reaproveita o padrão do `ConfirmationService._confirm_batch`:
+    audit `action='confirm'`, actor='user'. **Não recomputa macros**
+    (só desmarca a flag; totais de kcal não mudam). Idempotente.
+    """
+    from sqlalchemy import select
+
+    from app.models import DayLog, FoodItem, FoodRecord
+    from app.repositories.food import AuditEventRepository
+
+    stmt = (
+        select(FoodItem, FoodRecord)
+        .join(FoodRecord, FoodRecord.id == FoodItem.food_record_id)
+        .where(FoodItem.id == entity_id, FoodRecord.user_id == current_user.id)
+    )
+    row = (await session.execute(stmt)).one_or_none()
+    if row is None:
+        raise NotFoundError("food_item not found", code="not_found")
+    item, food_record = row
+    if item.deleted_at is not None:
+        raise NotFoundError("food_item deleted", code="not_found")
+
+    day_log = await session.get(DayLog, food_record.day_log_id)
+    if day_log is not None and day_log.status == "closed":
+        raise ConflictError("day is closed", code="conflict_closed_day")
+
+    if not item.needs_confirmation:
+        return ConfirmationOut(
+            id=item.id,
+            needs_confirmation=False,
+            already_confirmed=True,
+            kcal=float(item.kcal) if item.kcal else None,
+        )
+
+    item.needs_confirmation = False
+    await session.flush()
+
+    await AuditEventRepository(session).record(
+        user_id=current_user.id,
+        entity_type="food_item",
+        entity_id=item.id,
+        action="confirm",
+        actor="user",
+        message_id=None,
+        before={"needs_confirmation": True},
+        after={"needs_confirmation": False},
+    )
+
+    return ConfirmationOut(
+        id=item.id,
+        needs_confirmation=False,
+        already_confirmed=False,
+        kcal=float(item.kcal) if item.kcal else None,
     )
