@@ -66,9 +66,11 @@ function collectPendingItems(day: DayResponse | null): FoodItemRef[] {
 export function DayTotalsBar({
   revalidateKey,
   onPendingClick,
+  onCloseDayClick,
 }: {
   revalidateKey: number;
   onPendingClick: (items: FoodItemRef[]) => void;
+  onCloseDayClick: (date: string) => void;
 }) {
   const [day, setDay] = useState<DayResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -113,6 +115,7 @@ export function DayTotalsBar({
   const kcalOut = totals!.kcal_out;
   const balance = totals!.kcal_in - kcalOut;
   const otherLiquids = totals!.other_liquids_ml;
+  const isClosed = day!.status === 'closed';
 
   return (
     <div className="mb-2 flex items-center gap-4 overflow-x-auto rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-900/50">
@@ -138,10 +141,27 @@ export function DayTotalsBar({
         <button
           type="button"
           onClick={() => onPendingClick(pending)}
-          className="ml-auto shrink-0 rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
+          className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
         >
           {pending.length} {pending.length === 1 ? 'item precisa' : 'itens precisam'} de confirmação
         </button>
+      )}
+      {/* T-704: botão de encerramento. Só aparece quando ainda está aberto
+          e existe pelo menos um registro (INV-5: nada útil em fechar um
+          dia vazio). Empurrado pra direita com ml-auto. */}
+      {!isClosed && (
+        <button
+          type="button"
+          onClick={() => onCloseDayClick(day!.date)}
+          className="ml-auto shrink-0 rounded-full border border-slate-300 px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+        >
+          Encerrar dia
+        </button>
+      )}
+      {isClosed && (
+        <span className="ml-auto shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+          Dia encerrado
+        </span>
       )}
     </div>
   );

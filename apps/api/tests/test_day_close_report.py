@@ -130,8 +130,8 @@ async def test_get_today_reflects_registered_food(
     resp = await client.get("/days/today")
     assert resp.status_code == 200
     body = resp.json()
-    # 150 × 159/100 = 238.50 kcal
-    assert body["totals"]["kcal_in"] == pytest.approx(238.50)
+    # 150 × 165/100 = 247.50 kcal (seed TBCA: peito_de_frango_grelhado = 165 kcal/100g)
+    assert body["totals"]["kcal_in"] == pytest.approx(247.50)
     assert len(body["records"]["food"]) == 1
     assert body["records"]["food"][0]["items"][0]["detected_name"] == "frango"
 
@@ -357,7 +357,8 @@ async def test_narrative_receives_precomputed_totals(
     assert len(fake_anthropic.narrative_calls) == 1
     payload = fake_anthropic.narrative_calls[0]["totals_payload"]
     # SP-103: LLM recebe TOTALS já calculados (Const. Art. II §5, INV-1).
-    assert payload["kcal_in"] == pytest.approx(238.50)
+    # 150g × 165/100 = 247.50 (peito_de_frango_grelhado).
+    assert payload["kcal_in"] == pytest.approx(247.50)
     assert "protein_g" in payload
     assert "warning_codes" in payload
     # Não vazamos IDs de entidades no payload da narrativa.
@@ -591,8 +592,8 @@ async def test_query_day_intent_returns_totals_via_chat(
     # Tabela `Total acumulado — DD/MM/YYYY` presente.
     assert "**Total acumulado —" in assistant.content
     assert "| Indicador | Total |" in assistant.content
-    # 238 kcal aparece na linha da tabela (int truncado).
-    assert "238 kcal" in assistant.content
+    # 247 kcal aparece na linha da tabela (int truncado; 150g × 165/100 = 247.50).
+    assert "247 kcal" in assistant.content
     assert DISCLAIMER in assistant.content
 
 

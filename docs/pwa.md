@@ -66,6 +66,10 @@ Se você tentar ações que dependem da API (enviar mensagem, encerrar dia), a r
 
 Desinstalar apaga o cache do SW e cookies isolados da app; login é perdido.
 
+> Também é o único jeito, no iOS, de puxar ícone/manifest novos após
+> um deploy que trocou esses assets. Ver seção
+> [Ícones ou manifest não atualizam após deploy](#ícones-ou-manifest-não-atualizam-após-deploy).
+
 ## Diagnóstico (dev/ops)
 
 ### O botão "Instalar" não aparece
@@ -78,6 +82,41 @@ Desinstalar apaga o cache do SW e cookies isolados da app; login é perdido.
 
 - SW ainda não detectou. Force via DevTools → Application → Service Workers → "Update on reload" + reload.
 - Deploy pode ter mantido o mesmo `sw.js` — Serwist regenera o bundle a cada build.
+
+### Ícones ou manifest não atualizam após deploy
+
+O service worker cacheia `manifest.webmanifest`, `sw.js` e os PNGs de
+ícone com estratégia cache-first (via `defaultCache` do Serwist). Depois
+que o usuário instalou a app, esses assets podem ficar no cache do SW
+por até 24-48h — mesmo com deploy novo — se o update flow for ignorado.
+
+Sintomas típicos:
+
+- Ícone antigo continua no home screen do iOS/Android
+- "Nome" da app na tela de instalação ainda é o velho
+- `manifest.webmanifest` que o DevTools mostra é a versão anterior
+
+Ordem de resolução:
+
+1. **Aceite o toast "Nova versão disponível"** quando aparecer — dispara
+   `SKIP_WAITING` e recarrega com o SW novo. É o caminho normal.
+2. **Force update manual** se o toast não aparecer:
+   - DevTools → Application → Service Workers → clique em "skipWaiting"
+     no worker em `waiting`, seguido de reload.
+   - Ou clique em "Unregister" e recarrega — o SW novo instala do zero.
+3. **Ícone do home screen (iOS)** só atualiza quando o usuário
+   desinstala e reinstala a app. iOS não re-lê o manifest depois que a
+   app foi adicionada. Aviso: reinstalar apaga cookies isolados do
+   PWA — usuário precisa fazer login de novo.
+4. **Android/Chrome desktop** relêem o manifest a cada abertura
+   standalone; um "Fechar tudo" + reabrir normalmente pega a versão
+   nova em ≤ 1 dia.
+
+**Regra pro operador:** ao trocar ícone/manifest, deploy + esperar
+propagação do SW **não é suficiente** pra que o home screen atualize em
+usuários já instalados. Comunicar reinstalação é o único caminho
+determinístico. Isso vale mesmo mudando `theme_color`, `short_name`,
+etc. Uma mudança silenciosa em `.png` só aparece pra novos usuários.
 
 ### `/offline` aparece mesmo online
 

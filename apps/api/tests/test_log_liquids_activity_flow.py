@@ -130,8 +130,8 @@ async def test_log_beverage_end_to_end_with_catalog(
     assert len(beverage_rows) == 1
 
     snap = (await db_session.execute(select(DailySnapshot))).scalar_one()
-    # leite 200ml × 61 kcal/100ml = 122
-    assert snap.kcal_in == Decimal("122.00")
+    # leite 200ml × 57 kcal/100ml = 114 (seed TBCA: leite_integral = 57 kcal/100ml)
+    assert snap.kcal_in == Decimal("114.00")
     assert snap.other_liquids_ml == 200
     assert snap.water_ml == 0  # nunca!
 
@@ -307,11 +307,12 @@ async def test_snapshot_mixes_food_beverage_activity_water(
     await client.post("/chat/messages", json={"text": "caminhei 30 min leves"})
 
     snap = (await db_session.execute(select(DailySnapshot))).scalar_one()
-    # kcal_in = 124 (arroz) + 4 (café 200ml × 2/100)
-    assert snap.kcal_in == Decimal("128.00")
+    # kcal_in = 130 (arroz 100g × 130/100) + 4 (café 200ml × 2/100) = 134
+    assert snap.kcal_in == Decimal("134.00")
     # kcal_out = 2.8 × 78 × 30/60 = 109.20
     assert snap.kcal_out == Decimal("109.20")
-    assert snap.kcal_balance == Decimal("18.80")
+    # kcal_balance = 134 - 109.20 = 24.80
+    assert snap.kcal_balance == Decimal("24.80")
     assert snap.water_ml == 750
     assert snap.other_liquids_ml == 200
     # 4 recomputes (uma por chat post)

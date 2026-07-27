@@ -1,0 +1,82 @@
+# T-1005 + T-1007 — CD: deploy automatico ao mergear em main
+#
+# Estrategia: SSH sem senha para conta `felix` na VPS com chave
+# `deploy-only` restrita por `command="..."` no ~/.ssh/authorized_keys
+# (T-1004). O comando restrito faz:
+#   cd ~/my-registers && git pull && ./scripts/bootstrap.sh .env.production
+#   && docker compose ... up -d --build api web
+# Ver docs/deploy.md §14 para o command exato.
+#
+# Este workflow NAO passa senhas nem edita .env.production. Segredo
+# ANTHROPIC_API_KEY continua so na VPS. GitHub Secret usado aqui e
+# so a chave privada SSH.
+#
+# Smoke test (T-1007): apos deploy, aguarda o healthcheck responder
+# via HTTPS publico. Se falhar, workflow marca fail — containers ficam
+# de pe, operador decide rollback manual (git revert + push).
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+# Um deploy por vez, mesmo se dois merges chegarem juntos.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: SSH deploy to VPS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    # Sanity: so continua se o CI que triggou passou. `workflow_run`
+    # dispara mesmo se falhou; filtramos aqui.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    environment:
+      name: production
+      url: https://${{ vars.DEPLOY_DOMAIN }}
+
+    steps:
+      - name: Configure SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Add VPS to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ vars.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      # Dispara o `command="..."` restringido em authorized_keys.
+      # Nao passamos argumentos — o comando na VPS eh fixo. Um `true`
+      # no fim eh so pra o SSH ter algo pra rodar; o `command="..."` da
+      # VPS executa antes de tudo e ignora o payload que a gente passa.
+      - name: Deploy via restricted SSH command
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=30 \
+            "felix@${{ vars.DEPLOY_HOST }}" \
+            true
+
+      # T-1007 — Smoke test: bate no /api/health via HTTPS publico.
+      # Espera ate 60s pra dar tempo do docker compose subir (health
+      # da api tem interval 15s + retries 6).
+      - name: Smoke test — /api/health
+        run: |
+          set -euo pipefail
+          url="https://${{ vars.DEPLOY_DOMAIN }}/api/health"
+          echo "Waiting for $url to respond 200 (up to 60s)…"
+          for i in $(seq 1 12); do
+            if curl -fsS --max-time 5 "$url" >/dev/null; then
+              echo "OK: $url respondeu 200."
+              exit 0
+            fi
+            echo "Attempt $i/12 falhou; aguardando 5s…"
+            sleep 5
+          done
+          echo "FAIL: $url nao respondeu 200 apos 60s."
+          exit 1

@@ -17,7 +17,16 @@ Fluxo canônico ao adicionar comportamento: `spec:` PR → `plan:` PR → `tasks
 
 Documentos SDD e commits estão em pt-BR — matenha esse padrão. Código, identificadores e comentários no código são em inglês (regra global do usuário).
 
-**Estado atual:** Fase 0 concluída (`c29bcbc`). Próxima é Fase 1 (auth + bootstrap admin) — ver `tasks.md` T-101..T-110.
+**Estado atual (2026-07-27, release v1.2):** MVP em produção em `https://myregister.felix.dev.br`.
+
+- **Fases 0-9 concluídas** — do bootstrap ao hardening/deploy. Único item ainda pendente da Fase 9 é o T-908 (smoke test manual em VPS real; depende do operador).
+- **Blocos pós-MVP entregues**: Bloco 1 (composer/envio), Bloco 2 (renderização de assistant messages), Bloco 4 (PWA básico — instalável, shell offline, INV-11).
+- **Fase 4.b** (leitura de rótulo nutricional) entregue.
+- **UIs T-704 (encerrar dia) e T-804 (relatório semanal)** entregues via PR #31.
+- **Especificadas mas não implementadas**: Bloco 3 (workout tracking, SP-120..127), Fase 10 (CI/CD, T-1001..T-1007). Ver `tasks.md`.
+- **Próximos alvos** listados em `docs/proximos-passos.md` — ordem sugerida: D-01/D-03/D-04 (dívida técnica de docs) → asset real do PWA → Fase 10 CI/CD → Bloco 3 workout.
+
+Ao encarar uma tarefa, sempre reconciliar com `tasks.md` (fonte de verdade) — este bloco pode ficar defasado entre releases.
 
 ## Comandos
 
@@ -30,7 +39,7 @@ Do raiz (`pnpm` workspace):
 | `pnpm dev:api` | `uv run uvicorn app.main:app --reload` em `apps/api` |
 | `pnpm dev:web` | Next.js dev server (porta 3000) |
 | `pnpm db:migrate` | `alembic upgrade head` |
-| `pnpm db:bootstrap` | `python -m app.cli bootstrap` (placeholder até Fase 1) |
+| `pnpm db:bootstrap` | `python -m app.cli bootstrap` — cria admin default idempotente (lê `DEFAULT_ADMIN_*`) e roda seed do catálogo TBCA |
 | `pnpm compose:up` | Modo alternativo: tudo em Docker (só se seu Docker Desktop não sofrer com bind mount) |
 
 Backend (`apps/api`, gerenciado com `uv`, Python 3.12):
@@ -42,8 +51,10 @@ Backend (`apps/api`, gerenciado com `uv`, Python 3.12):
 - Nova migration: `uv run alembic -c alembic.ini revision --autogenerate -m "…"` (models precisam estar importados em `alembic/env.py` para autogenerate ver)
 - CLI admin: `uv run python -m app.cli <cmd>` (bootstrap, version)
 
-Frontend (`apps/web`, Next.js 15 + React 19 + Tailwind):
+Frontend (`apps/web`, Next.js 16 + React 19 + Tailwind + Serwist):
 - `pnpm --filter web dev` / `build` / `start` / `lint` / `typecheck`
+- `pnpm --filter web verify:sw` — sanity check estático do service worker (garante INV-11 pós-build)
+- **Build usa `--webpack`** (Serwist ainda não suporta Turbopack — issue [serwist/serwist#54](https://github.com/serwist/serwist/issues/54)). Não trocar por Turbopack até a lib migrar.
 
 ## Ambiente de dev (macOS)
 
@@ -56,8 +67,8 @@ Portas: web `3000`, api `8000` (docs em `/docs`, health em `/health`), Postgres 
 Monorepo pnpm (`pnpm-workspace.yaml` = `apps/*`) com dois apps:
 
 - `apps/api` — FastAPI + Pydantic v2 + SQLAlchemy 2 async + Alembic. Camadas: `api/routes/` (HTTP) → `services/` (regras de negócio) → `repositories/` (acesso ao DB) → `models/` (SQLAlchemy). Integrações externas em `integrations/{anthropic,storage,nutrition}/`. Config via `pydantic-settings` em `app/core/config.py` (lê `.env`). Middleware global injeta `X-Request-Id`. Erros de domínio herdam de `AppError` (em `core/exceptions.py`) e são traduzidos para JSON pelo handler global em `main.py`.
-- `apps/web` — Next.js 15 App Router. Só uma rota placeholder por ora; UI real chega na Fase 1+.
-- `infra/` — Nginx + Certbot (produção). `docker-compose.local.yml` só para dev local.
+- `apps/web` — Next.js 16 App Router (React 19). Rotas principais: `/login`, `/chat`, `/weekly`, `/offline`. `proxy.ts` protege prefixos por presença de cookie (validação real acontece no backend). PWA via Serwist (SW em `src/app/sw.ts`) — service worker aplica `NetworkOnly` em `/api/*` (INV-11). Server components que precisam bater na API usam `INTERNAL_API_URL` (DNS interno do compose), não `NEXT_PUBLIC_API_URL` (relativo `/api`, browser-only).
+- `infra/` — Nginx + Certbot (produção). `docker-compose.local.yml` só para dev local. Produção usa `docker-compose.production.yml`; deploy manual documentado em `docs/deploy.md` (Fase 10 vai automatizar via GitHub Actions).
 
 ### Princípios que afetam decisões de código
 

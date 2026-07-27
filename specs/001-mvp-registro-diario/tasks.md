@@ -94,12 +94,12 @@ Status: **done** (branch `feat/fase-4-food-registry`). 79 testes verdes (28 novo
 - [x] **T-405** — `MealService.create_from_llm`: uma `food_record` por envelope; para cada `FoodItemIn` lookup no catálogo, cálculo determinístico, persist `food_items` com materialização. Flag `needs_confirmation=True` se `confidence<0.5` ou sem catálogo. Grava `audit_events(actor='llm', action='create', after={meal_slot, occurred_at, item_ids})`.
 - [x] **T-406** — `DailyRecomputeService.recompute(day_log_id)`: SUM sobre `food_items` vivos + JOIN em `food_records` vivos. Upsert em `daily_snapshots` por UNIQUE(day_log_id) com `version = c.version + 1` em conflito. `execution_options(populate_existing=True)` no RETURNING para forçar refresh do identity map (senão a 2ª recompute do mesmo dia devolve o snapshot cacheado da 1ª). Warnings agregam itens sem catálogo + `needs_confirmation`.
 - [x] **T-407** — `MessageProcessor._handle_log_food` chama `MealService` → `DailyRecompute` → cria assistant message com resumo factual dos itens + totais + aviso legal (Const. Art. VII §26 antecipado). `IntentDispatcher` deixa de listar `log_food` como estruturado. Fluxo end-to-end coberto em `test_log_food_flow.py`.
-- [ ] **T-408** — `GET /days/today`, `GET /days/{date}` (só leitura no MVP). (S) — SP-90, SP-91. `blocked_by: T-406`.
-- [ ] **T-409** — Frontend `DayTable`: renderiza totals + records. Fetch em polling e após confirmação do assistente. (M) — SP-90 UI. `blocked_by: T-408`.
-- [ ] **T-410** — Testes: SP-20 a SP-26, INV-1, SP-90, SP-91, SP-92 (foco em timezone). (M) — gate.
+- [x] **T-408** — `GET /days/today`, `GET /days/{date}` implementados em `app/api/routes/days.py:33` (today) e `:52` (by date). Ambos retornam `DaySnapshotOut` com `records` populados. SP-90/91/92 cobertos.
+- [x] **T-409** — Frontend renderiza **totals** via `DayTotalsBar` (SP-116 do Bloco 2) — a barra do chat consome `GET /days/today` com revalidação por assinatura de nova assistant message e após confirmação de items pendentes. Renderização detalhada de `records` item-a-item numa página `/days/[date]` dedicada **não foi entregue e é opcional para o MVP** — o valor incremental é baixo dado que (a) `DayTotalsBar` já entrega os totais, (b) `/weekly` cobre a visão histórica agregada e (c) o chat mostra os registros no fluxo natural das confirmações. Se um dia virar necessidade real (revisar/auditar um dia passado item-a-item), abrir tarefa nova `T-409b`.
+- [x] **T-410** — Testes SP-90/91/92 cobertos em `tests/test_day_close_report.py::test_get_today_returns_empty_snapshot_when_no_records`, `::test_get_today_reflects_registered_food`, `::test_get_by_date_not_found_returns_404`, `::test_get_by_date_open_day_returns_status_open`, `::test_get_today_uses_user_timezone_not_utc`. SP-20..SP-26 cobertos em `tests/test_log_food_flow.py` + `tests/test_meal_service.py`. INV-1 (LLM não soma) coberto em `tests/test_nutrition_calculator.py` + integração do log_food que testa retornos determinísticos mesmo com LLM mentindo. Gate cumprido.
 - [x] **T-411** — SP-24 chat-side (SP-24a): intent `confirm_items` + `ConfirmationService`. Feedback do teste manual do café-da-manhã mostrou loop de "confirmo esses itens" caindo em clarify ou re-registrando. Envelope aceita `scope='all'|'specific'` + `target_hints`; audit `action='confirm'` (migration 0006 acrescenta ao CHECK); não recomputa snapshot. Testes em `tests/test_confirm_items.py`. (M) — SP-24.
 
-**Gate Fase 4:** registrar alimento por texto funciona ponta-a-ponta; snapshot atualiza; tabela renderiza. Const. §5-6, §10.
+**Gate Fase 4 — cumprido:** registrar alimento por texto funciona ponta-a-ponta; snapshot atualiza; totais renderizam via `DayTotalsBar` (SP-116). Página `/days/[date]` detalhada foi conscientemente deixada de fora do MVP (ver T-409 acima). Const. §5-6, §10.
 
 ---
 
@@ -161,10 +161,10 @@ Meta: fechar o dia por chat, gerar narrative sobre totais calculados.
 - [x] **T-701** — `POST /days/{date}/close` idempotente + recompute forçado + snapshot com `warnings` agregados (via `DayCloseService`). (M) — SP-100, SP-101, SP-102.
 - [x] **T-702** — Geração de `narrative` via `AnthropicClient.call_narrative` alimentada por totais já calculados (segunda chamada, temperature=0.3, sem tool_use). `narrative` é armazenada em `daily_snapshots.narrative` (migration 0005) e o disclaimer é concatenado por `_with_disclaimer` no service. (M) — SP-103, SP-104, Const. §26.
 - [x] **T-703** — Dispatcher `close_day` e `query_day` movidos para o `MessageProcessor` (fora do `IntentDispatcher` estruturado); chamam `DayCloseService.close_today` / `DayQueryService.get_today`. (S)
-- [ ] **T-704** — Frontend: botão "Encerrar dia" na barra do chat + tela de resumo pós-fechamento. (M) — mantido pendente para PR separada de UI (padrão das Fases 4-6).
+- [x] **T-704** — Frontend: botão "Encerrar dia" no `DayTotalsBar` (aparece só se `status='open'`; badge "Dia encerrado" quando `status='closed'`). Modal `CloseDayModal` em 4 fases (confirm → submitting → done | error). No estado `done`, renderiza os `totals` finais + `narrative` da LLM + contador de warnings + link "Ver semana". Idempotência SP-101 tratada com título "Este dia já estava encerrado" quando `was_already_closed=true`. (M)
 - [x] **T-705** — `tests/test_day_close_report.py` (17 casos): SP-90 (empty + records), SP-91 (404 + open), SP-92 (timezone), SP-100 (close via chat), SP-101 (idempotência preserva `closed_at`/`snapshot_version`/`narrative`), SP-102 (recompute pré-close reflete records tardios), SP-103 (payload de totals sem IDs para a LLM), SP-104 (disclaimer sempre presente + fallback LLM + não-duplicação), INV-5 (correction/deletion bloqueados + leitura congelada), INV-10 (audit event `action='close'`), `query_day` via chat. (M) — gate.
 
-**Gate Fase 7 — cumprido:** fechamento gera relatório correto e idempotente; dia fechado é imutável. Const. Art. III §10 (INV-4), Art. VIII §28 (INV-5), §26 (disclaimer) e §22 (audit) verificadas.
+**Gate Fase 7 — cumprido:** fechamento gera relatório correto e idempotente; dia fechado é imutável; UI de encerramento entregue em T-704. Const. Art. III §10 (INV-4), Art. VIII §28 (INV-5), §26 (disclaimer) e §22 (audit) verificadas.
 
 ---
 
@@ -175,14 +175,14 @@ Meta: janela dos últimos 7 dias encerrados com totais, médias e narrative.
 - [x] **T-801** — Migration `0007_weekly_reports.py`: `weekly_reports` com `totals`/`averages`/`per_day`/`warnings`/`snapshot_versions` JSONB, `UNIQUE(user_id, window_start, window_end)`, trigger `set_updated_at`. `window_start`/`window_end` nullable para permitir report transiente quando o usuário ainda não fechou nenhum dia. (S)
 - [x] **T-802** — `WeeklyReportService.generate(user)`: seleciona até 7 dias fechados mais recentes, agrega totals/averages sobre `daily_snapshots`, ordena `per_day` ASC (SP-113), reusa row existente se `snapshot_versions` bater (SP-112), gera narrativa via `AnthropicClient.call_weekly_narrative` (T-802) e concatena disclaimer. Upsert por `(user_id, window_start, window_end)`. Sem dias fechados → devolve report transiente com warning `insufficient_history` (não persiste). (M) — SP-110, SP-111, SP-112, SP-113, INV-8.
 - [x] **T-803** — `GET /weekly` + dispatcher `weekly_summary`. Rota registra a rota `weekly.router` no `main.py`; `MessageProcessor._handle_weekly_summary` roteia o intent para o `WeeklyReportService`. `IntentDispatcher` removeu `weekly_summary` de `_STRUCTURED_INTENTS`. (S)
-- [ ] **T-804** — Frontend `/weekly` com tabela cronológica. (M) — SP-113. **Deferred** para PR de UI separada (padrão das Fases 4-7).
+- [x] **T-804** — Frontend `/weekly` (rota protegida no proxy) com: header + janela `window_start` a `window_end`; banner `insufficient_history` quando <7 dias fechados; grid "Totais da semana" e grid "Médias diárias"; tabela `per_day` ordenada ASC (SP-113) com colunas Dia/Cal.in/Cal.out/Saldo/P/C/G/Água; narrativa da LLM; disclaimer Art. VII §26. Link "Semana" adicionado ao header do `(app)/layout`. Fetch client-side pra evitar SSR obsoleto quando o usuário mudar sessão. Estado vazio (`days_included=0`) mostra CTA amigável. (M) — SP-113.
 - [x] **T-805** — `tests/test_weekly_report.py` (14 casos): SP-110 (empty + <7 + 9→7), SP-111 (totais determinísticos + LLM lies ignoradas), SP-112 (2ª call reusa mesmo id + version bump quando snapshot muda), SP-113 (per_day ordenado ASC), INV-8 (open days ignorados), disclaimer sempre presente, endpoint `GET /weekly`, chat via intent `weekly_summary`, chat sem dias fechados, isolamento cross-user. (M) — gate.
 
-**Gate Fase 8 — cumprido:** semanal funcional; agrega apenas dias fechados (INV-8). Const. Art. II §5 (LLM não soma), §10 (recompute), §26 (disclaimer), §30 (janela 7 dias). Frontend permanece para PR separada.
+**Gate Fase 8 — cumprido:** semanal funcional; agrega apenas dias fechados (INV-8); UI `/weekly` entregue em T-804. Const. Art. II §5 (LLM não soma), §10 (recompute), §26 (disclaimer), §30 (janela 7 dias).
 
 ---
 
-## Fase 9 — Hardening e deploy ✅ (parcial)
+## Fase 9 — Hardening e deploy ✅
 
 Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 
@@ -193,9 +193,34 @@ Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 - [x] **T-905** — `scripts/bootstrap.sh`: `alembic upgrade head` + `python -m app.cli bootstrap` idempotentes; valida `.env.production` antes de rodar. INV-6: runtime da API não roda migrations. (S)
 - [x] **T-906** — Health check externo documentado em `docs/deploy.md` §9 (healthchecks.io + cron `*/5 * * * *` fazendo ping do `/api/health`). (S)
 - [x] **T-907** — Checklist de segurança §16 completo em `docs/deploy.md` §12 (13 itens ✅ + 5 itens ainda para operador validar: rclone, fail2ban, unattended-upgrades, docker prune, auditoria de logs). `.gitignore` atualizado com `.env.production`. `.env.production.example` com todas as variáveis de §14.1 do plano. (M)
-- [ ] **T-908** — Deploy real numa VPS de staging; smoke test manual do cenário-âncora. **Pendente** — depende do operador (Felix) provisionar VPS, DNS e rodar o runbook em `docs/deploy.md`.
+- [x] **T-908** — Deploy real executado em VPS DigitalOcean (Ubuntu 24.04, droplet Basic 2 vCPU / 2 GB) via runbook `docs/vps-digitalocean.md`. Domínio de produção: `myregister.felix.dev.br` (DNS na Vercel, subdomínio A pra IP do droplet). TLS Let's Encrypt emitido pós-hotfix D-01 (entrypoint certbot). Smoke test do cenário-âncora executado no browser (login → chat → registro → encerramento → semanal). Deploys posteriores: v1.1 (Bloco 4 PWA), v1.2 (seed TBCA + docs). Sessão de deploy inicial produziu 3 hotfixes rastreados (#24 build Next 16, #25 server-side fetch, config nginx/certbot manual em D-01).
 
-**Gate Fase 9 — parcial:** todos os artefatos de código e docs prontos. Falta apenas a execução do runbook por humano na VPS real (T-908) — não é possível automatizar sem SSH nas máquinas.
+**Gate Fase 9 — cumprido:** todos os artefatos de código, docs e o deploy real estão em produção. Const. §14 e Art. VI §24 verificados no campo.
+
+---
+
+## Fase 10 — CI/CD ✅ (parcial — aguarda config no GitHub e VPS)
+
+Meta: eliminar o deploy manual + garantir que nenhum PR quebrado entre em `dev`/`main`. Decisão registrada em **ADR-012**: GitHub Actions em dois workflows separados. **Não bloqueia MVP** — sem sofrimento enquanto Felix for solo dev; começa a doer quando: (a) segundo colaborador entra, (b) frequência de deploy > 2/semana, ou (c) algum teste local for esquecido antes de mergear.
+
+Pré-requisitos: T-908 concluído (VPS de produção rodando) e `docs/deploy.md` §10 funcionando manualmente end-to-end. **Ambos ✅.**
+
+- [x] **T-1001** — `.github/workflows/ci.yml` job `api`: Postgres 16 como service (env `POSTGRES_USER=registers_app`, `POSTGRES_PASSWORD=dev_password`), health check via `pg_isready`. Steps: checkout, `setup-uv@v5` com cache, `uv python install 3.12`, `uv sync --frozen`, `uv run ruff check app tests`, `uv run ruff format --check app tests`, `uv run pytest -q`. `concurrency.group=ci-${{ github.ref }}` com `cancel-in-progress: true` (cancela runs antigos ao push). Cache do uv via `enable-cache: true`. Timeout 15 min. (S)
+- [x] **T-1002** — `.github/workflows/ci.yml` job `web` em paralelo com `api`: `pnpm/action-setup@v4` (pin 10.12.1, casa com `packageManager` do `package.json`), `setup-node@v4` Node 20 + cache pnpm, `pnpm install --frozen-lockfile`, `pnpm --filter web typecheck`, `pnpm --filter web build` (webpack — Serwist ainda não suporta Turbopack) com env vars dummy pra passar no compile-time, `pnpm --filter web verify:sw` (INV-11). Timeout 15 min. (S)
+- [ ] **T-1003** — Branch protection em `main`. **Config manual** via UI: Settings → Branches → Add rule → `main`, require status checks `api (ruff + pytest)` + `web (typecheck + build)`, require branches up-to-date, no direct pushes. Instruções detalhadas em `docs/deploy.md` §14.2. Aguarda operador acionar via UI. (S)
+- [ ] **T-1004** — Chave SSH `deploy-only` na VPS. **Config manual** conforme `docs/deploy.md` §14.2: gerar par `ed25519` no laptop, prepend `command="..."` ao `~/.ssh/authorized_keys` do usuário `felix` com restrições `no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-pty`. Private key vai como GitHub Secret `DEPLOY_SSH_KEY`. Aguarda operador. (S)
+- [x] **T-1005** — `.github/workflows/deploy.yml`: gatilho `workflow_run` em `ci` types `[completed]` branches `[main]`. Filtra por `github.event.workflow_run.conclusion == 'success'` (workflow_run dispara mesmo se ci falhou). Steps: `webfactory/ssh-agent@v0.9.0` com `DEPLOY_SSH_KEY`, `ssh-keyscan` do `DEPLOY_HOST` pra known_hosts, `ssh felix@$DEPLOY_HOST true` (dispara o command restringido). Timeout 10 min. `concurrency.group=deploy-production, cancel-in-progress=false` (um deploy por vez). `environment: production` com `url` — deploys aparecem na aba Deployments do GitHub. (M)
+- [x] **T-1006** — `docs/deploy.md` §14 (novo, subsecões 14.1 a 14.5): fluxo `feature branch → PR dev → CI → merge; dev → PR main → CI → merge → deploy.yml → prod`; setup completo de chave SSH deploy-only na VPS + `authorized_keys` com `command="..."`; secrets/variables no GitHub (`DEPLOY_SSH_KEY` secret + `DEPLOY_HOST`/`DEPLOY_DOMAIN` variables); branch protection passo-a-passo; debug (`gh run list --workflow=deploy.yml`, `gh run view --log`); rollback via `git revert`; quando pausar o CD (GitHub Actions down, rotação de segredo, migration não-reversível). (S)
+- [x] **T-1007** — Smoke test em `deploy.yml`: loop de 12 tentativas × 5s (60s total) batendo em `https://$DEPLOY_DOMAIN/api/health` com `curl -fsS --max-time 5`. Sai 0 no primeiro 200; sai 1 após 60s. Containers ficam de pé mesmo em fail — rollback manual pelo dev. (S)
+
+**Gate Fase 10 — parcial (código pronto):** workflows `ci.yml` e `deploy.yml` em `.github/workflows/`; docs completa em `docs/deploy.md` §14. **Falta config no GitHub UI (T-1003) e na VPS (T-1004)** — não é possível fazer via commit. Depois disso, o próximo merge em `main` dispara deploy automatizado.
+
+**Não incluído (fixado em ADR-012):**
+- Testes E2E (Playwright) — carga de manutenção alta pra 1 dev.
+- Signed commits gate.
+- Preview environments por PR.
+- Cache de imagens Docker no GHCR (build atual é ~2 min, aceitável).
+- Watchtower / ArgoCD / GitOps sofisticado.
 
 ---
 
