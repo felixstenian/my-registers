@@ -316,8 +316,8 @@ async def test_catalog_prefers_tbca_over_label_ocr(admin_user, db_session: Async
 
     hit = await LocalTBCACatalog(db_session).lookup(LookupQuery(name="arroz"))
     assert hit is not None
-    # 124 kcal do arroz TBCA, NÃO 999 do label_ocr.
-    assert float(hit.kcal) == pytest.approx(124.0, abs=0.5)
+    # 130 kcal do arroz TBCA (seed arroz_branco_cozido), NÃO 999 do label_ocr.
+    assert float(hit.kcal) == pytest.approx(130.0, abs=0.5)
 
 
 async def test_catalog_prefers_label_ocr_when_verified(admin_user, db_session: AsyncSession):

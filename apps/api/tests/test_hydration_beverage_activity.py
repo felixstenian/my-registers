@@ -146,8 +146,8 @@ async def test_sp50_beverage_with_catalog_hit(db_session: AsyncSession, admin_us
     await db_session.commit()
 
     assert result.record.catalog_ref_id is not None
-    # leite 200ml × 61 kcal/100ml = 122
-    assert result.record.kcal == Decimal("122.00")
+    # leite 200ml × 57 kcal/100ml = 114 (seed TBCA: leite_integral = 57 kcal/100ml)
+    assert result.record.kcal == Decimal("114.00")
     assert result.record.protein_g > 0
     assert result.record.volume_ml == 200
 

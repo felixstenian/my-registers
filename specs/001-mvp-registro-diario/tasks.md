@@ -199,23 +199,23 @@ Meta: sistema pronto para VPS com HTTPS, backups, e restart resiliente.
 
 ---
 
-## Fase 10 — CI/CD — pendente
+## Fase 10 — CI/CD ✅ (parcial — aguarda config no GitHub e VPS)
 
 Meta: eliminar o deploy manual + garantir que nenhum PR quebrado entre em `dev`/`main`. Decisão registrada em **ADR-012**: GitHub Actions em dois workflows separados. **Não bloqueia MVP** — sem sofrimento enquanto Felix for solo dev; começa a doer quando: (a) segundo colaborador entra, (b) frequência de deploy > 2/semana, ou (c) algum teste local for esquecido antes de mergear.
 
-Pré-requisitos: T-908 concluído (VPS de produção rodando) e `docs/deploy.md` §10 funcionando manualmente end-to-end.
+Pré-requisitos: T-908 concluído (VPS de produção rodando) e `docs/deploy.md` §10 funcionando manualmente end-to-end. **Ambos ✅.**
 
-- [ ] **T-1001** — `.github/workflows/ci.yml`: gatilho `pull_request` para `dev`/`main`. Service container Postgres 16. Steps: checkout, setup Python 3.12 + uv, `uv sync`, `uv run ruff check app tests`, `uv run pytest -q`. Concurrency por PR (cancela runs antigos ao push). Cache do `~/.cache/uv`. (S)
-- [ ] **T-1002** — `.github/workflows/ci.yml` estendido para o web: setup Node 20 + pnpm 10, `pnpm install --frozen-lockfile`, `pnpm --filter web typecheck`. Roda em paralelo com o job Python (matrix ou jobs separados). (S)
-- [ ] **T-1003** — Branch protection em `main`: require status checks `ci / python`, `ci / web`; require PR reviews = 0 (single dev) mas exige `linear history` e `no direct pushes to main`. Documentar em `docs/deploy.md` como configurar via UI do GitHub. (S)
-- [ ] **T-1004** — Chave SSH `deploy-only` na VPS: gerar par `ed25519`, adicionar a public key ao `~/.ssh/authorized_keys` do usuário `felix` com prefixo `command="cd ~/my-registers && git pull && ./scripts/bootstrap.sh .env.production && docker compose -f docker-compose.production.yml --env-file .env.production up -d api web",no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-pty`. Doc de rotação em `docs/deploy.md`. (S)
-- [ ] **T-1005** — `.github/workflows/deploy.yml`: gatilho `push` para `main` **após** `ci.yml` passar (via `workflow_run: workflows: [ci]  types: [completed]  branches: [main]`). Steps: install ssh-agent, adiciona a chave via Secret `DEPLOY_SSH_KEY`, faz `ssh felix@$DEPLOY_HOST 'true'` (dispara o command restringido acima). Timeout de 10 min. Concurrency single-in-progress-per-branch. (M)
-- [ ] **T-1006** — Documentar em `docs/deploy.md` §14 (novo): como o CI/CD encaixa no workflow (git commit → PR → checks → merge → deploy automático), como debugar deploy que falhou (`gh run list --workflow=deploy.yml`, `gh run view --log`), como fazer rollback (revert + push). Adicionar seção "quando pausar o CD" (força override manual via `docker compose ...` no SSH tradicional se GitHub estiver fora do ar). (S)
-- [ ] **T-1007** — Smoke test pós-deploy dentro do `deploy.yml`: após `up -d`, aguardar 30s e bater em `curl -fsS https://$DOMAIN/api/health`. Se falhar, workflow marca como fail (mas containers ficam de pé — rollback manual pelo dev). (S)
+- [x] **T-1001** — `.github/workflows/ci.yml` job `api`: Postgres 16 como service (env `POSTGRES_USER=registers_app`, `POSTGRES_PASSWORD=dev_password`), health check via `pg_isready`. Steps: checkout, `setup-uv@v5` com cache, `uv python install 3.12`, `uv sync --frozen`, `uv run ruff check app tests`, `uv run ruff format --check app tests`, `uv run pytest -q`. `concurrency.group=ci-${{ github.ref }}` com `cancel-in-progress: true` (cancela runs antigos ao push). Cache do uv via `enable-cache: true`. Timeout 15 min. (S)
+- [x] **T-1002** — `.github/workflows/ci.yml` job `web` em paralelo com `api`: `pnpm/action-setup@v4` (pin 10.12.1, casa com `packageManager` do `package.json`), `setup-node@v4` Node 20 + cache pnpm, `pnpm install --frozen-lockfile`, `pnpm --filter web typecheck`, `pnpm --filter web build` (webpack — Serwist ainda não suporta Turbopack) com env vars dummy pra passar no compile-time, `pnpm --filter web verify:sw` (INV-11). Timeout 15 min. (S)
+- [ ] **T-1003** — Branch protection em `main`. **Config manual** via UI: Settings → Branches → Add rule → `main`, require status checks `api (ruff + pytest)` + `web (typecheck + build)`, require branches up-to-date, no direct pushes. Instruções detalhadas em `docs/deploy.md` §14.2. Aguarda operador acionar via UI. (S)
+- [ ] **T-1004** — Chave SSH `deploy-only` na VPS. **Config manual** conforme `docs/deploy.md` §14.2: gerar par `ed25519` no laptop, prepend `command="..."` ao `~/.ssh/authorized_keys` do usuário `felix` com restrições `no-port-forwarding,no-x11-forwarding,no-agent-forwarding,no-pty`. Private key vai como GitHub Secret `DEPLOY_SSH_KEY`. Aguarda operador. (S)
+- [x] **T-1005** — `.github/workflows/deploy.yml`: gatilho `workflow_run` em `ci` types `[completed]` branches `[main]`. Filtra por `github.event.workflow_run.conclusion == 'success'` (workflow_run dispara mesmo se ci falhou). Steps: `webfactory/ssh-agent@v0.9.0` com `DEPLOY_SSH_KEY`, `ssh-keyscan` do `DEPLOY_HOST` pra known_hosts, `ssh felix@$DEPLOY_HOST true` (dispara o command restringido). Timeout 10 min. `concurrency.group=deploy-production, cancel-in-progress=false` (um deploy por vez). `environment: production` com `url` — deploys aparecem na aba Deployments do GitHub. (M)
+- [x] **T-1006** — `docs/deploy.md` §14 (novo, subsecões 14.1 a 14.5): fluxo `feature branch → PR dev → CI → merge; dev → PR main → CI → merge → deploy.yml → prod`; setup completo de chave SSH deploy-only na VPS + `authorized_keys` com `command="..."`; secrets/variables no GitHub (`DEPLOY_SSH_KEY` secret + `DEPLOY_HOST`/`DEPLOY_DOMAIN` variables); branch protection passo-a-passo; debug (`gh run list --workflow=deploy.yml`, `gh run view --log`); rollback via `git revert`; quando pausar o CD (GitHub Actions down, rotação de segredo, migration não-reversível). (S)
+- [x] **T-1007** — Smoke test em `deploy.yml`: loop de 12 tentativas × 5s (60s total) batendo em `https://$DEPLOY_DOMAIN/api/health` com `curl -fsS --max-time 5`. Sai 0 no primeiro 200; sai 1 após 60s. Containers ficam de pé mesmo em fail — rollback manual pelo dev. (S)
 
-**Gate Fase 10:** PR bloqueado se testes falharem; merge em `main` sobe versão nova sem SSH manual; deploy audível em `gh run list`. Decisões dependentes já estão em ADR-012.
+**Gate Fase 10 — parcial (código pronto):** workflows `ci.yml` e `deploy.yml` em `.github/workflows/`; docs completa em `docs/deploy.md` §14. **Falta config no GitHub UI (T-1003) e na VPS (T-1004)** — não é possível fazer via commit. Depois disso, o próximo merge em `main` dispara deploy automatizado.
 
-**Não inclui (registrado no ADR-012 como "não inclui no MVP"):**
+**Não incluído (fixado em ADR-012):**
 - Testes E2E (Playwright) — carga de manutenção alta pra 1 dev.
 - Signed commits gate.
 - Preview environments por PR.
