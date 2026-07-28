@@ -574,6 +574,16 @@ Revive parcialmente a intenção do T-409 original ("DayTable renderiza totals +
 - Read-only mesmo pra dias abertos passados (edição via chat cria confusão sobre "data efetiva" da mutação).
 - Fica `may` porque uso primário é o dia atual; historico via `/weekly` já cobre visão agregada.
 
+**SP-155** (`should`) — Navegação temporal a partir do `/day` e do `/weekly`.
+- Header do `/day` (e do `/day/[date]`) ganha três controles logo abaixo da data:
+  - Botão **← Dia anterior** aponta pra `/day/[date-1]`. Sempre presente.
+  - Botão **Próximo dia →** aponta pra `/day/[date+1]` **quando** `date+1 <= hoje`. Escondido no dia atual (não faz sentido "próximo" existir).
+  - Botão **Hoje** aponta pra `/day` quando `date != hoje`. Escondido no dia atual.
+  - Input HTML nativo `<input type="date">` com `max` no dia atual — submit navega pra `/day/[selecionada]`.
+- Coluna **Dia** da tabela de `per_day` no `/weekly` vira link pra `/day/[date]` (para cada linha).
+- Data no futuro (`date > hoje` no fuso do usuário) → renderiza mensagem amigável "Não é possível ver o futuro" + link "Voltar para hoje". Não chama backend.
+- Datas anteriores ao primeiro `day_log` do usuário → cai no 404 amigável de SP-154 (não é caso especial).
+
 **Fora do escopo desta feature:**
 - Edição/deleção inline (v2 — hoje é via chat).
 - Filtros/ordenação (só a ordem natural: meal_slot → occurred_at).
@@ -697,4 +707,5 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-26** — v1.6. Adicionada seção 3.13 "Registro estruturado de treino" com SP-120..SP-127 (todos `may`, pós-MVP). Modelo hierárquico sessão → exercícios → séries, coexistência com `log_activity` via consolidação em `activity_record` no encerramento (ADR-004 em `research.md`). Novos invariantes INV-11, INV-12, INV-13. Não bloqueia MVP; implementação após Fase 9.
 - **2026-07-27** — v1.7. Nova seção 3.13: PWA básico (SP-128..SP-135). Escopo: instalabilidade + shell offline, sem fila de mensagens nem cache de dados de negócio. Nova INV-11 proíbe SW de cachear `/api/*`. Item correspondente removido de "Fora do escopo". (Se PR de workout-tracking mergear primeiro, essa seção vira 3.14 no rebase; sem conflito de SP porque as faixas SP-120..127 e SP-128..135 são disjuntas.)
 - **2026-07-27** — v1.9. Nova seção 3.15 "Visão detalhada do dia" (SP-150..SP-154, todos `should`/`may`): página `/day` server-rendered com refeições agrupadas por meal_slot, food_items com macros + micros expansíveis, seções auxiliares de hidratação/bebidas/atividade, rota opcional `/day/[date]` para dias passados. Motivador: bug do catálogo vazio em prod expôs que faltava lugar pro usuário validar item-por-item. Revive parcialmente a intenção do T-409 original. Escopo v1 é read-only; mutações continuam via chat. Faixa SP-150..154 escolhida pra reservar espaço acima de SP-140..142 (§3.14 de recuperação de catálogo, ainda em PR aberta) — sem conflito.
+- **2026-07-27** — v1.10. Adicionado SP-155 (`should`) à seção 3.15: navegação temporal a partir do `/day` (botões prev/next/hoje + input date HTML nativo) e do `/weekly` (coluna "Dia" da tabela `per_day` vira link pra `/day/[date]`). Datas no futuro bloqueadas com mensagem amigável, sem bater no backend. Motivador: `/day/[date]` já existia (SP-154) mas só era acessível via URL manual.
 - **2026-07-27** — v1.8. Nova seção 3.14 "Recuperação de itens sem catálogo" (SP-140..SP-142, todos `should`, pós-MVP): prompt de recuperação na assistant message quando há `no_catalog_hit`, endpoint `POST /nutrient-facts/manual` para cadastro sem foto, promoção opcional de `food_item` legado no mesmo cadastro. Também: limpeza de duplicação em §3.13 (bloco PWA aparecia duas vezes idênticas por artefato de merge).

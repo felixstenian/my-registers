@@ -4,6 +4,7 @@
 
 import { ActivitySection, BeverageSection, HydrationSection } from './AuxiliarySections';
 import { CloseDayButton } from './CloseDayButton';
+import { DayNavigator } from './DayNavigator';
 import { fmtDateFull, fmtInt, fmtKcal } from './format';
 import { MealSection } from './MealSection';
 import { RefreshOnFocus } from './RefreshOnFocus';
@@ -32,24 +33,27 @@ export function DayView({
   return (
     <main className="mx-auto max-w-4xl space-y-4 p-4">
       <RefreshOnFocus />
-      <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-800">
-        <div>
-          <h1 className="text-lg font-semibold capitalize">{fmtDateFull(data.date)}</h1>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            {data.status === 'closed' ? (
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-                Dia encerrado
-              </span>
-            ) : (
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                Em aberto
-              </span>
-            )}
-          </p>
+      <header className="space-y-3 border-b border-slate-200 pb-3 dark:border-slate-800">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold capitalize">{fmtDateFull(data.date)}</h1>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {data.status === 'closed' ? (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                  Dia encerrado
+                </span>
+              ) : (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  Em aberto
+                </span>
+              )}
+            </p>
+          </div>
+          {allowClose && data.status === 'open' && !isEmpty && (
+            <CloseDayButton date={data.date} />
+          )}
         </div>
-        {allowClose && data.status === 'open' && !isEmpty && (
-          <CloseDayButton date={data.date} />
-        )}
+        <DayNavigator date={data.date} />
       </header>
 
       {isEmpty ? (
