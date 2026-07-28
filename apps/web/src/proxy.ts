@@ -5,7 +5,7 @@ const ACCESS_COOKIE = 'access_token';
 
 // Rotas protegidas por presença de cookie access. A validação real acontece
 // no backend (SP-06): se o cookie for inválido, o app recebe 401 e faz redirect.
-const PROTECTED_PREFIXES = ['/chat', '/days', '/weekly'];
+const PROTECTED_PREFIXES = ['/chat', '/day', '/days', '/weekly'];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -29,5 +29,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/chat/:path*', '/days/:path*', '/weekly/:path*', '/login'],
+  matcher: ['/chat/:path*', '/day/:path*', '/days/:path*', '/weekly/:path*', '/login'],
 };
