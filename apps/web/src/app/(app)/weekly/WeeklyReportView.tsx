@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api-client';
 
@@ -220,10 +221,19 @@ function PerDayTable({ rows }: { rows: DayRow[] }) {
             {rows.map((row) => (
               <tr key={row.date} className="border-t border-slate-100 dark:border-slate-800">
                 <td className="px-3 py-2">
-                  <div className="text-slate-500 dark:text-slate-400">
-                    {fmtWeekday(row.date)}
-                  </div>
-                  <div className="font-medium">{fmtDateShort(row.date)}</div>
+                  {/* SP-155: link pra visão detalhada daquele dia. */}
+                  <Link
+                    href={`/day/${row.date}`}
+                    className="block hover:opacity-80"
+                    title="Ver detalhes deste dia"
+                  >
+                    <div className="text-slate-500 dark:text-slate-400">
+                      {fmtWeekday(row.date)}
+                    </div>
+                    <div className="font-medium underline decoration-slate-300 underline-offset-2 dark:decoration-slate-700">
+                      {fmtDateShort(row.date)}
+                    </div>
+                  </Link>
                 </td>
                 <td className="px-3 py-2 text-right">{fmtInt(row.kcal_in)}</td>
                 <td className="px-3 py-2 text-right">

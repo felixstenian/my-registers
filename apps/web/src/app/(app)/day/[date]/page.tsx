@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { DayView } from '../DayView';
+import { compareISO, todayLocalISO } from '../format';
 import type { DaySnapshot } from '../types';
 
 export const metadata: Metadata = {
@@ -40,6 +41,28 @@ export default async function DayByDatePage({
       <main className="mx-auto max-w-3xl p-4">
         <ErrorPanel>
           Data inválida: <code>{date}</code>. Formato esperado: <code>YYYY-MM-DD</code>.
+        </ErrorPanel>
+      </main>
+    );
+  }
+
+  // SP-155: data futura — não bate no backend. `todayLocalISO` server-side
+  // usa TZ do container (docker-compose seta `TZ: ${TZ}`). Se por acaso o
+  // usuário estiver em fuso diferente do container e a data cair no limite,
+  // backend responde 404 e caímos no ErrorPanel abaixo.
+  if (compareISO(date, todayLocalISO()) > 0) {
+    return (
+      <main className="mx-auto max-w-3xl p-4">
+        <ErrorPanel>
+          Não é possível ver o futuro.
+          <div className="mt-3">
+            <Link
+              href="/day"
+              className="text-sm text-slate-600 underline dark:text-slate-300"
+            >
+              Voltar para hoje
+            </Link>
+          </div>
         </ErrorPanel>
       </main>
     );

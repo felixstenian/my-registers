@@ -85,3 +85,49 @@ export function fmtConfidence(c: number | null): string {
   if (c === null || c === undefined) return '—';
   return `${Math.round(c * 100)}%`;
 }
+
+// --- Aritmética de datas para navegação temporal (SP-155) ---
+//
+// Usa UTC interno pra evitar DST drift: o input é YYYY-MM-DD sem hora,
+// tratamos como dia calendário. `todayLocalISO` usa o timezone do
+// browser, o que casa com o `user.timezone` do backend na maioria dos
+// cenários pessoais (contas locais).
+
+export function isoToParts(iso: string): { y: number; m: number; d: number } | null {
+  const [y, m, d] = iso.split('-').map((s) => parseInt(s, 10));
+  if (!y || !m || !d) return null;
+  return { y, m, d };
+}
+
+export function partsToIso(y: number, m: number, d: number): string {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${y}-${pad(m)}-${pad(d)}`;
+}
+
+export function addDaysISO(iso: string, delta: number): string {
+  const p = isoToParts(iso);
+  if (!p) return iso;
+  const dt = new Date(Date.UTC(p.y, p.m - 1, p.d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return partsToIso(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+}
+
+/**
+ * ISO YYYY-MM-DD do dia local do browser. Usado como `max` do date
+ * picker e como referência pra esconder botão "próximo" quando estamos
+ * no dia atual.
+ */
+export function todayLocalISO(): string {
+  const dt = new Date();
+  return partsToIso(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+}
+
+/**
+ * Compara YYYY-MM-DD lexicograficamente (funciona porque zero-padded).
+ * Retorna -1 / 0 / 1.
+ */
+export function compareISO(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
