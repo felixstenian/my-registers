@@ -296,30 +296,57 @@ Pré-requisitos: Fase 9 concluída (app em prod com HTTPS válido — PWA exige 
 
 ---
 
-## Bloco 5 — Recuperação de itens sem catálogo (SP-140..SP-142) — pendente
+## Bloco 5 — Recuperação de itens sem catálogo (SP-140..SP-143) — revisado 2026-07-28
 
-Meta: fechar o loop pra o usuário quando `catalog.lookup` devolve `None`. Hoje o item entra zerado + `needs_confirmation`, e o usuário só sabe recuperar via caminhos escondidos. Feature adiciona (a) prompt visível na assistant message com as opções, (b) cadastro manual sem foto, (c) promoção opcional do item legado no mesmo POST.
+Meta: fechar o loop pra o usuário quando `catalog.lookup` devolve `None`, entregando **três botões clicáveis por item** direto no assistant message (Cadastrar manual, Foto do rótulo, Descartar). Remove o fluxo de "confirmação de item" que era redundante.
 
 Pré-requisitos:
-- Fase 4.b (SP-30..35) concluída (LabelCatalogService disponível como referência).
-- Hotfix do PATCH aceitar lookup dinâmico já em `main` (PR #37) — permite testar a promoção via chat também.
+- Fase 4.b (SP-30..35) concluída (LabelCatalogService disponível).
 
-- [x] **T-B501** — `message_formatter.compose_meal` detecta warnings `code='no_catalog_hit'` e anexa bloco de recovery (SP-140). Marcador HTML-comment `<!-- catalog-recovery: id1,id2 -->` seguido de texto pt-BR listando os items em bold + 3 CTAs (foto, cadastrar, descartar). Frontend parseia o marcador; se ignorado, cai como texto puro. 3 testes novos em `test_message_formatter.py`. (S)
-- [x] **T-B502** — **Não necessária.** CHECK de `source` já inclui `'manual'`; reusamos esse valor (mesma semântica que `'user_manual'` da spec).
-- [x] **T-B503** — `POST /nutrient-facts/manual` em `app/api/routes/nutrient_facts.py`. Schema `ManualNutrientFactIn` (validator regex `^[a-z0-9_]+$` no canonical_name, aliases dedupe). Persiste `source='manual'`, `verified_by_user=True`, `created_by=current_user.id`. Migration `0008_nutrient_facts_created_by.py` adiciona coluna + índice parcial. Audit `entity_type='nutrient_fact', action='create', actor='user'`. (M)
-- [x] **T-B504** — Suporte a `promote_food_item_id` no mesmo endpoint. Helper `_try_promote_item` valida item + reusa `CatalogHit.from_model` pra recomputar via `NutritionCalculator` + audit `action='correct'` + `DailyRecomputeService.recompute`. Falha silenciosa devolve fact criado + `promotion_warning='promotion_failed:{motivo}'`. (M)
-- [x] **T-B505** — 11 testes de integração em `tests/test_manual_nutrient_facts.py`: happy per_100g, happy per_100ml, canonical_name inválido → 422, kcal negativa → 422, `created_by` correto, audit gravado, promoção válida (macros + snapshot atualizados), item de outro user (warning), item deletado (warning), dia fechado (warning, INV-5), sobrescrever catalog_ref_id (audit registra before/after). (L) — gate.
-- [x] **T-B506** — `ManualCatalogForm.tsx` (client, modal). Campos mínimos (canonical_name auto-gerado do display_name + basis + kcal + P/C/G), fibras/sódio em `<details>` accordion. Submit chama `POST /nutrient-facts/manual` com `promote_food_item_id`. Warning de promoção mostrado inline; success recarrega. (M)
-- [x] **T-B507** — `AssistantContent.tsx` parseia o marcador + extrai nomes em bold + emite bloco custom com botão "Cadastrar" por item que abre `ManualCatalogForm`. Foto e descartar continuam como instrução textual (evita hook em input file de outro componente). (M)
-- [ ] **T-B508** — Docs. **Adiado** — UX do card deve ser autodescoberta. Se aparecer dúvida em uso real, criar `docs/manual-catalog.md` em PR curta separada. (XS)
+### Backend — cadastro manual (mantido do PR original)
 
-**Gate Bloco 5 — cumprido:** usuário que registra alimento fora do seed vê card amarelo com nome + botão "Cadastrar" no assistant message; abre form curto, cadastra os macros, e o item volta pro diário com kcal correto + needs_confirmation=false, sem sair do chat.
+- [x] **T-B501** — Composer de assistant message detecta warnings `no_catalog_hit` e anexa marcador `<!-- catalog-recovery: id1,id2 -->` + label "Sem catálogo para: **X**, **Y**". Frontend parseia. Adaptado à revisão v1.12 — remove texto sobre "descartar via chat" e "responda apaga" (vira botão). Testes em `test_message_formatter.py`. (S)
+- [x] **T-B502** — **Não necessária** (CHECK já tinha `'manual'`).
+- [x] **T-B503** — `POST /nutrient-facts/manual` com `ManualNutrientFactIn` + migration `0008_nutrient_facts_created_by`. Audit `create`. (M)
+- [x] **T-B504** — `promote_food_item_id` no mesmo endpoint via `_try_promote_item`. Falha silenciosa com `promotion_warning`. (M)
+- [x] **T-B505** — 11 testes em `tests/test_manual_nutrient_facts.py`. (L)
+- [x] **T-B506** — `ManualCatalogForm.tsx` (modal client, form curto). (M)
+
+### Backend — remoção do fluxo de confirmação
+
+- [ ] **T-B510** — Backend não seta mais `needs_confirmation=True`. Remover a lógica em `MealService._create_item` (`if confidence < LOW_CONFIDENCE_THRESHOLD or hit is None`) e no `BeverageService` equivalente. Campo continua no schema (nunca setado), retorno de API continua expondo (frontend ignora). Ajustar testes que hoje esperam `needs_confirmation=True` — passar a esperar `False`. (M)
+- [ ] **T-B511** — Deletar endpoint `POST /records/food-items/{id}/confirm` (hotfix #37) + `ConfirmationOut` schema. Testes em `test_corrections_deletions.py` (`test_confirm_food_item_*`, 4 casos) deletados. (S)
+- [ ] **T-B512** — Deletar `apps/api/app/services/confirmation.py` (`ConfirmationService`), remover import + branch `confirm_items` do `IntentDispatcher` + `MessageProcessor._handle_confirm_items`, remover intent do enum `Intent`, remover campos `confirmation`/`ConfirmationIn` do `LLMEnvelope` + `system_v2.md` prompt + `tool_schema.py`. `tests/test_confirm_items.py` deletado. Fluxo de correção via chat ("corrija X 100g") continua funcionando via intent `correct_record` (não tocado). (L)
+- [ ] **T-B513** — `message_formatter._warnings_block` (bloco "Confirma estes itens?") deletado. `_has_approx_food_items` continua usando warnings pra decidir `≈`. Teste `test_compose_meal_warnings_listed_after_disclaimer` deletado ou reformado. (S)
+
+### Backend — foto do rótulo com promoção acoplada (SP-143)
+
+- [ ] **T-B520** — `POST /chat/messages` aceita novo campo opcional `promote_food_item_id: uuid`. Adiciona ao schema Pydantic + rota. Validação server-side de ownership no `ChatService.post_user_message` (silenciosamente descarta se falha — não bloqueia envio). Coluna nova em `messages` (nullable) ou armazenar em `raw_llm_response`? Decisão de plan: **armazenar em `raw_llm_response.metadata.promote_food_item_id`** pra evitar migration destrutiva. (M) — SP-143.
+- [ ] **T-B521** — `MessageProcessor._handle_log_nutrition_label` (fluxo Fase 4.b), depois de `LabelCatalogService.upsert_from_label` retornar sucesso: se `promote_food_item_id` está na mensagem E o item passa validação (ownership + não deletado + dia aberto), chama helper compartilhado com `_try_promote_item` do endpoint manual (extrair pra `app/services/promotion.py` ou similar). Falha silenciosa grava audit `action='promotion_failed'`. (M) — SP-143.
+- [ ] **T-B522** — Testes de integração em `tests/test_label_promotion.py` (6 casos): foto de rótulo válido + item válido → promoção completa; foto de rótulo válido + item de outro user → fact criado sem promoção; foto de rótulo válido + item deletado → idem; foto de rótulo válido + dia fechado → idem; foto que **não** é rótulo (LLM retorna clarify) → `promote_food_item_id` ignorado silenciosamente; foto de rótulo mas sem `promote_food_item_id` → comportamento original inalterado. (M)
+
+### Frontend — remoção da UX de confirmação
+
+- [ ] **T-B530** — Deletar `apps/web/src/app/(app)/chat/PendingItemsModal.tsx`. Remover import + state + render do modal em `chat/page.tsx`. `DayTotalsBar.tsx` remove badge "N item precisa de confirmação" + prop `onPendingClick`. Interface `FoodItemRef.needs_confirmation` fica no tipo (backend ainda expõe), mas nenhum consumidor no frontend. (S)
+- [ ] **T-B531** — Deletar `apps/web/src/app/(app)/day/ConfirmItemButton.tsx`. Em `FoodItemRow.tsx`, remover badge "confirmar" (mantém apenas "sem catálogo" quando `has_catalog=false`). Cor amarela do badge some. (S)
+
+### Frontend — 3 botões clicáveis no card recovery
+
+- [ ] **T-B540** — `AssistantContent.tsx` estende o parser + render do bloco `recovery` pra ter 3 botões por item (não só "Cadastrar"): **Cadastrar** (abre `ManualCatalogForm`, já feito), **Foto** (novo, ver T-B541), **Descartar** (novo, ver T-B542). Layout compacto — botões inline, ícones + label curto em mobile. (M) — SP-140.
+- [ ] **T-B541** — Novo componente `LabelPhotoUploader.tsx` (client). Botão dispara `<input type="file" accept="image/*" capture="environment">` (aproveita SP-16 pra câmera mobile). Ao selecionar: (1) POST `/media` pra subir; (2) POST `/chat/messages` com `text` mínimo ("foto do rótulo de {nome}"), `media_ids=[uploadedId]`, `promote_food_item_id={item.id}`. Sucesso → toast + `window.location.reload()` pra pegar novo assistant message. Erros de upload (SP-18) reusam mecânica existente (mensagens em pt-BR pra `file_too_large`, `invalid_image`). (M) — SP-143.
+- [ ] **T-B542** — Novo componente `DiscardItemButton.tsx` (client). Botão dispara `DELETE /records/food-items/{item.id}` diretamente (sem confirmação extra — item que ainda não gerou macros úteis pode ser deletado com 1 clique). Success → `window.location.reload()`. Erro exibe toast. (S)
+
+### Docs
+
+- [ ] **T-B508** — Docs. **Adiado** (mesmo motivo do PR original — UX autodescoberta). (XS)
+
+**Gate Bloco 5 revisado — objetivo:** usuário registra alimento fora do seed → assistant message mostra card com 3 botões por item. Clica Cadastrar → form curto + submit + item promovido + snapshot recalculado. Clica Foto → escolhe imagem → LLM lê rótulo + backend promove item automaticamente. Clica Descartar → item removido + snapshot recalculado. Nenhum fluxo de "confirmar" existe mais (endpoint, UI, intent LLM).
 
 **Não inclui:**
-- Delete de nutrient_fact manual (adiar até haver necessidade real).
-- Sugestão automática de kcal pela LLM (Const. §5 — LLM não gera macros).
+- Migration destrutiva removendo `needs_confirmation` da coluna (adia).
+- Delete de fact manual (adia).
+- Sugestão automática de kcal pela LLM (viola Const. §5).
 - Compartilhamento de facts entre users (single-user por design).
-- Formulário com micros completos (opcional na v1; usuário pode omitir).
 
 ---
 
