@@ -11,10 +11,10 @@ Const. §14 / app_plan §14.6. Runbook do TLS na VPS.
 ## Emissão pela 1ª vez (staging → prod)
 
 O Nginx precisa estar servindo `/.well-known/acme-challenge/` na porta 80
-**antes** do certbot. Como o `conf.d/app.conf` referencia
+**antes** do certbot. Como o `templates/app.conf.template` referencia
 `/etc/letsencrypt/live/${DOMAIN}/fullchain.pem` (que ainda não existe),
 o container quebra. Solução: subir num modo temporário só com o Nginx +
-uma config mínima HTTP.
+um template mínimo HTTP.
 
 > ⚠️ **Armadilha do entrypoint em daemon-mode.**
 >
@@ -35,9 +35,11 @@ Passo a passo (uma vez só na vida da VPS):
 # 1. Ir para o repositório
 cd ~/my-registers
 
-# 2. Substituir a config real por uma placeholder HTTP-only
-cp infra/nginx/conf.d/app.conf infra/nginx/conf.d/app.conf.bak
-cat > infra/nginx/conf.d/app.conf <<'EOF'
+# 2. Substituir o template por um placeholder HTTP-only. Nginx expande
+#    ${DOMAIN} automaticamente no boot (envsubst da imagem oficial),
+#    então o template pode conter `${DOMAIN}` sem escapes.
+cp infra/nginx/templates/app.conf.template infra/nginx/templates/app.conf.template.bak
+cat > infra/nginx/templates/app.conf.template <<'EOF'
 server {
   listen 80;
   server_name ${DOMAIN};
@@ -46,15 +48,12 @@ server {
 }
 EOF
 
-# 3. Substituir ${DOMAIN} manualmente (o nginx não expande env vars
-#    fora da diretiva `set`; use `envsubst` ou o sed abaixo):
-sed -i "s|\${DOMAIN}|$DOMAIN|g" infra/nginx/conf.d/app.conf
-
-# 4. Subir SÓ o nginx e o volume compartilhado
+# 3. Subir SÓ o nginx e o volume compartilhado. O entrypoint faz
+#    envsubst e escreve em /etc/nginx/conf.d/ automaticamente.
 docker compose -f docker-compose.production.yml --env-file .env.production \
   up -d nginx
 
-# 5. Testar (staging Let's Encrypt primeiro — não bate rate limit)
+# 4. Testar (staging Let's Encrypt primeiro — não bate rate limit)
 docker compose -f docker-compose.production.yml --env-file .env.production run --rm \
   --entrypoint certbot certbot \
   certonly --webroot -w /var/www/certbot \
@@ -73,12 +72,14 @@ docker compose -f docker-compose.production.yml --env-file .env.production run -
   --agree-tos --no-eff-email \
   -m "$LETSENCRYPT_EMAIL" -d "$DOMAIN"
 
-# 6. Restaurar a config real (com HTTPS)
-mv infra/nginx/conf.d/app.conf.bak infra/nginx/conf.d/app.conf
-sed -i "s|\${DOMAIN}|$DOMAIN|g" infra/nginx/conf.d/app.conf
+# 5. Restaurar o template real (com HTTPS)
+mv infra/nginx/templates/app.conf.template.bak infra/nginx/templates/app.conf.template
 
-# 7. Recarregar
-docker compose -f docker-compose.production.yml --env-file .env.production restart nginx
+# 6. Restart pra re-processar o template (envsubst só roda no boot,
+#    então `nginx -s reload` sozinho não pega mudança de template —
+#    precisa recriar o container).
+docker compose -f docker-compose.production.yml --env-file .env.production \
+  up -d --force-recreate nginx
 ```
 
 ## Renovação

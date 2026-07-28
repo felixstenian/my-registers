@@ -480,44 +480,61 @@ Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push
 
 ---
 
-### 3.13 Progressive Web App (pós-MVP, escopo básico)
+### 3.14 Recuperação de itens sem catálogo (pós-MVP)
 
-Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push (B-05) nem cache de dados de negócio.
+Quando `catalog.lookup()` devolve `None` para um `food_item`, hoje o item entra no diário com `kcal=0`, `catalog_ref_id=NULL` e `needs_confirmation=true` (Const. §5-6, INV-1). O usuário fica com três caminhos: (a) foto do rótulo (Fase 4.b, SP-30..35), (b) descartar, (c) confirmar zerado. Nenhum é intuitivo se o usuário não conhecer o mecanismo. Esta seção cobre duas melhorias:
 
-**SP-128** (`must`) — Manifest publicado em `/manifest.webmanifest`.
-- Campos obrigatórios: `name`, `short_name` (≤12 chars), `icons` (192, 512, maskable), `theme_color`, `background_color`, `display: standalone`, `start_url: /chat`, `scope: /`, `orientation: portrait`.
-- MIME type correto (`application/manifest+json`) — Next.js já resolve via convenção de arquivo em `src/app/manifest.ts`.
+**SP-140** (`should`) — Prompt de recuperação na assistant message.
+- Quando o resultado de `log_food` contém warnings com `code='no_catalog_hit'`, o `message_formatter.compose_meal` anexa um bloco "Sem catálogo para: {itens}" listando **detected_name** dos afetados e três chamadas de ação claras:
+  1. `📸 Enviar foto do rótulo` — atalho textual explicando o fluxo SP-30..35 (usuário anexa foto no próximo message).
+  2. `✏️ Cadastrar manualmente` — link/botão que abre o formulário curto (SP-141).
+  3. `❌ Descartar item` — instrução curta ("responda `apaga {nome}`").
+- Não altera o cálculo. Apenas UX. Aviso legal (Art. VII §26) continua obrigatório.
 
-**SP-129** (`must`) — Meta tags para instalação em iOS Safari.
-- `apple-mobile-web-app-capable=yes`, `apple-mobile-web-app-status-bar-style=default`, `apple-mobile-web-app-title=my-registers`, `apple-touch-icon` 180×180.
-- Sem essas tags, iOS Safari não trata a app como instalável em standalone.
+**SP-141** (`should`) — Endpoint de cadastro manual de `nutrient_facts`.
+- `POST /nutrient-facts/manual` autenticado. Body:
+  ```json
+  {
+    "canonical_name": "pao_de_queijo_congelado",
+    "display_name": "Pão de queijo congelado",
+    "brand": "Forno de Minas",   // opcional
+    "basis": "per_100g",          // "per_100g" ou "per_100ml"
+    "kcal": 320,
+    "protein_g": 8,
+    "carbs_g": 40,
+    "fat_g": 14,
+    "fiber_g": 0.5,              // demais macros/micros opcionais
+    "sodium_mg": 380,
+    "calcium_mg": null,
+    "iron_mg": null,
+    "potassium_mg": null,
+    "aliases": ["pao de queijo", "pao_queijo"],  // opcional
+    "promote_food_item_id": "uuid"               // opcional (SP-142)
+  }
+  ```
+- Response 201 com o `nutrient_facts.id` criado (ou 200 se merge com fact existente do usuário — decisão via ADR).
+- Persiste com `source='user_manual'`, `verified_by_user=true`, `created_by=user_id`.
+- Validação: `basis ∈ {per_100g, per_100ml}`; `kcal ≥ 0`; `protein/carbs/fat ≥ 0`; `canonical_name` slug-like (`[a-z0-9_]+`).
+- Isolamento: cada usuário tem seu próprio fact (não compartilha entre users). Const. §21.
+- Precedência de source: `user_manual + verified_by_user=true` empata com TBCA_2023; entre ambos, mais recente vence (o `LocalTBCACatalog` já resolve isso).
 
-**SP-130** (`must`) — Service worker com estratégia por rota.
-- Shell estático (`/_next/static/*`, ícones, manifest, fonts): **cache-first** com revalidação em background.
-- HTML de rotas (`/chat`, `/login`, `/weekly`): **network-first** com fallback pra cache offline.
-- API (`/api/*`): **network-only, nunca cachear.** Ver `INV-11`.
-- Registro no client após hidratação (não bloqueia render inicial).
+**SP-142** (`should`) — Promoção de `food_item` legado no cadastro manual.
+- Se `POST /nutrient-facts/manual` incluir `promote_food_item_id`, o backend:
+  1. Cria o `nutrient_fact` (SP-141).
+  2. Faz lookup do item legado; se pertence ao usuário e não está deletado:
+     - Atualiza `catalog_ref_id` pro novo fact.
+     - Recalcula macros via `NutritionCalculator.compute(hit=new_fact, grams=item.grams, ml=item.ml)`.
+     - Desmarca `needs_confirmation`.
+     - Grava audit `action='correct'`, `actor='user'`, before/after (mesma semântica do PATCH atual).
+     - Chama `DailyRecomputeService.recompute(item.food_record.day_log_id)` — snapshot reflete novo valor.
+- Se `promote_food_item_id` for de outro usuário ou não achado, endpoint retorna 201 do fact criado + warning `"promotion_failed"` no body (não falha o cadastro).
+- Se `promote_food_item_id` já tem catalog_ref_id != null, endpoint sobrescreve (registra audit).
 
-**SP-131** (`must`) — Assets de ícone em 4 tamanhos mínimos.
-- `192×192` (Android padrão), `512×512` (Android hi-res / splash), `180×180` (apple-touch), `512×512 maskable` (Android adaptativo).
-- Formato PNG. Cor de fundo compatível com `background_color` do manifest.
-
-**SP-132** (`should`) — Update flow visível.
-- Quando SW detecta versão nova disponível (`updatefound` + `installed` state), exibir toast persistente "Nova versão disponível" com botão "Recarregar" que dispara `postMessage({type: 'SKIP_WAITING'})` seguido de `window.location.reload()`.
-- Sem esse fluxo, usuário fica preso em versão antiga até fechar todas as abas.
-
-**SP-133** (`should`) — Botão "Instalar" no header.
-- Escuta `beforeinstallprompt` (Chrome/Edge Android+desktop), guarda evento, exibe botão que chama `.prompt()`.
-- Oculto em navegadores sem o evento (Safari desktop/iOS — nesses, install é via "Adicionar à tela de início" do menu do browser).
-- Após install (`appinstalled` event), botão some.
-
-**SP-134** (`may`) — Splash iOS via `apple-touch-startup-image`.
-- Set mínimo: iPhone SE/8, iPhone 15/16 Pro (3 sizes). iPad opcional.
-- Sem isso, iOS mostra tela branca de ~500ms na abertura standalone.
-
-**SP-135** (`must`) — Comportamento offline previsível.
-- Rota carregada offline (sem cache do dia) exibe página `/offline` com mensagem: "Sem conexão. Algumas ações ficam indisponíveis até você reconectar." + link "Tentar novamente".
-- Aviso legal (Constituição Art. VII §26) presente na `/offline`.
+**Fora do escopo desta feature:**
+- Formulário completo com micros (fica opcional na v1).
+- Sincronização entre users (cada user tem seu fact).
+- Delete de fact manual (adiar até haver necessidade real; auditoria vai preservar).
+- Sugestão de cadastro automática por LLM sem interação do usuário (viola Const. §5).
 
 ---
 
@@ -680,3 +697,4 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-26** — v1.6. Adicionada seção 3.13 "Registro estruturado de treino" com SP-120..SP-127 (todos `may`, pós-MVP). Modelo hierárquico sessão → exercícios → séries, coexistência com `log_activity` via consolidação em `activity_record` no encerramento (ADR-004 em `research.md`). Novos invariantes INV-11, INV-12, INV-13. Não bloqueia MVP; implementação após Fase 9.
 - **2026-07-27** — v1.7. Nova seção 3.13: PWA básico (SP-128..SP-135). Escopo: instalabilidade + shell offline, sem fila de mensagens nem cache de dados de negócio. Nova INV-11 proíbe SW de cachear `/api/*`. Item correspondente removido de "Fora do escopo". (Se PR de workout-tracking mergear primeiro, essa seção vira 3.14 no rebase; sem conflito de SP porque as faixas SP-120..127 e SP-128..135 são disjuntas.)
 - **2026-07-27** — v1.9. Nova seção 3.15 "Visão detalhada do dia" (SP-150..SP-154, todos `should`/`may`): página `/day` server-rendered com refeições agrupadas por meal_slot, food_items com macros + micros expansíveis, seções auxiliares de hidratação/bebidas/atividade, rota opcional `/day/[date]` para dias passados. Motivador: bug do catálogo vazio em prod expôs que faltava lugar pro usuário validar item-por-item. Revive parcialmente a intenção do T-409 original. Escopo v1 é read-only; mutações continuam via chat. Faixa SP-150..154 escolhida pra reservar espaço acima de SP-140..142 (§3.14 de recuperação de catálogo, ainda em PR aberta) — sem conflito.
+- **2026-07-27** — v1.8. Nova seção 3.14 "Recuperação de itens sem catálogo" (SP-140..SP-142, todos `should`, pós-MVP): prompt de recuperação na assistant message quando há `no_catalog_hit`, endpoint `POST /nutrient-facts/manual` para cadastro sem foto, promoção opcional de `food_item` legado no mesmo cadastro. Também: limpeza de duplicação em §3.13 (bloco PWA aparecia duas vezes idênticas por artefato de merge).
