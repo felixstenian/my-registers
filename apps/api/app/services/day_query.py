@@ -168,6 +168,15 @@ class DayQueryService:
                     "protein_g": _dec(item.protein_g),
                     "carbs_g": _dec(item.carbs_g),
                     "fat_g": _dec(item.fat_g),
+                    "fiber_g": _dec(item.fiber_g),
+                    # Micros — usados pela expansão de /day (SP-152).
+                    "sodium_mg": _dec(item.sodium_mg),
+                    "calcium_mg": _dec(item.calcium_mg),
+                    "iron_mg": _dec(item.iron_mg),
+                    "potassium_mg": _dec(item.potassium_mg),
+                    # Metadata útil pra badges + auditoria na página /day.
+                    "confidence": _dec(item.confidence),
+                    "has_catalog": item.catalog_ref_id is not None,
                     "is_estimate": item.is_estimate,
                     "needs_confirmation": item.needs_confirmation,
                     "source": item.source,

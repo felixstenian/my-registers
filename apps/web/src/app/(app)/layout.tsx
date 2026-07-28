@@ -44,6 +44,12 @@ export default async function ProtectedLayout({
               Chat
             </Link>
             <Link
+              href="/day"
+              className="hover:text-slate-900 dark:hover:text-slate-100"
+            >
+              Hoje
+            </Link>
+            <Link
               href="/weekly"
               className="hover:text-slate-900 dark:hover:text-slate-100"
             >
