@@ -1,8 +1,11 @@
 # app_plan.md §14.6 — virtual host da app.
 #
-# Config usa a variável de ambiente `${DOMAIN}` — substituída no boot pelo
-# comando `envsubst` (veja infra/nginx/entrypoint.sh, se usar) ou o `sed`
-# do bootstrap. Alternativa: hardcodar o domínio direto neste arquivo.
+# Este arquivo é um TEMPLATE processado pelo entrypoint do
+# `nginx:*-alpine` no boot: `envsubst` substitui apenas `${DOMAIN}`
+# (whitelist via `NGINX_ENVSUBST_FILTER=^DOMAIN$` no compose) e escreve
+# o resultado em `/etc/nginx/conf.d/app.conf`. Variáveis nativas do
+# nginx (`$host`, `$request_uri`, `$proxy_add_x_forwarded_for`,
+# `$remote_addr`, `$http_upgrade`) NÃO são tocadas.
 #
 # Sem HSTS preload por padrão — habilite `preload` só quando tiver
 # certeza (uma vez incluído no preload list é praticamente irreversível).
@@ -67,6 +70,26 @@ server {
     proxy_read_timeout 120s;
     proxy_connect_timeout 10s;
     # Chat pode ter respostas ~30s por causa do LLM. 120s é margem.
+  }
+
+  # --- Mídia (MinIO servida pelo mesmo domínio) ---
+  # Reescreve `/media/<bucket>/<key>` → `http://minio:9000/<bucket>/<key>`.
+  # O `S3_PUBLIC_BASE_URL` do backend reescreve o host da URL assinada pra
+  # `https://${DOMAIN}/media` — nginx redireciona pro MinIO interno.
+  #
+  # Necessário porque:
+  #   1. MinIO só existe na rede docker `internal` (browser não alcança).
+  #   2. CSP `img-src 'self'` exige mesma origem — proxy pelo domínio
+  #      principal satisfaz sem afrouxar CSP.
+  location /media/ {
+    proxy_pass http://minio:9000/;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_read_timeout 30s;
+    proxy_connect_timeout 5s;
+    add_header Cache-Control "private, max-age=3600" always;
   }
 
   # --- Frontend Next.js standalone ---

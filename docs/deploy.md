@@ -156,7 +156,8 @@ containers sem necessidade. Use a tabela abaixo pra decidir escopo:
 | Só `apps/api/` (sem migration) | `up -d --build api` |
 | `apps/api/` **com** migration nova | `./scripts/bootstrap.sh .env.production` + `up -d --build api` |
 | `docker-compose.production.yml` | `up -d` (recria containers afetados; adicione `--build` se `build:` mudou) |
-| `infra/nginx/` (config) | `exec nginx nginx -s reload` (ou restart se mudou volume/binding) |
+| `infra/nginx/templates/*.template` | `up -d --force-recreate nginx` (envsubst só roda no boot — reload sozinho não pega mudança de template) |
+| `infra/nginx/conf.d/*.conf` ou `nginx.conf` | `exec nginx nginx -s reload` (mudança direta em config renderizada) |
 | `.env.production` | `up -d --force-recreate <service>` (nomear os que consomem a var) |
 | Sem certeza / múltiplas áreas | `up -d --build` sem nome — rebuilda tudo. Custa tempo mas nunca deixa serviço com imagem stale. |
 
@@ -222,7 +223,7 @@ Cobrir antes de considerar o MVP "em produção".
 - [x] Rate limit login: 5/min/IP + 10/15min/email.
 - [x] Validação server-side de MIME e ≤ 8MB no upload (SP-11).
 - [x] Nginx: HSTS 1 ano, X-Content-Type-Options, X-Frame-Options DENY, CSP,
-      Referrer-Policy, Permissions-Policy — `infra/nginx/conf.d/app.conf`.
+      Referrer-Policy, Permissions-Policy — `infra/nginx/templates/app.conf.template`.
 - [x] TLSv1.2+ (nada de v1.0/1.1); ciphers `HIGH:!aNULL:!MD5`; OCSP stapling.
 - [x] Postgres e MinIO sem porta pública (rede `internal` do compose).
 - [x] `client_max_body_size 15m` no Nginx (4 fotos × 8MB + margem).

@@ -26,9 +26,18 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # Entrypoint da imagem oficial roda `envsubst` nos arquivos em
+    # `/etc/nginx/templates/*.template` e escreve o resultado em
+    # `/etc/nginx/conf.d/`. `NGINX_ENVSUBST_FILTER=^DOMAIN$` restringe
+    # a substituição a `${DOMAIN}` — vars nativas do nginx (`$host`,
+    # `$request_uri`, etc.) permanecem intactas. Ver
+    # `infra/nginx/templates/app.conf.template`.
+    environment:
+      DOMAIN: ${DOMAIN}
+      NGINX_ENVSUBST_FILTER: "^DOMAIN$$"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infra/nginx/templates:/etc/nginx/templates:ro
       - letsencrypt:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot:ro
     networks: [web, internal]
