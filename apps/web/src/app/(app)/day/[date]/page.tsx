@@ -90,9 +90,12 @@ export default async function DayByDatePage({
     );
   }
 
-  // Dias passados são read-only nesta rota (edição via chat evita
-  // confusão de "data efetiva" da mutação).
-  return <DayView data={result} allowClose={false} />;
+  // SP-154 revisto: dias passados são read-only pra edição de records
+  // (isso continua via chat), mas o botão "Encerrar dia" precisa aparecer
+  // se o dia ainda estiver aberto — usuário que esqueceu de encerrar
+  // naquele dia precisa poder resolver retroativamente. O `DayView` já
+  // filtra `status === 'open'` internamente antes de renderizar o botão.
+  return <DayView data={result} allowClose />;
 }
 
 function ErrorPanel({ children }: { children: React.ReactNode }) {
