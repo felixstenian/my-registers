@@ -223,7 +223,57 @@ def compose_meal(meal, recompute, log_date: date) -> str:
     if warnings_block:
         parts.append("")
         parts.append(warnings_block)
+    # SP-140: prompt de recuperação quando algum item ficou sem catálogo.
+    recovery_block = _no_catalog_recovery_block(meal.items, meal.warnings)
+    if recovery_block:
+        parts.append("")
+        parts.append(recovery_block)
     return "\n".join(parts)
+
+
+# SP-140 — Marcador processado pelo AssistantContent do frontend pra
+# transformar a linha em CTAs clicáveis (foto, cadastrar, descartar).
+# Formato: `<!-- catalog-recovery: id1,id2 -->` seguido de listagem
+# markdown legível. Se o frontend não reconhecer, a listagem markdown
+# continua útil como texto puro.
+_RECOVERY_MARKER = "<!-- catalog-recovery:"
+
+
+def _no_catalog_recovery_block(items, warnings: list[dict]) -> str:
+    """Retorna bloco pt-BR com CTAs quando 1+ item tem `no_catalog_hit`.
+
+    Bloco inclui:
+    - marcador HTML-comment com IDs dos items afetados (parseado pelo
+      frontend em AssistantContent — invisível na renderização plain).
+    - texto amigável com 3 caminhos: foto do rótulo, cadastro manual,
+      descartar.
+    """
+    affected_ids = {
+        w["item_id"] for w in warnings if w.get("code") == "no_catalog_hit" and w.get("item_id")
+    }
+    if not affected_ids:
+        return ""
+    # Mantém a ordem original dos items (LLM devolve nesta ordem).
+    id_to_name = {str(it.id): it.detected_name for it in items}
+    affected = [(str(it.id), it.detected_name) for it in items if str(it.id) in affected_ids]
+    if not affected:
+        return ""
+
+    id_list = ",".join(id_ for id_, _ in affected)
+    names = ", ".join(f"**{name}**" for _, name in affected)
+    lines = [
+        f"{_RECOVERY_MARKER} {id_list} -->",
+        f"**Sem catálogo para:** {names}",
+        "",
+        "Como você quer resolver?",
+        "- 📸 **Enviar foto do rótulo** — anexe no próximo message.",
+        "- ✏️ **Cadastrar manualmente** — informe kcal e macros por 100 g/ml.",
+        "- ❌ **Descartar item** — responda `apaga {nome}`.",
+    ]
+    # `id_to_name` intencionalmente não vira mais nada — mantém escopo
+    # simples; frontend renderiza CTAs por item.
+    _ = id_to_name
+    return "\n".join(lines)
 
 
 def compose_water(hydration, recompute, log_date: date) -> str:

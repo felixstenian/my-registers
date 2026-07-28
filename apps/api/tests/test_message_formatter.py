@@ -166,6 +166,70 @@ def test_compose_meal_warnings_listed_after_disclaimer():
     assert "molho X" in out
 
 
+def _food_item_with_id(item_id: str, detected_name: str = "arroz"):
+    it = _food_item()
+    it.id = item_id
+    it.detected_name = detected_name
+    return it
+
+
+def test_compose_meal_appends_recovery_block_when_no_catalog_hit():
+    """SP-140: quando há warnings `no_catalog_hit`, o composer adiciona
+    marcador HTML-comment com IDs + bloco com 3 CTAs em pt-BR."""
+    item = _food_item_with_id("11111111-1111-1111-1111-111111111111", "pão de queijo")
+    meal = SimpleNamespace(
+        food_record=SimpleNamespace(meal_slot="breakfast"),
+        items=[item],
+        warnings=[
+            {"code": "no_catalog_hit", "item_id": item.id, "detected_name": item.detected_name}
+        ],
+    )
+    out = mf.compose_meal(meal, SimpleNamespace(snapshot=_snap()), date(2026, 7, 20))
+
+    # Marcador com IDs — usado pelo AssistantContent no frontend.
+    assert "<!-- catalog-recovery: 11111111-1111-1111-1111-111111111111 -->" in out
+    # Bloco em pt-BR com as 3 CTAs.
+    assert "Sem catálogo para:" in out
+    assert "**pão de queijo**" in out
+    assert "Enviar foto do rótulo" in out
+    assert "Cadastrar manualmente" in out
+    assert "Descartar item" in out
+
+
+def test_compose_meal_no_recovery_block_when_all_items_have_catalog():
+    """Sem warnings `no_catalog_hit`, nada muda no output."""
+    meal = SimpleNamespace(
+        food_record=SimpleNamespace(meal_slot="lunch"),
+        items=[_food_item()],
+        warnings=[],
+    )
+    out = mf.compose_meal(meal, SimpleNamespace(snapshot=_snap()), date(2026, 7, 20))
+    assert "catalog-recovery" not in out
+    assert "Sem catálogo para" not in out
+
+
+def test_compose_meal_recovery_lists_only_no_catalog_items():
+    """Mistura: só o item marcado como sem catálogo aparece no bloco."""
+    with_catalog = _food_item_with_id("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "arroz")
+    without = _food_item_with_id("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "tapioca")
+    meal = SimpleNamespace(
+        food_record=SimpleNamespace(meal_slot="lunch"),
+        items=[with_catalog, without],
+        warnings=[
+            {
+                "code": "no_catalog_hit",
+                "item_id": without.id,
+                "detected_name": without.detected_name,
+            }
+        ],
+    )
+    out = mf.compose_meal(meal, SimpleNamespace(snapshot=_snap()), date(2026, 7, 20))
+    assert "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" in out
+    assert "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" not in out
+    assert "**tapioca**" in out
+    assert "**arroz**" not in out.split("Sem catálogo para:")[-1]
+
+
 def test_compose_meal_daily_shows_kcal_out_only_when_positive():
     """Sem atividade registrada, Calorias Gastas / Saldo não aparecem."""
     meal = SimpleNamespace(
