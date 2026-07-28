@@ -6,6 +6,7 @@ import { ActivitySection, BeverageSection, HydrationSection } from './AuxiliaryS
 import { CloseDayButton } from './CloseDayButton';
 import { fmtDateFull, fmtInt, fmtKcal } from './format';
 import { MealSection } from './MealSection';
+import { RefreshOnFocus } from './RefreshOnFocus';
 import {
   MEAL_SLOT_LABEL_PT,
   MEAL_SLOT_ORDER,
@@ -30,6 +31,7 @@ export function DayView({
 
   return (
     <main className="mx-auto max-w-4xl space-y-4 p-4">
+      <RefreshOnFocus />
       <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-800">
         <div>
           <h1 className="text-lg font-semibold capitalize">{fmtDateFull(data.date)}</h1>
