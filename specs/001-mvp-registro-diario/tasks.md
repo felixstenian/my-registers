@@ -323,6 +323,32 @@ Pré-requisitos:
 
 ---
 
+## Bloco 6 — Visão detalhada do dia (SP-150..SP-154) — pendente
+
+Meta: página `/day` que lista item-por-item do dia com macros + micros, permitindo o usuário validar cada registro. Fecha o loop de confiança que ficou aberto após o bug do catálogo vazio em prod (usuário via total zerado sem saber qual item estava sem catálogo).
+
+Read-only na v1 — todas as mutações continuam via chat (mantém interface única de escrita). V2 pode ganhar ações inline.
+
+Pré-requisitos: nenhum backend novo. `GET /days/today` e `GET /days/{date}` já entregam records completos (T-408 concluído). Reaproveita `CloseDayModal` (T-704) para o botão "Encerrar dia" no header.
+
+- [ ] **T-B601** — Rota `/day/page.tsx` (server component protegido) faz fetch de `GET /days/today` via `INTERNAL_API_URL` — mesma forma do `(app)/layout.tsx` (padrão do hotfix #25). Renderiza header com data pt-BR (`domingo, 27 de julho de 2026`) + badge de status + botão "Encerrar dia" quando aberto. Server component chama client `<CloseDayButton />` (novo, extrai do `CloseDayModal` a mecânica sem depender do chat page). SP-150. (M)
+- [ ] **T-B602** — Componente `MealSection.tsx` (server) recebe `records.food` filtrado por `meal_slot`, renderiza cabeçalho pt-BR do slot + kcal parcial + tabela com Item/Quantidade/Cal/P/C/G/Fibras. Ordem fixa: breakfast → lunch → snack → dinner → unspecified; slots vazios não renderizam. SP-151. (M)
+- [ ] **T-B603** — Componente `FoodItemRow.tsx` (server + `<details>` HTML nativo, sem client component pra manter estático). Linha principal + expansão revela micros (sódio, cálcio, ferro, potássio) + `source` + `confidence`. Valores zero → `—`. Badges "confirmar" (needs_confirmation) e "sem catálogo" (catalog_ref_id=null) inline. SP-152. (S)
+- [ ] **T-B604** — Componentes `HydrationSection.tsx` + `BeverageSection.tsx` + `ActivitySection.tsx` (todos server), cada um lê a lista correspondente de `records.*`. Água: horário + volume + total. Bebidas: item, volume, kcal + macros (sem micros). Atividade: tipo pt-BR + duração + intensidade + kcal_out + método. SP-153. (M)
+- [ ] **T-B605** — Link "Detalhes" no header do `(app)/layout` (peer de "Chat" e "Semana") apontando para `/day`. Zero mudança de auth (proxy.ts já protege `/day` porque cai fora de `PROTECTED_PREFIXES`? — **verificar**; se cair fora, adicionar `/day` ao array). SP-150. (XS)
+- [ ] **T-B606** — Rota opcional `/day/[date]/page.tsx` idêntica ao `/day` mas com `GET /days/{date}`. 404 amigável quando day_log inexistente (backend já retorna 404; server component renderiza mensagem "Sem registros nesta data" + link "Voltar para hoje"). SP-154. (S, opcional)
+- [ ] **T-B607** — Testes: (a) sanity de render do server component com fixture de day_log open + food_items com/sem catalog + micros zerados/preenchidos (usa `render` de `@testing-library/react` OU sanity via build + inspeção do HTML gerado, dependendo do que já existe no web); (b) e2e manual documentado em `docs/day-view.md`: cadastra 3 itens no chat, abre `/day`, confirma que agrupa por meal_slot + macros batem. (S)
+
+**Gate Bloco 6:** navegar em `/day` mostra dia atual completo com refeições agrupadas, macros por item, expansão de micros, e seções auxiliares. `/day/[date]` opcional mas exercitado se implementado. Botão "Encerrar dia" abre modal que reaproveita `CloseDayModal` sem duplicação.
+
+**Não inclui (por design):**
+- Edição/deleção inline (v2 — hoje é via chat).
+- Filtros/ordenação (só a ordem natural: meal_slot → occurred_at).
+- Exportação CSV/PDF (feature B-06 do backlog).
+- Gráficos ou comparação com dias anteriores (v2+).
+
+---
+
 ## Backlog (pós-MVP, `may`)
 
 - **B-01** — Persistência agregada de `sugars_g`, `added_sugars_g`, `saturated_fat_g`, `trans_fat_g`.
