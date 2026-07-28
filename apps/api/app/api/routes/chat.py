@@ -46,7 +46,10 @@ async def post_message(
 ) -> PostMessageResponse:
     service = ChatService(session)
     message = await service.post_user_message(
-        user=current_user, text=payload.text, media_ids=payload.media_ids
+        user=current_user,
+        text=payload.text,
+        media_ids=payload.media_ids,
+        promote_food_item_id=payload.promote_food_item_id,
     )
     # BackgroundTasks rodam ANTES do cleanup da dep `get_session`; comitamos
     # explicitamente aqui para que o worker (com sua própria sessão) enxergue
