@@ -257,5 +257,3 @@ async def _try_promote_item(
     )
     await DailyRecomputeService(session).recompute(food_record.day_log_id)
     return (None, item.id)
-
-
