@@ -144,27 +144,8 @@ def _daily_totals_table(snapshot, log_date: date, approx: bool) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Warnings block (below disclaimer)
+# Approximation heuristic (used by kcal/g prefix `≈`)
 # ---------------------------------------------------------------------------
-
-
-def _warnings_block(warnings: list[dict], detected_name_fallback: str | None = None) -> str:
-    to_confirm: list[str] = []
-    for w in warnings:
-        code = w.get("code")
-        if code in ("low_confidence_item", "no_catalog_hit", "needs_confirmation"):
-            name = w.get("detected_name") or detected_name_fallback or w.get("item_id", "item")
-            to_confirm.append(name)
-    if not to_confirm:
-        return ""
-    # Dedup preservando ordem.
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for n in to_confirm:
-        if n not in seen:
-            seen.add(n)
-            ordered.append(n)
-    return "**Confirma estes itens?** — " + ", ".join(ordered)
 
 
 def _has_approx_food_items(items, warnings: list[dict]) -> bool:
@@ -219,11 +200,7 @@ def compose_meal(meal, recompute, log_date: date) -> str:
         "",
         _DISCLAIMER,
     ]
-    warnings_block = _warnings_block(meal.warnings)
-    if warnings_block:
-        parts.append("")
-        parts.append(warnings_block)
-    # SP-140: prompt de recuperação quando algum item ficou sem catálogo.
+    # SP-140: card de recuperação quando algum item ficou sem catálogo.
     recovery_block = _no_catalog_recovery_block(meal.items, meal.warnings)
     if recovery_block:
         parts.append("")
@@ -322,10 +299,6 @@ def compose_beverage(beverage, recompute, log_date: date) -> str:
         "",
         _DISCLAIMER,
     ]
-    warnings_block = _warnings_block(beverage.warnings, detected_name_fallback=detected)
-    if warnings_block:
-        parts.append("")
-        parts.append(warnings_block)
     return "\n".join(parts)
 
 

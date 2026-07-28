@@ -249,7 +249,8 @@ async def test_promote_valid_item_recomputes_macros(
     )
     assert item.catalog_ref_id is None
     assert item.kcal == 0
-    assert item.needs_confirmation is True
+    # Bloco 5 revisão v1.12: needs_confirmation não é mais setado.
+    assert item.needs_confirmation is False
 
     await _login(client)
     payload = _valid_payload(promote_food_item_id=str(item.id))
@@ -311,7 +312,9 @@ async def test_promote_item_of_other_user_falls_silent(
     # Item do outro user permanece intacto.
     await db_session.refresh(other_item)
     assert other_item.catalog_ref_id is None
-    assert other_item.needs_confirmation is True
+    # needs_confirmation nunca mais é setado — comparação apenas por
+    # `catalog_ref_id IS NULL` pra saber que o item continua "solto".
+    assert other_item.needs_confirmation is False
 
 
 async def test_promote_deleted_item_falls_silent(

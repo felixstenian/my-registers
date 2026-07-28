@@ -149,23 +149,6 @@ def test_compose_meal_no_approx_when_exact():
     assert "≈" not in out
 
 
-def test_compose_meal_warnings_listed_after_disclaimer():
-    meal = SimpleNamespace(
-        food_record=SimpleNamespace(meal_slot="dinner"),
-        items=[_food_item(needs_confirmation=True)],
-        warnings=[
-            {"code": "needs_confirmation", "detected_name": "sushi ninja"},
-            {"code": "no_catalog_hit", "detected_name": "molho X"},
-        ],
-    )
-    out = mf.compose_meal(meal, SimpleNamespace(snapshot=_snap()), date(2026, 7, 20))
-    disclaimer_idx = out.index(DISCLAIMER)
-    warn_idx = out.index("Confirma estes itens?")
-    assert warn_idx > disclaimer_idx
-    assert "sushi ninja" in out
-    assert "molho X" in out
-
-
 def _food_item_with_id(item_id: str, detected_name: str = "arroz"):
     it = _food_item()
     it.id = item_id
