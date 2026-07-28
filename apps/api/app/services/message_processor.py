@@ -31,6 +31,7 @@ from app.integrations.anthropic.client import AnthropicClient, LLMCallResult
 from app.integrations.nutrition.local_tbca import LocalTBCACatalog
 from app.integrations.storage.minio import MinioStorage
 from app.models import Media, Message, MessageMedia, User
+from app.repositories.food import AuditEventRepository
 from app.repositories.message import MessageRepository
 from app.services import message_formatter
 from app.services.activity import ActivityResult, ActivityService, WeightRequired
@@ -59,6 +60,7 @@ from app.services.intent_dispatcher import (
 from app.services.label_catalog import LabelCatalogService, LabelResult
 from app.services.meal import MealResult, MealService
 from app.services.profile import ProfileService, ProfileUpdateResult
+from app.services.promotion import try_promote_food_item
 from app.services.weekly_report import WeeklyReportService
 
 logger = logging.getLogger("app.message_processor")
@@ -555,6 +557,39 @@ class MessageProcessor:
                     user_message.day_log_id
                 )
 
+        # SP-143 / T-B521: se a user message veio do card recovery do Bloco 5
+        # (frontend adicionou `promote_food_item_id` ao POST /chat/messages,
+        # armazenado em raw_llm_response.metadata pelo ChatService), promove
+        # o item legado usando o fact recém-criado. Falha silenciosa grava
+        # audit `action='promotion_failed'` sem afetar a resposta.
+        promotion_warning: str | None = None
+        promoted_item_id: uuid.UUID | None = None
+        promote_id = _extract_promote_id(user_message.raw_llm_response)
+        if promote_id is not None:
+            promotion_warning, promoted_item_id = await try_promote_food_item(
+                session=self.session,
+                user=user,
+                item_id=promote_id,
+                fact=label_result.fact,
+                message_id=user_message.id,
+                promoted_from="label_ocr",
+            )
+            if promotion_warning is not None:
+                await AuditEventRepository(self.session).record(
+                    user_id=user.id,
+                    entity_type="food_item",
+                    entity_id=promote_id,
+                    action="promotion_failed",
+                    actor="user",
+                    message_id=user_message.id,
+                    before=None,
+                    after={
+                        "nutrient_fact_id": str(label_result.fact.id),
+                        "reason": promotion_warning,
+                        "promoted_from": "label_ocr",
+                    },
+                )
+
         raw = _pack_raw(result)
         raw["dispatch"] = {
             "action": "log_nutrition_label",
@@ -566,6 +601,10 @@ class MessageProcessor:
             raw["dispatch"]["consumed_item_id"] = str(consumed_item.id)
         if recompute is not None:
             raw["dispatch"]["snapshot_version"] = recompute.snapshot.version
+        if promoted_item_id is not None:
+            raw["dispatch"]["promoted_item_id"] = str(promoted_item_id)
+        if promotion_warning is not None:
+            raw["dispatch"]["promotion_warning"] = promotion_warning
 
         content = _compose_label_summary(
             envelope.nutrition_label, label_result, consumed_item, recompute
@@ -1112,6 +1151,27 @@ def _pack_raw(result: LLMCallResult) -> dict[str, Any]:
     # `envelope` é um BaseModel e não é JSON-serializable por asdict.
     packed["envelope"] = result.envelope.model_dump(mode="json") if result.envelope else None
     return packed
+
+
+def _extract_promote_id(raw: Any) -> uuid.UUID | None:
+    """SP-143: lê `promote_food_item_id` da metadata gravada pelo ChatService
+    quando o usuário enviou pelo card recovery do Bloco 5.
+
+    Retorna None se qualquer coisa faltar/estiver malformada — o handler
+    fallback é "não promover" (comportamento pré-Bloco 5).
+    """
+    if not isinstance(raw, dict):
+        return None
+    metadata = raw.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("promote_food_item_id")
+    if not isinstance(value, str):
+        return None
+    try:
+        return uuid.UUID(value)
+    except (TypeError, ValueError):
+        return None
 
 
 async def run_processor_in_background(

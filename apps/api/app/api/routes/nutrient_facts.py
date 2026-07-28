@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_session
 from app.core.exceptions import NotFoundError, ValidationAppError
-from app.models import DayLog, FoodItem, FoodRecord, NutrientFact, User
+from app.models import NutrientFact, User
 from app.repositories.food import AuditEventRepository
 from app.schemas.nutrient_facts import (
     ManualNutrientFactIn,
@@ -27,8 +27,7 @@ from app.schemas.nutrient_facts import (
     NutrientFactOut,
     NutrientFactPatch,
 )
-from app.services.daily_recompute import DailyRecomputeService
-from app.services.nutrition_calculator import NutritionCalculator
+from app.services.promotion import try_promote_food_item
 
 router = APIRouter(prefix="/nutrient-facts", tags=["nutrient-facts"])
 
@@ -170,90 +169,15 @@ async def create_manual_nutrient_fact(
     promoted_item_id: uuid.UUID | None = None
 
     if payload.promote_food_item_id is not None:
-        promotion_warning, promoted_item_id = await _try_promote_item(
+        promotion_warning, promoted_item_id = await try_promote_food_item(
             session=session,
             user=current_user,
             item_id=payload.promote_food_item_id,
             fact=fact,
+            promoted_from="manual_catalog",
         )
 
     out = ManualNutrientFactOut.model_validate(fact)
     out.promotion_warning = promotion_warning
     out.promoted_item_id = promoted_item_id
     return out
-
-
-async def _try_promote_item(
-    *,
-    session: AsyncSession,
-    user: User,
-    item_id: uuid.UUID,
-    fact: NutrientFact,
-) -> tuple[str | None, uuid.UUID | None]:
-    """SP-142. Retorna (warning|None, promoted_id|None).
-
-    Fails silently — o fact criado prevalece. Cenários que geram warning:
-    item não achado, deletado, de outro user, dia fechado. Sucesso →
-    (None, item.id) + recompute do snapshot.
-    """
-    stmt = (
-        select(FoodItem, FoodRecord)
-        .join(FoodRecord, FoodRecord.id == FoodItem.food_record_id)
-        .where(FoodItem.id == item_id, FoodRecord.user_id == user.id)
-    )
-    row = (await session.execute(stmt)).one_or_none()
-    if row is None:
-        return ("promotion_failed:item_not_found", None)
-    item, food_record = row
-    if item.deleted_at is not None:
-        return ("promotion_failed:item_deleted", None)
-
-    day_log = await session.get(DayLog, food_record.day_log_id)
-    if day_log is not None and day_log.status == "closed":
-        return ("promotion_failed:day_closed", None)
-
-    before: dict[str, Any] = {
-        "catalog_ref_id": str(item.catalog_ref_id) if item.catalog_ref_id else None,
-        "kcal": _dec(item.kcal),
-        "needs_confirmation": item.needs_confirmation,
-    }
-
-    from app.integrations.nutrition.catalog import CatalogHit
-
-    computed = NutritionCalculator.compute(
-        hit=CatalogHit.from_model(fact), grams=item.grams, ml=item.ml
-    )
-    item.catalog_ref_id = fact.id
-    for field in (
-        "kcal",
-        "protein_g",
-        "carbs_g",
-        "fat_g",
-        "fiber_g",
-        "sodium_mg",
-        "calcium_mg",
-        "iron_mg",
-        "potassium_mg",
-    ):
-        setattr(item, field, getattr(computed, field))
-    item.needs_confirmation = False
-    item.source = "user_corrected"
-    await session.flush()
-
-    await AuditEventRepository(session).record(
-        user_id=user.id,
-        entity_type="food_item",
-        entity_id=item.id,
-        action="correct",
-        actor="user",
-        message_id=None,
-        before=before,
-        after={
-            "catalog_ref_id": str(fact.id),
-            "kcal": _dec(item.kcal),
-            "needs_confirmation": False,
-            "promoted_from": "manual_catalog",
-        },
-    )
-    await DailyRecomputeService(session).recompute(food_record.day_log_id)
-    return (None, item.id)
