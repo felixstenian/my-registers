@@ -15,6 +15,8 @@
  */
 
 import { JSX, useState } from 'react';
+import { DiscardItemButton } from './DiscardItemButton';
+import { LabelPhotoUploader } from './LabelPhotoUploader';
 import { ManualCatalogForm } from './ManualCatalogForm';
 
 type RecoveryItem = { id: string; name: string };
@@ -129,6 +131,8 @@ function isPendingRowLabel(text: string): boolean {
 export function AssistantContent({ content }: { content: string }) {
   const blocks = parseBlocks(content);
   const [openForm, setOpenForm] = useState<RecoveryItem | null>(null);
+  const [openPhoto, setOpenPhoto] = useState<RecoveryItem | null>(null);
+  const [discardedIds, setDiscardedIds] = useState<Set<string>>(new Set());
 
   return (
     <div className="space-y-3 text-sm">
@@ -141,7 +145,8 @@ export function AssistantContent({ content }: { content: string }) {
           );
         }
         if (block.type === 'recovery') {
-          if (block.items.length === 0) return null;
+          const visibleItems = block.items.filter((it) => !discardedIds.has(it.id));
+          if (visibleItems.length === 0) return null;
           return (
             <div
               key={idx}
@@ -150,24 +155,40 @@ export function AssistantContent({ content }: { content: string }) {
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
                 Sem catálogo:
               </p>
-              <ul className="space-y-1.5">
-                {block.items.map((item) => (
-                  <li key={item.id} className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-medium">{item.name || 'item sem nome'}</span>
-                    <button
-                      type="button"
-                      onClick={() => setOpenForm(item)}
-                      className="rounded bg-slate-900 px-2 py-0.5 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                    >
-                      ✏️ Cadastrar
-                    </button>
+              <ul className="space-y-3">
+                {visibleItems.map((item) => (
+                  <li key={item.id} className="space-y-1.5">
+                    <span className="block font-medium">{item.name || 'item sem nome'}</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setOpenForm(item)}
+                        className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                      >
+                        ✏️ Cadastrar manual
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOpenPhoto(item)}
+                        className="rounded border border-slate-400 bg-white px-2 py-1 text-xs font-medium text-slate-800 transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                      >
+                        📸 Foto do rótulo
+                      </button>
+                      <DiscardItemButton
+                        itemId={item.id}
+                        itemName={item.name}
+                        onDiscarded={() =>
+                          setDiscardedIds((prev) => {
+                            const next = new Set(prev);
+                            next.add(item.id);
+                            return next;
+                          })
+                        }
+                      />
+                    </div>
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-400">
-                Você também pode enviar uma <strong>foto do rótulo</strong> no próximo message, ou{' '}
-                <strong>descartar</strong> respondendo <code>apaga {'{nome}'}</code>.
-              </p>
             </div>
           );
         }
@@ -233,6 +254,14 @@ export function AssistantContent({ content }: { content: string }) {
             // deliberadamente evitando isso na v1 pra manter escopo.
             window.location.reload();
           }}
+        />
+      )}
+      {openPhoto && (
+        <LabelPhotoUploader
+          promoteFoodItemId={openPhoto.id}
+          itemName={openPhoto.name}
+          onClose={() => setOpenPhoto(null)}
+          onSent={() => setOpenPhoto(null)}
         />
       )}
     </div>
