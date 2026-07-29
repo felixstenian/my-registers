@@ -13,8 +13,8 @@
  * ainda aparecer no /day até a próxima navegação.
  */
 
-import { useState } from 'react';
 import { api } from '@/lib/api-client';
+import { useState } from 'react';
 
 type Props = {
   itemId: string;
@@ -28,6 +28,7 @@ export function DiscardItemButton({ itemId, itemName, onDiscarded }: Props) {
 
   async function onClick() {
     if (state === 'deleting') return;
+    // TODO: Adicionar modal de confirmação customizado, com explicação do que acontece ao descartar.
     const label = itemName || 'este item';
     if (!window.confirm(`Descartar "${label}" do registro?`)) return;
     setState('deleting');

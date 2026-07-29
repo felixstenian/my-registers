@@ -28,7 +28,7 @@ type Block =
 
 // SP-140: marcador emitido pelo backend em `message_formatter._no_catalog_recovery_block`.
 // Formato: `<!-- catalog-recovery: id1,id2,... -->`
-const RECOVERY_MARKER = /^\s*<!--\s*catalog-recovery:\s*([^-]+?)\s*-->\s*$/;
+const RECOVERY_MARKER = /^\s*<!--\s*catalog-recovery:\s*(.+?)\s*-->\s*$/;
 // Extrai nomes em **bold** na ordem em que aparecem no bloco de recovery.
 const BOLD_INLINE = /\*\*(.+?)\*\*/g;
 

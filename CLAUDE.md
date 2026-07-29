@@ -17,16 +17,15 @@ Fluxo canônico ao adicionar comportamento: `spec:` PR → `plan:` PR → `tasks
 
 Documentos SDD e commits estão em pt-BR — matenha esse padrão. Código, identificadores e comentários no código são em inglês (regra global do usuário).
 
-**Estado atual (2026-07-27, release v1.2):** MVP em produção em `https://myregister.felix.dev.br`.
+**Estado atual (2026-07-28, release v1.3.0):** MVP em produção em `https://myregister.felix.dev.br`.
 
-- **Fases 0-9 concluídas** — do bootstrap ao hardening/deploy. Único item ainda pendente da Fase 9 é o T-908 (smoke test manual em VPS real; depende do operador).
-- **Blocos pós-MVP entregues**: Bloco 1 (composer/envio), Bloco 2 (renderização de assistant messages), Bloco 4 (PWA básico — instalável, shell offline, INV-11).
-- **Fase 4.b** (leitura de rótulo nutricional) entregue.
-- **UIs T-704 (encerrar dia) e T-804 (relatório semanal)** entregues via PR #31.
-- **Especificadas mas não implementadas**: Bloco 3 (workout tracking, SP-120..127), Fase 10 (CI/CD, T-1001..T-1007). Ver `tasks.md`.
-- **Próximos alvos** listados em `docs/proximos-passos.md` — ordem sugerida: D-01/D-03/D-04 (dívida técnica de docs) → asset real do PWA → Fase 10 CI/CD → Bloco 3 workout.
+- **Fases 0-9 concluídas** — bootstrap → hardening/deploy. T-908 (smoke test em VPS real) depende do operador.
+- **Fase 10 (CI/CD) concluída** via PR #34: `.github/workflows/ci.yml` (jobs paralelos `api` — Postgres 16 service + ruff + pytest — e `web` — typecheck + build + `verify:sw`) e `.github/workflows/deploy.yml` (SSH deploy pós-CI verde em `main`, com smoke em `/api/health`). Setup manual pendente (T-1003 branch protection + T-1004 chave SSH deploy-only) documentado em `docs/fase-10-setup.md` e `docs/deploy.md` §14.
+- **Blocos pós-MVP entregues**: Bloco 1 (composer/envio), Bloco 2 (renderização de assistant messages), Bloco 4 (PWA básico — instalável, shell offline, INV-11), Bloco 6 (visão detalhada do dia + navegação temporal, SP-150..155, PRs #43 #44). Fase 4.b (leitura de rótulo nutricional) e UIs T-704/T-804 (encerrar dia + relatório semanal) também no ar.
+- **Em andamento — branch `feat/bloco-5-catalog-recovery`**: Bloco 5 (recuperação de itens sem catálogo, SP-140..142) — spec reformulada removeu fluxo de confirmação e acoplou foto de rótulo com promoção; T-B510..T-B513 já commitados, T-B520 (`promote_food_item_id` no `POST /chat/messages`) recém-feito.
+- **Especificado, ainda não implementado**: Bloco 3 (workout tracking, SP-120..127). Ver `tasks.md`.
 
-Ao encarar uma tarefa, sempre reconciliar com `tasks.md` (fonte de verdade) — este bloco pode ficar defasado entre releases.
+Ao encarar uma tarefa, sempre reconciliar com `tasks.md` (fonte de verdade) e com `CHANGELOG.md` — este bloco pode ficar defasado entre releases.
 
 ## Comandos
 
@@ -68,7 +67,7 @@ Monorepo pnpm (`pnpm-workspace.yaml` = `apps/*`) com dois apps:
 
 - `apps/api` — FastAPI + Pydantic v2 + SQLAlchemy 2 async + Alembic. Camadas: `api/routes/` (HTTP) → `services/` (regras de negócio) → `repositories/` (acesso ao DB) → `models/` (SQLAlchemy). Integrações externas em `integrations/{anthropic,storage,nutrition}/`. Config via `pydantic-settings` em `app/core/config.py` (lê `.env`). Middleware global injeta `X-Request-Id`. Erros de domínio herdam de `AppError` (em `core/exceptions.py`) e são traduzidos para JSON pelo handler global em `main.py`.
 - `apps/web` — Next.js 16 App Router (React 19). Rotas principais: `/login`, `/chat`, `/weekly`, `/offline`. `proxy.ts` protege prefixos por presença de cookie (validação real acontece no backend). PWA via Serwist (SW em `src/app/sw.ts`) — service worker aplica `NetworkOnly` em `/api/*` (INV-11). Server components que precisam bater na API usam `INTERNAL_API_URL` (DNS interno do compose), não `NEXT_PUBLIC_API_URL` (relativo `/api`, browser-only).
-- `infra/` — Nginx + Certbot (produção). `docker-compose.local.yml` só para dev local. Produção usa `docker-compose.production.yml`; deploy manual documentado em `docs/deploy.md` (Fase 10 vai automatizar via GitHub Actions).
+- `infra/` — Nginx + Certbot (produção). `docker-compose.local.yml` só para dev local. Produção usa `docker-compose.production.yml`. Deploy é automatizado por `.github/workflows/deploy.yml` (push em `main` → CI verde → SSH em VPS → rebuild seletivo → smoke em `/api/health`); passo-a-passo manual continua em `docs/deploy.md` para debug/rollback.
 
 ### Princípios que afetam decisões de código
 
