@@ -105,6 +105,7 @@ services:
       uv sync &&
       uv run alembic -c alembic.ini upgrade head &&
       uv run python -m app.cli bootstrap &&
+      uv run python -m app.cli seed-nutrition &&
       uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
       "
 
