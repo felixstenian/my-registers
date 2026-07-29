@@ -1,0 +1,139 @@
+# Stack E2E — isolada do dev, roda simultaneamente com docker-compose.local.yml.
+# Portas expostas ao host:
+#   3001  -> web (Next.js hot reload, APP_ENV=test)
+#   8001  -> api (FastAPI hot reload, APP_ENV=test, /test/* ativos)
+#   5433  -> postgres (DB: registers_e2e)
+#   9010  -> minio S3
+#   9011  -> minio console
+#
+# Project name fixo `registers_e2e` pra network/volumes não colidirem.
+# Volumes nomeados dedicados; `docker compose -f docker-compose.e2e.yml down -v`
+# limpa tudo entre runs.
+name: registers_e2e
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: registers_e2e
+      POSTGRES_USER: registers_app
+      POSTGRES_PASSWORD: dev_password
+      TZ: America/Sao_Paulo
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_e2e:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registers_app -d registers_e2e"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio_dev
+      MINIO_ROOT_PASSWORD: minio_dev_secret
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    volumes:
+      - minio_data_e2e:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minio_dev minio_dev_secret &&
+      (mc mb -p local/registers-media || true) &&
+      mc anonymous set none local/registers-media
+      "
+    restart: "no"
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: dev
+    environment:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://registers_app:dev_password@postgres:5432/registers_e2e
+      # Vazio de propósito — TestAnthropicClient (T-E02) atende as chamadas.
+      ANTHROPIC_API_KEY: ""
+      ANTHROPIC_MODEL: claude-sonnet-4-6
+      JWT_SECRET: e2e-only-secret-do-not-use-in-prod
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: registers-media
+      S3_ACCESS_KEY: minio_dev
+      S3_SECRET_KEY: minio_dev_secret
+      S3_FORCE_PATH_STYLE: "true"
+      DEFAULT_ADMIN_EMAIL: admin@example.com
+      DEFAULT_ADMIN_PASSWORD: adminadmin
+      ALLOWED_ORIGINS: http://localhost:3001
+      # E2E faz login/reset a cada spec — 5/min ficaria apertado rápido.
+      RATE_LIMIT_LOGIN_PER_MIN: 1000
+      TZ: America/Sao_Paulo
+      LOG_LEVEL: DEBUG
+      LOG_FORMAT: json
+    volumes:
+      - ./apps/api:/app
+      - api_venv_e2e:/app/.venv
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    command: >
+      sh -c "
+      uv sync &&
+      uv run alembic -c alembic.ini upgrade head &&
+      uv run python -m app.cli bootstrap &&
+      uv run python -m app.cli seed-nutrition &&
+      uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      target: dev
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+      INTERNAL_API_URL: http://api:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules_e2e:/app/node_modules
+      - web_next_e2e:/app/.next
+    ports:
+      - "3001:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    command: pnpm dev
+
+volumes:
+  pgdata_e2e:
+  minio_data_e2e:
+  api_venv_e2e:
+  web_node_modules_e2e:
+  web_next_e2e:
