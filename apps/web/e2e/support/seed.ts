@@ -65,15 +65,23 @@ export async function seedLunchMeal({
   if (!post.ok()) {
     throw new Error(`seedLunchMeal POST /chat/messages: ${post.status()} ${await post.text()}`);
   }
+  const userMessageId = ((await post.json()) as { message_id: string }).message_id;
 
-  // Worker background processa em ms; damos ate 10s pra o commit aparecer.
+  // Poll /chat/messages?after=<user_id> ate assistant aparecer. Aguardar
+  // kcal_in>0 nao seria seguro: /days/today faz recompute automatico se
+  // snapshot=None, e a chamada da 1a poll roda em race com o worker —
+  // pode escrever snapshot com food_items vazios e sobrescrever o valor
+  // real que o worker persistiu. Aguardar assistant garante que o worker
+  // ja commitou tudo (food_items + snapshot + assistant).
   for (let i = 0; i < 40; i++) {
-    const daysRes = await page.request.get(`${API_BASE}/days/today`);
-    if (daysRes.ok()) {
-      const day = (await daysRes.json()) as { totals: { kcal_in: number } };
-      if (day.totals.kcal_in > 0) return;
+    const res = await page.request.get(
+      `${API_BASE}/chat/messages?after=${userMessageId}`,
+    );
+    if (res.ok()) {
+      const body = (await res.json()) as { messages: { role: string }[] };
+      if (body.messages.some((m) => m.role === 'assistant')) return;
     }
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error('seedLunchMeal: /days/today permaneceu com kcal_in=0 apos 10s');
+  throw new Error('seedLunchMeal: assistant message nao apareceu em 10s');
 }
