@@ -49,3 +49,8 @@ apps/web/public/workbox-*.js
 # Logs
 *.log
 logs/
+
+# Playwright (E2E)
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/e2e/.auth/
