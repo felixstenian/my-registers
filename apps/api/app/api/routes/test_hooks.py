@@ -91,7 +91,11 @@ async def reset_state(session: AsyncSession = Depends(get_session)) -> Response:
         password_hash=hash_password(settings.default_admin_password),
         display_name="Admin",
     )
-    await session.flush()
+    # Commit explicito antes de retornar: o Playwright dispara /auth/login
+    # imediatamente apos receber 204, e sem esse commit hava race — a
+    # request de login veria o snapshot antes do INSERT do admin novo e
+    # inseria refresh_token apontando pra user id stale (FK violation).
+    await session.commit()
 
     fake.clear_all_queues()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
