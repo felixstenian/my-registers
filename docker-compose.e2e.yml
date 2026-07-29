@@ -81,6 +81,8 @@ services:
       DEFAULT_ADMIN_EMAIL: admin@example.com
       DEFAULT_ADMIN_PASSWORD: adminadmin
       ALLOWED_ORIGINS: http://localhost:3001
+      # E2E faz login/reset a cada spec — 5/min ficaria apertado rápido.
+      RATE_LIMIT_LOGIN_PER_MIN: 1000
       TZ: America/Sao_Paulo
       LOG_LEVEL: DEBUG
       LOG_FORMAT: json

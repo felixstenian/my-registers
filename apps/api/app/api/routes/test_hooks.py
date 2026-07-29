@@ -37,11 +37,13 @@ from app.schemas.llm import LLMEnvelope
 
 router = APIRouter(prefix="/test", tags=["test-hooks"])
 
-_TRUNCATE_TABLES = (
+# Ordem de DELETE (filhos -> pais) pra respeitar FKs. Usamos DELETE em vez
+# de TRUNCATE porque `nutrient_facts.label_media_id -> media` tem
+# ON DELETE SET NULL, e o TRUNCATE ignora esse comportamento (cascata ou
+# aborta), o que apagaria o seed TBCA junto com media.
+# nutrient_facts NAO e' listado: e catalogo estatico seeded no boot da api.
+_DELETE_ORDER = (
     "audit_events",
-    "message_media",
-    "messages",
-    "media",
     "food_items",
     "food_records",
     "beverage_records",
@@ -49,8 +51,10 @@ _TRUNCATE_TABLES = (
     "activity_records",
     "daily_snapshots",
     "weekly_reports",
+    "message_media",
+    "messages",
     "day_logs",
-    "nutrient_facts",
+    "media",
     "refresh_tokens",
     "users",
 )
@@ -80,7 +84,8 @@ async def reset_state(session: AsyncSession = Depends(get_session)) -> Response:
     _require_test_env()
     settings = get_settings()
 
-    await session.execute(text(f"TRUNCATE {', '.join(_TRUNCATE_TABLES)} RESTART IDENTITY CASCADE"))
+    for table in _DELETE_ORDER:
+        await session.execute(text(f"DELETE FROM {table}"))
     await UserRepository(session).create(
         email=settings.default_admin_email,
         password_hash=hash_password(settings.default_admin_password),

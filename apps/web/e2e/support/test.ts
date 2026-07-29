@@ -15,7 +15,7 @@
  */
 
 import { test as base, expect } from '@playwright/test';
-import { API_BASE } from './constants';
+import { ADMIN_EMAIL, ADMIN_PASSWORD, API_BASE } from './constants';
 
 type LLMKind = 'record_intent' | 'narrative' | 'weekly_narrative';
 type QueuePayload =
@@ -25,10 +25,11 @@ type QueuePayload =
 type Fixtures = {
   queueLlm: (payload: QueuePayload) => Promise<void>;
   resetDb: () => Promise<void>;
+  loginAdmin: () => Promise<void>;
 };
 
 export const test = base.extend<Fixtures>({
-  queueLlm: async ({ request }, use) => {
+  queueLlm: async ({ page }, use) => {
     await use(async (payload) => {
       const body: Record<string, unknown> = { kind: payload.kind };
       if (payload.kind === 'record_intent') {
@@ -36,7 +37,7 @@ export const test = base.extend<Fixtures>({
       } else {
         body.text = payload.text;
       }
-      const res = await request.post(`${API_BASE}/test/queue-llm-response`, {
+      const res = await page.request.post(`${API_BASE}/test/queue-llm-response`, {
         data: body,
       });
       if (!res.ok()) {
@@ -46,11 +47,25 @@ export const test = base.extend<Fixtures>({
       }
     });
   },
-  resetDb: async ({ request }, use) => {
+  resetDb: async ({ page }, use) => {
     await use(async () => {
-      const res = await request.post(`${API_BASE}/test/reset`);
+      const res = await page.request.post(`${API_BASE}/test/reset`);
       if (!res.ok()) {
         throw new Error(`resetDb falhou: ${res.status()} ${await res.text()}`);
+      }
+    });
+  },
+  loginAdmin: async ({ page }, use) => {
+    // Necessario apos resetDb() em specs autenticados: o TRUNCATE dropou o
+    // admin, deixando o storageState apontando pra um user inexistente
+    // (redirect loop no /chat). Usar page.request substitui o cookie no
+    // context da page, e o proximo page.goto ja usa o cookie novo.
+    await use(async () => {
+      const login = await page.request.post(`${API_BASE}/auth/login`, {
+        data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+      });
+      if (!login.ok()) {
+        throw new Error(`loginAdmin falhou: ${login.status()}`);
       }
     });
   },
