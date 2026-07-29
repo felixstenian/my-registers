@@ -228,10 +228,9 @@ export function AssistantContent({ content }: { content: string }) {
           onSuccess={() => {
             setOpenForm(null);
             // Força reload da página inteira do chat pra puxar o snapshot
-            // atualizado (macros recomputadas + needs_confirmation limpo).
-            // Alternativa cirúrgica seria puxar o revalidate do DayTotalsBar
-            // por prop drilling — deliberadamente evitando isso na v1 pra
-            // manter escopo.
+            // atualizado (macros recomputadas). Alternativa cirúrgica seria
+            // puxar o revalidate do DayTotalsBar por prop drilling —
+            // deliberadamente evitando isso na v1 pra manter escopo.
             window.location.reload();
           }}
         />

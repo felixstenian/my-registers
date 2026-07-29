@@ -74,11 +74,6 @@ export function BeverageSection({ records }: { records: BeverageRecord[] }) {
           <li key={r.id} className="grid grid-cols-12 gap-2 px-3 py-2">
             <span className="col-span-5 truncate">
               {r.detected_name || 'bebida'}
-              {r.needs_confirmation && (
-                <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                  confirmar
-                </span>
-              )}
             </span>
             <span className="col-span-2 text-right text-slate-600 dark:text-slate-400">
               {fmtMl(r.volume_ml)}
