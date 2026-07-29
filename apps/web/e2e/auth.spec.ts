@@ -16,16 +16,6 @@ test.beforeEach(async ({ resetDb }) => {
   await resetDb();
 });
 
-test('login OK redireciona para /chat', async ({ page }) => {
-  await page.goto('/login');
-
-  await page.getByLabel('E-mail').fill(ADMIN_EMAIL);
-  await page.getByLabel('Senha').fill(ADMIN_PASSWORD);
-  await page.getByRole('button', { name: /entrar/i }).click();
-
-  await expect(page).toHaveURL(/\/chat$/);
-});
-
 test('senha errada mostra mensagem inline', async ({ page }) => {
   await page.goto('/login');
 
@@ -39,3 +29,14 @@ test('senha errada mostra mensagem inline', async ({ page }) => {
   await expect(alert).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
 });
+
+test('login OK redireciona para /chat', async ({ page }) => {
+  await page.goto('/login');
+
+  await page.getByLabel('E-mail').fill(ADMIN_EMAIL);
+  await page.getByLabel('Senha').fill(ADMIN_PASSWORD);
+  await page.getByRole('button', { name: /entrar/i }).click();
+
+  await expect(page).toHaveURL(/\/chat$/);
+});
+
