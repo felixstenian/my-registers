@@ -2,7 +2,7 @@
 #
 # Dois jobs em paralelo:
 #   - api:  Postgres 16 service + uv sync + ruff + pytest
-#   - web:  pnpm install + typecheck + build (garante que `next build`
+#   - web:  pnpm install + typecheck + lint + build (garante que `next build`
 #           passa antes do deploy — evita o hotfix Next 16 (#24) de novo)
 #
 # Ambos precisam passar pro PR poder mergear (T-1003 configura o gate).
@@ -75,7 +75,7 @@ jobs:
           PGPORT: "5432"
 
   web:
-    name: web (typecheck + build)
+    name: web (typecheck + lint + build)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -99,6 +99,9 @@ jobs:
 
       - name: Typecheck
         run: pnpm --filter web typecheck
+
+      - name: Lint (ESLint flat config — FE-05)
+        run: pnpm --filter web lint
 
       - name: Build
         run: pnpm --filter web build
