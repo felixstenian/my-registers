@@ -13,7 +13,15 @@ const ERROR_MESSAGES: Record<string, string> = {
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextParam = searchParams.get('next') ?? '/chat';
+  // FE-03: open redirect — `?next=https://evil.com` levava o usuário
+// autenticado para fora do app. Validação local do lado client: só
+// paths internos (começam com `/` e não com `//`). A validação real
+// de auth/sessão é no backend; o proxy só checa presença de cookie.
+  const safeNext = (() => {
+    const raw = searchParams.get('next');
+    if (raw && raw.startsWith('/') && !raw.startsWith('//')) return raw;
+    return '/chat';
+  })();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +37,7 @@ export function LoginForm() {
         body: JSON.stringify({ email, password }),
       });
       if (result.ok) {
-        router.replace(nextParam);
+        router.replace(safeNext);
         router.refresh();
         return;
       }
