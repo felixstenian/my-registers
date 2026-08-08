@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
 from app.core.config import get_settings
+from app.core.rate_limit import reset_login_limiters
 from app.core.security import hash_password
 from app.integrations.anthropic import test_client as fake
 from app.repositories.user import UserRepository
@@ -98,6 +99,7 @@ async def reset_state(session: AsyncSession = Depends(get_session)) -> Response:
     await session.commit()
 
     fake.clear_all_queues()
+    reset_login_limiters()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
