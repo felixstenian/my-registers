@@ -186,7 +186,10 @@ test.describe('FE-04 — 401 client-side redireciona para login', () => {
     let logoutCount = 0;
     await page.route('**/api/auth/logout', (route) => {
       logoutCount++;
-      return route.fulfill({ status: 204 });
+      return route.fulfill({
+        status: 204,
+        headers: { 'Set-Cookie': 'access_token=; Max-Age=0; Path=/; HttpOnly' },
+      });
     });
 
     await page.route('**/api/days/today', (route) => {
@@ -207,15 +210,20 @@ test.describe('FE-04 — 401 client-side redireciona para login', () => {
 
     // Load the page — the first 401 triggers the guard and calls
     // POST /auth/logout once, then window.location.assign redirects.
-    // The guard suppresses subsequent 401s.
+    // The guard suppresses subsequent 401s from concurrent callers.
     // Use domcontentloaded to avoid hanging on the redirect.
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
-    // Wait for the logout call to be made (guard triggers it).
-    await page.waitForTimeout(3000);
+    // Wait for the redirect to /login to complete. The mock logout
+    // returns Set-Cookie to clear access_token, so the proxy allows
+    // /login to render (breaking the redirect loop).
+    await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
 
-    // Guard should have limited logout calls to 1 (or at most 2 if
-    // the flag hasn't propagated yet in the same microtask).
+    // Give a small grace period for any straggling requests to settle.
+    await page.waitForTimeout(500);
+
+    // The guard should have fired exactly 1 logout call. We allow
+    // up to 2 for margin (StrictMode double-firing in dev mode).
     expect(logoutCount).toBeLessThanOrEqual(2);
   });
 });
