@@ -17,9 +17,10 @@
 import { test as base, expect } from '@playwright/test';
 import { ADMIN_EMAIL, ADMIN_PASSWORD, API_BASE } from './constants';
 
-type LLMKind = 'record_intent' | 'narrative' | 'weekly_narrative';
+type LLMKind = 'record_intent' | 'record_intent_error' | 'narrative' | 'weekly_narrative';
 type QueuePayload =
   | { kind: 'record_intent'; envelope: Record<string, unknown> }
+  | { kind: 'record_intent_error'; error: string }
   | { kind: 'narrative' | 'weekly_narrative'; text: string | null };
 
 type Fixtures = {
@@ -34,6 +35,8 @@ export const test = base.extend<Fixtures>({
       const body: Record<string, unknown> = { kind: payload.kind };
       if (payload.kind === 'record_intent') {
         body.envelope = payload.envelope;
+      } else if (payload.kind === 'record_intent_error') {
+        body.error = payload.error;
       } else {
         body.text = payload.text;
       }
