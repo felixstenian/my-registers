@@ -144,27 +144,8 @@ def _daily_totals_table(snapshot, log_date: date, approx: bool) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Warnings block (below disclaimer)
+# Approximation heuristic (used by kcal/g prefix `≈`)
 # ---------------------------------------------------------------------------
-
-
-def _warnings_block(warnings: list[dict], detected_name_fallback: str | None = None) -> str:
-    to_confirm: list[str] = []
-    for w in warnings:
-        code = w.get("code")
-        if code in ("low_confidence_item", "no_catalog_hit", "needs_confirmation"):
-            name = w.get("detected_name") or detected_name_fallback or w.get("item_id", "item")
-            to_confirm.append(name)
-    if not to_confirm:
-        return ""
-    # Dedup preservando ordem.
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for n in to_confirm:
-        if n not in seen:
-            seen.add(n)
-            ordered.append(n)
-    return "**Confirma estes itens?** — " + ", ".join(ordered)
 
 
 def _has_approx_food_items(items, warnings: list[dict]) -> bool:
@@ -219,11 +200,57 @@ def compose_meal(meal, recompute, log_date: date) -> str:
         "",
         _DISCLAIMER,
     ]
-    warnings_block = _warnings_block(meal.warnings)
-    if warnings_block:
+    # SP-140: card de recuperação quando algum item ficou sem catálogo.
+    recovery_block = _no_catalog_recovery_block(meal.items, meal.warnings)
+    if recovery_block:
         parts.append("")
-        parts.append(warnings_block)
+        parts.append(recovery_block)
     return "\n".join(parts)
+
+
+# SP-140 — Marcador processado pelo AssistantContent do frontend pra
+# transformar a linha em CTAs clicáveis (foto, cadastrar, descartar).
+# Formato: `<!-- catalog-recovery: id1,id2 -->` seguido de listagem
+# markdown legível. Se o frontend não reconhecer, a listagem markdown
+# continua útil como texto puro.
+_RECOVERY_MARKER = "<!-- catalog-recovery:"
+
+
+def _no_catalog_recovery_block(items, warnings: list[dict]) -> str:
+    """Retorna bloco pt-BR com CTAs quando 1+ item tem `no_catalog_hit`.
+
+    Bloco inclui:
+    - marcador HTML-comment com IDs dos items afetados (parseado pelo
+      frontend em AssistantContent — invisível na renderização plain).
+    - texto amigável com 3 caminhos: foto do rótulo, cadastro manual,
+      descartar.
+    """
+    affected_ids = {
+        w["item_id"] for w in warnings if w.get("code") == "no_catalog_hit" and w.get("item_id")
+    }
+    if not affected_ids:
+        return ""
+    # Mantém a ordem original dos items (LLM devolve nesta ordem).
+    id_to_name = {str(it.id): it.detected_name for it in items}
+    affected = [(str(it.id), it.detected_name) for it in items if str(it.id) in affected_ids]
+    if not affected:
+        return ""
+
+    id_list = ",".join(id_ for id_, _ in affected)
+    names = ", ".join(f"**{name}**" for _, name in affected)
+    lines = [
+        f"{_RECOVERY_MARKER} {id_list} -->",
+        f"**Sem catálogo para:** {names}",
+        "",
+        "Como você quer resolver?",
+        "- 📸 **Enviar foto do rótulo** — anexe no próximo message.",
+        "- ✏️ **Cadastrar manualmente** — informe kcal e macros por 100 g/ml.",
+        "- ❌ **Descartar item** — responda `apaga {nome}`.",
+    ]
+    # `id_to_name` intencionalmente não vira mais nada — mantém escopo
+    # simples; frontend renderiza CTAs por item.
+    _ = id_to_name
+    return "\n".join(lines)
 
 
 def compose_water(hydration, recompute, log_date: date) -> str:
@@ -272,10 +299,6 @@ def compose_beverage(beverage, recompute, log_date: date) -> str:
         "",
         _DISCLAIMER,
     ]
-    warnings_block = _warnings_block(beverage.warnings, detected_name_fallback=detected)
-    if warnings_block:
-        parts.append("")
-        parts.append(warnings_block)
     return "\n".join(parts)
 
 

@@ -140,13 +140,10 @@ class DailyRecomputeService:
             field: Decimal(value or 0) for field, value in zip(_MACRO_FIELDS, row, strict=True)
         }
 
+        # Bloco 5 revisão v1.12: `needs_confirmation` deixou de ser sinal —
+        # só emitimos `no_catalog_hit` pra items sem catálogo.
         stmt_warnings = (
-            select(
-                FoodItem.id,
-                FoodItem.detected_name,
-                FoodItem.catalog_ref_id,
-                FoodItem.needs_confirmation,
-            )
+            select(FoodItem.id, FoodItem.detected_name, FoodItem.catalog_ref_id)
             .join(FoodRecord, FoodRecord.id == FoodItem.food_record_id)
             .where(
                 FoodRecord.day_log_id == day_log_id,
@@ -155,22 +152,13 @@ class DailyRecomputeService:
             )
         )
         warnings: list[dict[str, Any]] = []
-        for item_id, detected_name, catalog_ref_id, needs_confirmation in (
+        for item_id, detected_name, catalog_ref_id in (
             await self.session.execute(stmt_warnings)
         ).all():
             if catalog_ref_id is None:
                 warnings.append(
                     {
                         "code": "no_catalog_hit",
-                        "entity": "food_item",
-                        "item_id": str(item_id),
-                        "detected_name": detected_name,
-                    }
-                )
-            if needs_confirmation:
-                warnings.append(
-                    {
-                        "code": "needs_confirmation",
                         "entity": "food_item",
                         "item_id": str(item_id),
                         "detected_name": detected_name,
@@ -199,31 +187,19 @@ class DailyRecomputeService:
                 totals[field] = Decimal(value or 0)
 
         stmt_warnings = select(
-            BeverageRecord.id,
-            BeverageRecord.detected_name,
-            BeverageRecord.catalog_ref_id,
-            BeverageRecord.needs_confirmation,
+            BeverageRecord.id, BeverageRecord.detected_name, BeverageRecord.catalog_ref_id
         ).where(
             BeverageRecord.day_log_id == day_log_id,
             BeverageRecord.deleted_at.is_(None),
         )
         warnings: list[dict[str, Any]] = []
-        for record_id, detected_name, catalog_ref_id, needs_confirmation in (
+        for record_id, detected_name, catalog_ref_id in (
             await self.session.execute(stmt_warnings)
         ).all():
             if catalog_ref_id is None:
                 warnings.append(
                     {
                         "code": "no_catalog_hit",
-                        "entity": "beverage_record",
-                        "record_id": str(record_id),
-                        "detected_name": detected_name,
-                    }
-                )
-            if needs_confirmation:
-                warnings.append(
-                    {
-                        "code": "needs_confirmation",
                         "entity": "beverage_record",
                         "record_id": str(record_id),
                         "detected_name": detected_name,

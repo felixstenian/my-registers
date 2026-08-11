@@ -30,7 +30,6 @@ export interface FoodItem {
   confidence: number | null;
   has_catalog: boolean;
   is_estimate: boolean;
-  needs_confirmation: boolean;
   source: string;
 }
 
@@ -55,7 +54,6 @@ export interface BeverageRecord {
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
-  needs_confirmation: boolean;
   occurred_at: string;
 }
 

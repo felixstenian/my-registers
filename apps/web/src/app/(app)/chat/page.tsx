@@ -12,8 +12,7 @@ import {
 import { api } from '@/lib/api-client';
 import { AssistantContent } from './AssistantContent';
 import { CloseDayModal } from './CloseDayModal';
-import { DayTotalsBar, type FoodItemRef } from './DayTotalsBar';
-import { PendingItemsModal } from './PendingItemsModal';
+import { DayTotalsBar } from './DayTotalsBar';
 
 type MediaRef = {
   id: string;
@@ -131,8 +130,6 @@ export default function ChatPage() {
   // SP-116: signal para o DayTotalsBar revalidar. Incrementa a cada nova
   // assistant message chegando pelo poll (ou pós-ação em modal).
   const [totalsRevalidateKey, setTotalsRevalidateKey] = useState(0);
-  // SP-117: modal de pending items aberto quando != null.
-  const [pendingItems, setPendingItems] = useState<FoodItemRef[] | null>(null);
   // T-704: modal de encerramento aberto com a data-alvo (`YYYY-MM-DD`).
   const [closingDate, setClosingDate] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -402,19 +399,8 @@ export default function ChatPage() {
     <main className="mx-auto flex h-[calc(100vh-49px)] max-w-3xl flex-col gap-2 p-4">
       <DayTotalsBar
         revalidateKey={totalsRevalidateKey}
-        onPendingClick={(items) => setPendingItems(items)}
         onCloseDayClick={(date) => setClosingDate(date)}
       />
-      {pendingItems !== null && (
-        <PendingItemsModal
-          items={pendingItems}
-          onClose={() => setPendingItems(null)}
-          onChanged={() => {
-            setTotalsRevalidateKey((k) => k + 1);
-            setPendingItems(null);
-          }}
-        />
-      )}
       {closingDate !== null && (
         <CloseDayModal
           date={closingDate}

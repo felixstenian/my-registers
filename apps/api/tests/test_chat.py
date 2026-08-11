@@ -259,3 +259,128 @@ async def test_post_reuses_existing_day_log(
 
     day_logs = list((await db_session.execute(select(DayLog))).scalars())
     assert len(day_logs) == 1
+
+
+# ---------------------------------------------------------------------------
+# SP-143 — POST /chat/messages aceita promote_food_item_id
+# ---------------------------------------------------------------------------
+
+
+async def _create_food_item_for_user(session: AsyncSession, user, *, deleted: bool = False):
+    """Helper: cria food_item (sem catálogo) do usuário — usado pra testar
+    a validação de ownership. Reduzido ao mínimo pra evitar depender do
+    MealService/seed."""
+    from datetime import UTC, datetime
+
+    from app.integrations.nutrition.local_tbca import LocalTBCACatalog
+    from app.schemas.llm import LLMEnvelope
+    from app.services.meal import MealService
+
+    dl = await DayLogRepository(session).get_or_create(
+        user_id=user.id,
+        log_date=datetime.now(ZoneInfo(user.timezone)).date(),
+    )
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "log_food",
+            "confidence": 0.9,
+            "user_text_summary": ".",
+            "needs_clarification": False,
+            "meal_slot": "lunch",
+            "food_items": [
+                {
+                    "detected_name": "novo",
+                    "normalized_name": "alimento_novo_sem_seed",
+                    "grams_estimate": 100,
+                    "confidence": 0.9,
+                    "is_estimate": False,
+                }
+            ],
+        }
+    )
+    result = await MealService(session, LocalTBCACatalog(session)).create_from_llm(
+        user=user, day_log_id=dl.id, message_id=None, envelope=envelope
+    )
+    item = result.items[0]
+    if deleted:
+        item.deleted_at = datetime.now(UTC)
+    await session.commit()
+    return item
+
+
+# Import necessário só neste bloco.
+from app.repositories.day_log import DayLogRepository  # noqa: E402
+
+
+async def test_post_with_valid_promote_food_item_id_stores_in_metadata(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """SP-143: envio com promote_food_item_id valido — ID guardado em
+    `raw_llm_response.metadata.promote_food_item_id` para o MessageProcessor
+    consumir na hora de acoplar a promoção após o OCR do rótulo."""
+    item = await _create_food_item_for_user(db_session, admin_user)
+
+    await _login(client)
+    resp = await client.post(
+        "/chat/messages",
+        json={"text": "foto do rotulo", "promote_food_item_id": str(item.id)},
+    )
+    assert resp.status_code == 202
+    message_id = resp.json()["message_id"]
+
+    stored = await db_session.get(Message, message_id)
+    assert stored is not None
+    assert stored.raw_llm_response == {"metadata": {"promote_food_item_id": str(item.id)}}
+
+
+async def test_post_with_invalid_promote_id_dropped_silently(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """SP-143: ID de food_item que não existe → campo descartado, mensagem
+    segue com raw_llm_response=None. Não bloqueia o envio (evita race
+    entre delete + upload da foto)."""
+    import uuid as _uuid
+
+    await _login(client)
+    resp = await client.post(
+        "/chat/messages",
+        json={"text": "foto", "promote_food_item_id": str(_uuid.uuid4())},
+    )
+    assert resp.status_code == 202
+    message_id = resp.json()["message_id"]
+
+    stored = await db_session.get(Message, message_id)
+    assert stored is not None
+    assert stored.raw_llm_response is None
+
+
+async def test_post_with_deleted_item_id_dropped_silently(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """SP-143: item deleted_at != NULL também é descartado (não faz sentido
+    promover item deletado)."""
+    item = await _create_food_item_for_user(db_session, admin_user, deleted=True)
+
+    await _login(client)
+    resp = await client.post(
+        "/chat/messages",
+        json={"text": "foto", "promote_food_item_id": str(item.id)},
+    )
+    assert resp.status_code == 202
+    stored = await db_session.get(Message, resp.json()["message_id"])
+    assert stored is not None
+    assert stored.raw_llm_response is None
+
+
+async def test_post_without_promote_id_leaves_raw_null(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """Comportamento pré-Bloco 5: sem `promote_food_item_id`, raw_llm_response
+    fica NULL (não vira dict vazio) — mantém compat com tudo que checa
+    `raw is None`."""
+    await _login(client)
+    resp = await client.post("/chat/messages", json={"text": "olá"})
+    assert resp.status_code == 202
+    stored = await db_session.get(Message, resp.json()["message_id"])
+    assert stored is not None
+    assert stored.raw_llm_response is None

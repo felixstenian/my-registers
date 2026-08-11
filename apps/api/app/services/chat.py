@@ -12,10 +12,11 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ValidationAppError
-from app.models import Media, Message, User
+from app.models import FoodItem, FoodRecord, Media, Message, User
 from app.repositories.day_log import DayLogRepository
 from app.repositories.media import MediaRepository
 from app.repositories.message import MessageRepository
@@ -46,6 +47,7 @@ class ChatService:
         user: User,
         text: str | None,
         media_ids: list[uuid.UUID],
+        promote_food_item_id: uuid.UUID | None = None,
     ) -> Message:
         text_stripped = (text or "").strip() or None
         if text_stripped is None and not media_ids:
@@ -61,14 +63,40 @@ class ChatService:
             if len(resolved) != len(set(media_ids)):
                 raise ValidationAppError("unknown media_id for this user", code="unknown_media")
 
+        # SP-143: valida ownership silenciosamente. Se falha, dropa o
+        # promote_food_item_id — mensagem segue o fluxo normal sem
+        # promoção. Motivação: não bloquear envio por erro em ID inválido
+        # que veio do frontend (race entre delete + upload). Bloco 5 §3.14.
+        validated_promote_id: uuid.UUID | None = None
+        if promote_food_item_id is not None:
+            stmt = (
+                select(FoodItem.id)
+                .join(FoodRecord, FoodRecord.id == FoodItem.food_record_id)
+                .where(
+                    FoodItem.id == promote_food_item_id,
+                    FoodRecord.user_id == user.id,
+                    FoodItem.deleted_at.is_(None),
+                )
+            )
+            row = (await self.session.execute(stmt)).scalar_one_or_none()
+            if row is not None:
+                validated_promote_id = promote_food_item_id
+
         day_log = await self.day_logs.get_or_create(
             user_id=user.id, log_date=local_today(user.timezone)
         )
+        # SP-143: promote_food_item_id armazenado em raw_llm_response.metadata
+        # (evita migration destrutiva). MessageProcessor lê daí quando o
+        # intent detectado for `log_nutrition_label` pra acoplar a promoção.
+        raw: dict | None = None
+        if validated_promote_id is not None:
+            raw = {"metadata": {"promote_food_item_id": str(validated_promote_id)}}
         message = await self.messages.create(
             user_id=user.id,
             day_log_id=day_log.id,
             role="user",
             content=text_stripped,
+            raw_llm_response=raw,
         )
         if media_ids:
             await self.messages.link_media(

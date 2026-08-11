@@ -205,9 +205,9 @@ async def test_deleted_items_excluded_from_snapshot(db_session: AsyncSession, ad
     assert r2.snapshot.kcal_in == Decimal("0")
 
 
-async def test_warnings_include_missing_catalog_and_needs_confirmation(
-    db_session: AsyncSession, admin_user
-):
+async def test_warnings_include_missing_catalog(db_session: AsyncSession, admin_user):
+    """Bloco 5 revisão v1.12: só `no_catalog_hit` é emitido —
+    `needs_confirmation` como warning saiu junto com o fluxo de confirmação."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user.id)
     catalog = LocalTBCACatalog(db_session)
@@ -234,4 +234,4 @@ async def test_warnings_include_missing_catalog_and_needs_confirmation(
     await db_session.commit()
     codes = {w["code"] for w in result.snapshot.warnings}
     assert "no_catalog_hit" in codes
-    assert "needs_confirmation" in codes
+    assert "needs_confirmation" not in codes

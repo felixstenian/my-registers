@@ -24,7 +24,6 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
                 "log_activity",
                 "correct_record",
                 "delete_record",
-                "confirm_items",
                 "query_day",
                 "close_day",
                 "weekly_summary",
@@ -143,24 +142,6 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
             "required": ["target_hint", "confidence"],
             "properties": {
                 "target_hint": {"type": "string"},
-                "confidence": {"type": "number"},
-            },
-        },
-        "confirmation": {
-            "type": ["object", "null"],
-            "additionalProperties": False,
-            "required": ["scope", "confidence"],
-            "properties": {
-                "scope": {"type": "string", "enum": ["all", "specific"]},
-                "target_hints": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Quando scope='specific', lista de dicas para o backend "
-                        "casar contra itens pendentes (mesma semântica de "
-                        "correction.target_hint)."
-                    ),
-                },
                 "confidence": {"type": "number"},
             },
         },

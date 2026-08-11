@@ -2,7 +2,6 @@
 // Server component intencionalmente (sem estado no client): usa o
 // elemento <details> HTML nativo pra colapso/expansão. Zero JS extra.
 
-import { ConfirmItemButton } from './ConfirmItemButton';
 import { fmtAmount, fmtConfidence, fmtGrams, fmtKcal, fmtMg } from './format';
 import { SOURCE_LABEL_PT, type FoodItem } from './types';
 
@@ -19,7 +18,6 @@ export function FoodItemRow({ item }: { item: FoodItem }) {
       <summary className="grid cursor-pointer grid-cols-12 items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-900/50">
         <span className="col-span-4 truncate font-medium">
           {item.detected_name}
-          {item.needs_confirmation && <ConfirmItemButton itemId={item.id} />}
           {!item.has_catalog && (
             <span
               className="ml-1.5 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200"

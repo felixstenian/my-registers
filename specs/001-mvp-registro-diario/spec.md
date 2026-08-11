@@ -192,7 +192,7 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
   - Prefixo `≈` (aproximadamente) **MUST** aparecer em qualquer linha nutricional cuja origem tenha pelo menos 1 item com `is_estimate=true` ou `needs_confirmation=true`. Se todos os itens têm quantidade exata + catálogo, o `≈` **MUST NOT** aparecer.
   - Água pura e volume nunca recebem `≈` (são medidas diretas).
   - Aviso legal (Const. Art. VII §26) continua ao final, separado por linha em branco.
-- **Warnings de itens pendentes** (needs_confirmation/no_catalog_hit) aparecem em um bloco separado abaixo do disclaimer, no formato: *"Confirma estes itens? — feijão, sushi ninja"* (referencia SP-24/SP-117 para o fluxo de correção).
+- **Warnings de itens sem catálogo** (`no_catalog_hit`) aparecem em card estruturado (SP-140, revisão 2026-07-28) com botões clicáveis por item. Warning `needs_confirmation` deprecated junto com o fluxo de confirmação (ver SP-24).
 - Este SP substitui o formato livre gerado hoje pelos `_compose_meal_summary` / `_compose_water_summary` / `_compose_beverage_summary` / `_compose_activity_summary` em `services/message_processor.py`.
 
 ### 3.3 Registro de alimentos
@@ -210,8 +210,10 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 - `catalog_ref_id=null`, macros zerados, `warnings: {code: "no_catalog_hit"}`. Assistente pergunta valores por 100g **ou** marca.
 
 **SP-24** (`must`) — Confiança baixa.
-- `confidence < 0.5` → `needs_confirmation=true`, destaque na tabela, aguarda confirmação por chat ou `PATCH /records/food-items/{id}`.
-- **Chat-side (SP-24a):** "confirmo", "sim", "está certo" → `intent=confirm_items` com `confirmation.scope='all'`. "Confirma o pão", "o queijo prato tá certo" → `scope='specific'` com `target_hints=[...]` casados via `TargetMatcher`. Sem itens pendentes → clarify ("não achei item pendente"). Confirmação NÃO recomputa snapshot (macros não mudam); apenas remove `needs_confirmation` e registra `audit_events(action='confirm')`. Dia fechado bloqueia (INV-5).
+- `confidence < 0.5` → item marcado como estimativa (`is_estimate=true`) para o prefixo `≈` no display. Correção continua via chat (`corrija X 100g`) ou `PATCH /records/food-items/{id}`.
+- ~~**Chat-side (SP-24a):**~~ **DEPRECATED em 2026-07-28 (v1.11)** — intent `confirm_items` + `ConfirmationService` + fluxo "confirmo esses itens" removidos junto com toda a UX de confirmação. Ver §3.14 (revisão) para o motivador. Item sem catálogo agora tem 3 botões diretos no card (Cadastrar manual, Foto do rótulo, Descartar) — não precisa mais "confirmar".
+
+> **Nota histórica sobre `needs_confirmation`.** O campo permanece no schema (evita migration destrutiva) mas nunca mais é setado como `true`. `MealService.create_from_llm` e `BeverageService.create_from_llm` não usam mais o campo pra sinalizar "pendente". O sinal de "item sem catálogo" no frontend passou a ser `has_catalog=false` (derivado de `catalog_ref_id IS NULL`).
 
 **SP-25** (`should`) — Múltiplas fotos.
 - Até 4 fotos em uma mensagem, agrupadas em 1 `food_records` (não separa refeições distintas no MVP).
@@ -482,14 +484,17 @@ Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push
 
 ### 3.14 Recuperação de itens sem catálogo (pós-MVP)
 
-Quando `catalog.lookup()` devolve `None` para um `food_item`, hoje o item entra no diário com `kcal=0`, `catalog_ref_id=NULL` e `needs_confirmation=true` (Const. §5-6, INV-1). O usuário fica com três caminhos: (a) foto do rótulo (Fase 4.b, SP-30..35), (b) descartar, (c) confirmar zerado. Nenhum é intuitivo se o usuário não conhecer o mecanismo. Esta seção cobre duas melhorias:
+Quando `catalog.lookup()` devolve `None` para um `food_item`, o item entra no diário com `kcal=0` e `catalog_ref_id=NULL` (Const. §5-6, INV-1). Sem intervenção, o item fica zerado no snapshot pra sempre. Esta seção dá ao usuário **três ações objetivas por item** direto na assistant message, todas como botões clicáveis.
 
-**SP-140** (`should`) — Prompt de recuperação na assistant message.
-- Quando o resultado de `log_food` contém warnings com `code='no_catalog_hit'`, o `message_formatter.compose_meal` anexa um bloco "Sem catálogo para: {itens}" listando **detected_name** dos afetados e três chamadas de ação claras:
-  1. `📸 Enviar foto do rótulo` — atalho textual explicando o fluxo SP-30..35 (usuário anexa foto no próximo message).
-  2. `✏️ Cadastrar manualmente` — link/botão que abre o formulário curto (SP-141).
-  3. `❌ Descartar item` — instrução curta ("responda `apaga {nome}`").
-- Não altera o cálculo. Apenas UX. Aviso legal (Art. VII §26) continua obrigatório.
+**Decisão de escopo (revisão 2026-07-28):** o fluxo de "confirmação de item" (`PendingItemsModal`, `POST /records/food-items/{id}/confirm`, `ConfirmItemButton` no `/day`, intent LLM `confirm_items`, `ConfirmationService`) foi **removido**. Motivação: sobreposição semântica confusa — item sem catálogo NÃO precisa de "confirmação", precisa de ação (cadastrar valores OU descartar). O campo `needs_confirmation` permanece no schema (evita migration), mas o backend **nunca mais** o seta como `true` e o frontend ignora completamente.
+
+**SP-140** (`should`) — Card de recuperação por item na assistant message.
+- Quando `log_food` retorna warnings com `code='no_catalog_hit'`, o `message_formatter.compose_meal` anexa um marcador estruturado que o frontend transforma em card com **três botões por item afetado**:
+  1. **✏️ Cadastrar manualmente** — abre `ManualCatalogForm` (modal). Ver SP-141.
+  2. **📸 Cadastrar com foto do rótulo** — abre file picker; ao selecionar imagem, upload + envio automático de uma mensagem no chat com `promote_food_item_id={item.id}` associado. Ver SP-143.
+  3. **❌ Descartar item** — dispara `DELETE /records/food-items/{item.id}` e re-renderiza. Sem confirmação extra.
+- Cada botão opera **em um item específico** — usuário resolve um por vez.
+- Não altera cálculo. Aviso legal (Art. VII §26) continua obrigatório na assistant message.
 
 **SP-141** (`should`) — Endpoint de cadastro manual de `nutrient_facts`.
 - `POST /nutrient-facts/manual` autenticado. Body:
@@ -512,29 +517,46 @@ Quando `catalog.lookup()` devolve `None` para um `food_item`, hoje o item entra 
     "promote_food_item_id": "uuid"               // opcional (SP-142)
   }
   ```
-- Response 201 com o `nutrient_facts.id` criado (ou 200 se merge com fact existente do usuário — decisão via ADR).
-- Persiste com `source='user_manual'`, `verified_by_user=true`, `created_by=user_id`.
+- Response 201 com o `nutrient_facts.id` criado.
+- Persiste com `source='manual'`, `verified_by_user=true`, `created_by=user_id`.
 - Validação: `basis ∈ {per_100g, per_100ml}`; `kcal ≥ 0`; `protein/carbs/fat ≥ 0`; `canonical_name` slug-like (`[a-z0-9_]+`).
-- Isolamento: cada usuário tem seu próprio fact (não compartilha entre users). Const. §21.
-- Precedência de source: `user_manual + verified_by_user=true` empata com TBCA_2023; entre ambos, mais recente vence (o `LocalTBCACatalog` já resolve isso).
+- Isolamento: cada usuário tem seu próprio fact (Const. §21).
 
 **SP-142** (`should`) — Promoção de `food_item` legado no cadastro manual.
-- Se `POST /nutrient-facts/manual` incluir `promote_food_item_id`, o backend:
+- Se `POST /nutrient-facts/manual` incluir `promote_food_item_id`, o backend, na mesma transação:
   1. Cria o `nutrient_fact` (SP-141).
-  2. Faz lookup do item legado; se pertence ao usuário e não está deletado:
+  2. Se o item pertence ao usuário e não está deletado e o dia não está fechado:
      - Atualiza `catalog_ref_id` pro novo fact.
      - Recalcula macros via `NutritionCalculator.compute(hit=new_fact, grams=item.grams, ml=item.ml)`.
-     - Desmarca `needs_confirmation`.
-     - Grava audit `action='correct'`, `actor='user'`, before/after (mesma semântica do PATCH atual).
+     - Grava audit `action='correct'`, `actor='user'`, before/after.
      - Chama `DailyRecomputeService.recompute(item.food_record.day_log_id)` — snapshot reflete novo valor.
-- Se `promote_food_item_id` for de outro usuário ou não achado, endpoint retorna 201 do fact criado + warning `"promotion_failed"` no body (não falha o cadastro).
-- Se `promote_food_item_id` já tem catalog_ref_id != null, endpoint sobrescreve (registra audit).
+- Se qualquer validação falhar (item de outro user, deletado, dia fechado), endpoint retorna 201 do fact criado + `promotion_warning='promotion_failed:{motivo}'` no body (não faz rollback).
+
+**SP-143** (`should`) — Cadastro por foto de rótulo com promoção acoplada.
+- `POST /chat/messages` aceita novo campo opcional `promote_food_item_id: uuid`. Body existente + o campo novo:
+  ```json
+  { "text": "...", "media_ids": ["..."], "promote_food_item_id": "uuid" }
+  ```
+- Backend valida no momento do envio que `promote_food_item_id` pertence ao usuário (isolamento). Se inválido, ignora silenciosamente (não bloqueia o envio da mensagem).
+- Processo normal: `MessageProcessor` roda LLM → se intent for `log_nutrition_label` (Fase 4.b) → `LabelCatalogService.upsert_from_label` cria/atualiza fact.
+- **Novo passo**: depois do `upsert_from_label` retornar com sucesso, se `promote_food_item_id` foi passado E o item é válido (ownership + não deletado + dia aberto), backend faz a mesma promoção do SP-142 (atualiza `catalog_ref_id`, recomputa macros, recompute snapshot, audit).
+- Se intent detectado ≠ `log_nutrition_label` (usuário mandou foto que não é rótulo), `promote_food_item_id` é ignorado e a mensagem segue o fluxo normal.
+- Se a promoção falhar após o fact ter sido criado, backend grava audit_event `action='promotion_failed'` mas não bloqueia o fluxo de chat.
 
 **Fora do escopo desta feature:**
-- Formulário completo com micros (fica opcional na v1).
-- Sincronização entre users (cada user tem seu fact).
-- Delete de fact manual (adiar até haver necessidade real; auditoria vai preservar).
-- Sugestão de cadastro automática por LLM sem interação do usuário (viola Const. §5).
+- Migration removendo `needs_confirmation` do schema (adia; sem impacto porque backend nunca mais seta e frontend ignora).
+- Formulário completo com micros (fica opcional; accordion).
+- Delete de fact manual (adiar).
+- Sugestão de cadastro automática por LLM (viola Const. §5).
+
+**Removidos por esta revisão:**
+- `PendingItemsModal.tsx` no chat.
+- `POST /records/food-items/{id}/confirm` (endpoint deletado).
+- `ConfirmItemButton.tsx` no `/day` (deletado).
+- Intent LLM `confirm_items` no `system_v2.md` + tool_schema + dispatcher + `ConfirmationService`.
+- Warning `needs_confirmation` no block do `message_formatter._warnings_block` (chamado "Confirma estes itens?"); substituído pelo card SP-140.
+- Badges "confirmar" e ícones amarelos em `DayTotalsBar`, `FoodItemRow`, etc.
+- SP-24a (SP-24 chat-side) fica marcada como deprecated na spec — implementação removida junto com o intent.
 
 ---
 
@@ -710,4 +732,5 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-27** — v1.9. Nova seção 3.15 "Visão detalhada do dia" (SP-150..SP-154, todos `should`/`may`): página `/day` server-rendered com refeições agrupadas por meal_slot, food_items com macros + micros expansíveis, seções auxiliares de hidratação/bebidas/atividade, rota opcional `/day/[date]` para dias passados. Motivador: bug do catálogo vazio em prod expôs que faltava lugar pro usuário validar item-por-item. Revive parcialmente a intenção do T-409 original. Escopo v1 é read-only; mutações continuam via chat. Faixa SP-150..154 escolhida pra reservar espaço acima de SP-140..142 (§3.14 de recuperação de catálogo, ainda em PR aberta) — sem conflito.
 - **2026-07-27** — v1.10. Adicionado SP-155 (`should`) à seção 3.15: navegação temporal a partir do `/day` (botões prev/next/hoje + input date HTML nativo) e do `/weekly` (coluna "Dia" da tabela `per_day` vira link pra `/day/[date]`). Datas no futuro bloqueadas com mensagem amigável, sem bater no backend. Motivador: `/day/[date]` já existia (SP-154) mas só era acessível via URL manual.
 - **2026-07-28** — v1.11. SP-154 esclarecido: `/day/[date]` NÃO é read-only universal — quando o dia passado ainda está `status='open'`, o botão "Encerrar dia" aparece pra permitir encerramento retroativo (usuário esqueceu de encerrar). Só edição de records fica exclusiva do chat. Motivador: comportamento anterior `allowClose={false}` bloqueava indevidamente esse fluxo.
+- **2026-07-28** — v1.12. **§3.14 (Bloco 5) reformulado.** SP-140 agora produz card com 3 botões clicáveis por item (Cadastrar manual, Foto do rótulo com promoção acoplada, Descartar). Nova SP-143 (`should`): `POST /chat/messages` aceita `promote_food_item_id` para acoplar upload de rótulo → promoção do item legado numa única viagem. Removidos: `PendingItemsModal`, endpoint `POST /records/food-items/{id}/confirm`, `ConfirmItemButton` do `/day`, intent LLM `confirm_items`, `ConfirmationService`, e SP-24a deprecated. Campo `needs_confirmation` fica no schema mas nunca mais é setado — frontend usa `has_catalog` como único sinal. Motivador: sobreposição semântica confusa entre "confirmar" e "resolver item sem catálogo".
 - **2026-07-27** — v1.8. Nova seção 3.14 "Recuperação de itens sem catálogo" (SP-140..SP-142, todos `should`, pós-MVP): prompt de recuperação na assistant message quando há `no_catalog_hit`, endpoint `POST /nutrient-facts/manual` para cadastro sem foto, promoção opcional de `food_item` legado no mesmo cadastro. Também: limpeza de duplicação em §3.13 (bloco PWA aparecia duas vezes idênticas por artefato de merge).
