@@ -38,7 +38,7 @@ class LocalTBCACatalog(NutritionCatalog):
             select(NutrientFact)
             .where(
                 or_(
-                    NutrientFact.aliases.any(normalized),
+                    NutrientFact.aliases.any(normalized),  # type: ignore[arg-type]
                     NutrientFact.canonical_name == normalized,
                 )
             )

@@ -193,7 +193,10 @@ class DailyRecomputeService:
         row = (await self.session.execute(stmt)).one()
         totals: dict[str, Decimal] = {}
         for field, value in zip((*_MACRO_FIELDS, "volume_ml"), row, strict=True):
-            totals[field] = int(value or 0) if field == "volume_ml" else Decimal(value or 0)
+            if field == "volume_ml":
+                totals[field] = Decimal(int(value or 0))
+            else:
+                totals[field] = Decimal(value or 0)
 
         stmt_warnings = select(
             BeverageRecord.id,

@@ -9,9 +9,11 @@ Endpoints:
   a partir de `DEFAULT_ADMIN_EMAIL/PASSWORD`. Também drena as filas do
   `TestAnthropicClient`.
 - `POST /test/queue-llm-response` — enfileira envelope canned na fila
-  correspondente (record_intent | narrative | weekly_narrative). Payload
-  Pydantic valida schema básico; envelope de intent é validado como
-  `LLMEnvelope` estrito.
+  correspondente (record_intent | record_intent_error | narrative |
+  weekly_narrative). Payload Pydantic valida schema básico; envelope de
+  intent é validado como `LLMEnvelope` estrito. `record_intent_error`
+  enfileira um error code que faz `call_record_intent` devolver
+  `LLMCallResult(error=...)`, disparando o fallback SP-14.
 - `GET /test/queue-llm-status` — retorna tamanho atual de cada fila
   (útil pra debug de setup em Playwright).
 
@@ -67,15 +69,18 @@ def _require_test_env() -> None:
 
 
 class QueueLlmRequest(BaseModel):
-    kind: Literal["record_intent", "narrative", "weekly_narrative"]
+    kind: Literal["record_intent", "record_intent_error", "narrative", "weekly_narrative"]
     # Para record_intent: envelope completo (dict aceita `_LenientBase` mode).
     envelope: dict[str, Any] | None = None
+    # Para record_intent_error: error code string (ex.: "anthropic_timeout").
+    error: str | None = None
     # Para narrative / weekly_narrative: texto pt-BR pronto.
     text: str | None = None
 
 
 class QueueStatusResponse(BaseModel):
     record_intent: int = Field(ge=0)
+    record_error: int = Field(ge=0)
     narrative: int = Field(ge=0)
     weekly_narrative: int = Field(ge=0)
 
@@ -115,6 +120,13 @@ async def queue_llm_response(payload: QueueLlmRequest) -> Response:
             )
         envelope = LLMEnvelope.model_validate(payload.envelope)
         fake.queue_record_intent(envelope)
+    elif payload.kind == "record_intent_error":
+        if not payload.error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="error required for record_intent_error",
+            )
+        fake.queue_record_error(payload.error)
     elif payload.kind == "narrative":
         fake.queue_narrative(payload.text)
     else:
