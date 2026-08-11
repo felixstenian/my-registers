@@ -20,15 +20,24 @@ export function DayNavigator({ date }: { date: string }) {
   const nextDate = addDaysISO(date, +1);
   const canGoNext = compareISO(nextDate, today) <= 0;
 
-  const [picked, setPicked] = useState(date);
+  // FE-02: antes, `useState(date)` inicializava `picked` só na 1ª montagem.
+  // Em soft navigation `/day/X` → `/day/Y` (links "Dia anterior"/"Próximo
+  // dia"), o Next preserva o estado de client components na mesma posição
+  // da árvore — o input ficava mostrando X e "Ir" navegava de volta pra X.
+  // Padrão React 19 "state derived from prop": guardamos apenas a edição
+  // do usuário (`null` = "não editou"); o valor efetivo é `picked ?? date`,
+  // que acompanha a prop automaticamente sem useEffect nem remount.
+  const [edit, setEdit] = useState<string | null>(null);
+  const picked = edit ?? date;
 
   const goToPicked = () => {
-    if (!picked || picked === date) return;
-    if (compareISO(picked, today) > 0) return; // sanity: futuro bloqueado
-    if (compareISO(picked, today) === 0) {
+    if (!edit || edit === date) return;
+    if (compareISO(edit, today) > 0) return; // sanity: futuro bloqueado
+    setEdit(null);
+    if (compareISO(edit, today) === 0) {
       router.push('/day');
     } else {
-      router.push(`/day/${picked}`);
+      router.push(`/day/${edit}`);
     }
   };
 
@@ -71,13 +80,13 @@ export function DayNavigator({ date }: { date: string }) {
           type="date"
           value={picked}
           max={today}
-          onChange={(e) => setPicked(e.target.value)}
+          onChange={(e) => setEdit(e.target.value)}
           className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
         />
         <button
           type="button"
           onClick={goToPicked}
-          disabled={!picked || picked === date}
+          disabled={!edit || edit === date}
           className="rounded bg-slate-900 px-2 py-0.5 text-white transition disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
         >
           Ir

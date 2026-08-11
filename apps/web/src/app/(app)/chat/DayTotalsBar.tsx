@@ -8,7 +8,7 @@
  * Colapsa em uma linha rolável horizontalmente em telas pequenas.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api-client';
 
 type FoodItemRef = {
@@ -56,12 +56,26 @@ export function DayTotalsBar({
   onCloseDayClick: (date: string) => void;
 }) {
   const [day, setDay] = useState<DayResponse | null>(null);
+  const dayRef = useRef<DayResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // FE-01: antes, falha na 1ª carga (rede fora) deixava a barra em "Carregando
+  // totais do dia…" para sempre (loading→false, day=null cairia no estado
+  // "vazio" enganoso). Agora exibimos erro discreto com retry; revalidações
+  // que falham mantêm os dados velhos (salvo quando ainda não há dados).
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const result = await api<DayResponse>('/days/today');
-    if (result.ok) setDay(result.data);
+    if (result.ok) {
+      dayRef.current = result.data;
+      setDay(result.data);
+      setErrorMsg(null);
+    } else if (dayRef.current === null) {
+      // Só exibe erro quando não há dados antigos a mostrar; com dados
+      // velhos disponíveis, mantemos o último snapshot válido.
+      setErrorMsg(result.error?.message ?? 'Falha ao carregar totais do dia.');
+    }
     setLoading(false);
   }, []);
 
@@ -73,6 +87,21 @@ export function DayTotalsBar({
     return (
       <div className="mb-2 rounded border border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
         Carregando totais do dia…
+      </div>
+    );
+  }
+
+  if (errorMsg && day === null) {
+    return (
+      <div className="mb-2 flex items-center justify-between gap-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+        <span>{errorMsg}</span>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="shrink-0 rounded bg-red-800 px-2.5 py-1 font-medium text-white transition hover:bg-red-900 dark:bg-red-900 dark:hover:bg-red-800"
+        >
+          Tentar novamente
+        </button>
       </div>
     );
   }

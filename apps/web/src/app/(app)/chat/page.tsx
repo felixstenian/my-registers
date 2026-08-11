@@ -62,12 +62,24 @@ const UPLOAD_REASONS: Record<string, (name: string) => string> = {
 async function uploadMedia(file: File): Promise<UploadResult> {
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch('/api/media', {
-    method: 'POST',
-    credentials: 'include',
-    cache: 'no-store',
-    body: form,
-  });
+  // FE-01: fetch próprio (FormData/multipart não passa pelo api-client).
+  // Lança em falha de rede — capturamos aqui para não virar unhandled
+  // rejection dentro de performSend (que não tem try/catch no loop).
+  let res: Response;
+  try {
+    res = await fetch('/api/media', {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      body: form,
+    });
+  } catch {
+    return {
+      ok: false,
+      file: file.name,
+      reason: `Não foi possível enviar \`${file.name}\` (falha de rede). Verifique sua conexão.`,
+    };
+  }
   if (res.status === 201) {
     const body = (await res.json()) as { id: string };
     return { ok: true, id: body.id };

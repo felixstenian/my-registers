@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api-client';
 
 type Totals = {
@@ -66,19 +66,25 @@ export function WeeklyReportView() {
     | { phase: 'error'; message: string }
   >({ phase: 'loading' });
 
-  useEffect(() => {
-    (async () => {
-      const result = await api<WeeklyResponse>('/weekly');
-      if (result.ok) {
-        setState({ phase: 'ready', data: result.data });
-      } else {
-        setState({
-          phase: 'error',
-          message: result.error?.message ?? 'Não foi possível carregar o relatório.',
-        });
-      }
-    })();
+  // FE-01: extraído do useEffect inline para permitir retry manual quando
+  // a carga inicial falha (rede fora). A regeneração do relatório é cara no
+  // backend, mas o usuário precisa de uma saída acionável no estado de erro.
+  const load = useCallback(async () => {
+    setState({ phase: 'loading' });
+    const result = await api<WeeklyResponse>('/weekly');
+    if (result.ok) {
+      setState({ phase: 'ready', data: result.data });
+    } else {
+      setState({
+        phase: 'error',
+        message: result.error?.message ?? 'Não foi possível carregar o relatório.',
+      });
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   if (state.phase === 'loading') {
     return (
@@ -91,7 +97,14 @@ export function WeeklyReportView() {
   if (state.phase === 'error') {
     return (
       <div className="rounded border border-red-200 bg-red-50 px-4 py-6 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-        {state.message}
+        <p>{state.message}</p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="mt-3 rounded bg-red-800 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-900 dark:bg-red-900 dark:hover:bg-red-800"
+        >
+          Tentar novamente
+        </button>
       </div>
     );
   }
