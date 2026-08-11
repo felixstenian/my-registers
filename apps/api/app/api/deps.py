@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from fastapi import Cookie, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.exceptions import UnauthorizedError
 from app.core.security import decode_access_token
 from app.db.session import SessionLocal
@@ -25,6 +26,13 @@ def get_storage_dep() -> MinioStorage:
 
 
 def get_anthropic_client_dep() -> AnthropicClient:
+    # Em APP_ENV=test o backend serve respostas de uma fila HTTP-controlável
+    # (ver `app/integrations/anthropic/test_client.py` e `routes/test_hooks.py`).
+    # Nunca bate na Anthropic real durante E2E.
+    if get_settings().app_env == "test":
+        from app.integrations.anthropic.test_client import TestAnthropicClient
+
+        return TestAnthropicClient()  # type: ignore[return-value]
     return get_anthropic_client()
 
 

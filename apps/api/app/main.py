@@ -44,6 +44,13 @@ def create_app() -> FastAPI:
     app.include_router(weekly.router)
     app.include_router(nutrient_facts.router)
 
+    # Endpoints /test/* — só em APP_ENV=test. Alimentam a fila do
+    # TestAnthropicClient e resetam estado entre specs do Playwright.
+    if settings.app_env == "test":
+        from app.api.routes import test_hooks
+
+        app.include_router(test_hooks.router)
+
     @app.exception_handler(AppError)
     async def handle_app_error(_: Request, exc: AppError) -> JSONResponse:
         return JSONResponse(

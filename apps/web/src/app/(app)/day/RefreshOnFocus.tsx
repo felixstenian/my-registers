@@ -27,10 +27,11 @@ export function RefreshOnFocus() {
 
   useEffect(() => {
     // Refresh no mount — a razão principal desse componente existir.
+    // `router` retornado por `useRouter()` é estável entre renders, então
+    // listar como dep não reexecuta o efeito após o mount.
     router.refresh();
     lastRefreshRef.current = Date.now();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     const onVisibility = () => {
