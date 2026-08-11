@@ -54,4 +54,4 @@ class RefreshTokenRepository:
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return int(result.rowcount or 0)
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]

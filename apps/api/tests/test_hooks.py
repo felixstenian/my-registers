@@ -39,12 +39,22 @@ async def test_queue_llm_status_reflects_enqueued_counts(client, make_envelope):
     assert r2.status_code == 204
 
     status = (await client.get("/test/queue-llm-status")).json()
-    assert status == {"record_intent": 1, "narrative": 1, "weekly_narrative": 0}
+    assert status == {
+        "record_intent": 1,
+        "record_error": 0,
+        "narrative": 1,
+        "weekly_narrative": 0,
+    }
 
     # Reset drena todas as filas.
     await client.post("/test/reset")
     cleared = (await client.get("/test/queue-llm-status")).json()
-    assert cleared == {"record_intent": 0, "narrative": 0, "weekly_narrative": 0}
+    assert cleared == {
+        "record_intent": 0,
+        "record_error": 0,
+        "narrative": 0,
+        "weekly_narrative": 0,
+    }
 
 
 async def test_queue_record_intent_without_envelope_returns_422(client):
