@@ -3,7 +3,18 @@
 // ao mesmo tempo e cada uma tentaria `window.location.assign`. Após o
 // primeiro redirect a página recarrega (novo contexto JS), então a flag
 // só precisa viver entre as chamadas da mesma página.
-let isRedirectingToLogin = false;
+//
+// Usamos `globalThis` em vez de `let` no escopo do módulo porque o
+// Next.js dev mode (webpack) pode criar múltiplas instâncias do módulo
+// (uma por chunk de cliente), cada uma com sua própria cópia da flag.
+// `globalThis` garante singleton real entre todas as instâncias.
+const REDIRECT_GUARD_KEY = '__mr_redirectingToLogin' as const;
+function isRedirectingToLogin(): boolean {
+  return (globalThis as Record<string, unknown>)[REDIRECT_GUARD_KEY] === true;
+}
+function setRedirectingToLogin(): void {
+  (globalThis as Record<string, unknown>)[REDIRECT_GUARD_KEY] = true;
+}
 
 export type ApiError = {
   code: string;
@@ -69,9 +80,9 @@ export async function api<T = unknown>(
       status === 401 &&
       !path.startsWith('/auth/') &&
       typeof window !== 'undefined' &&
-      !isRedirectingToLogin
+      !isRedirectingToLogin()
     ) {
-      isRedirectingToLogin = true;
+      setRedirectingToLogin();
       // O cookie de sessão é HttpOnly — não dá para limpar via
       // `document.cookie`. Sem invalidar, o proxy (`proxy.ts:24`) rebate
       // `/login` de volta pra `/chat` (presença de cookie ≠ válido). Um
