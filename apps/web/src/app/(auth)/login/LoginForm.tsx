@@ -14,12 +14,21 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   // FE-03: open redirect — `?next=https://evil.com` levava o usuário
-// autenticado para fora do app. Validação local do lado client: só
-// paths internos (começam com `/` e não com `//`). A validação real
-// de auth/sessão é no backend; o proxy só checa presença de cookie.
+  // autenticado para fora do app. Validação local do lado client: só
+  // paths internos (começam com `/`, não com `//`, e sem backslash
+  // literal ou URL-encoded `%5C` que o browser normaliza para `/`).
+  // A validação real de auth/sessão é no backend; o proxy só checa
+  // presença de cookie.
   const safeNext = (() => {
     const raw = searchParams.get('next');
-    if (raw && raw.startsWith('/') && !raw.startsWith('//')) return raw;
+    if (
+      raw &&
+      raw.startsWith('/') &&
+      !raw.startsWith('//') &&
+      !raw.includes('\\') &&
+      !raw.toLowerCase().includes('%5c')
+    )
+      return raw;
     return '/chat';
   })();
   const [email, setEmail] = useState('');
