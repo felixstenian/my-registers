@@ -6,6 +6,7 @@
  *   TC-E-002 — Foto + descrição (upload de 2 imagens + texto)
  *   TC-E-003 — Erro LLM gera fallback SP-14
  *   TC-E-004 — Foco volta ao composer após envio
+ *   TC-E-005 — Mídias enviadas aparecem como imagens na mensagem do usuário
  */
 
 import { expect, test } from './support/test';
@@ -267,5 +268,79 @@ test('TC-E-004: composer mantém foco e limpa texto após envio', async ({
   await expect(composer).toBeFocused();
 
   // Assistant chega (confirma que o envio foi processado).
+  await expect(page.getByText(/registrei/i)).toBeVisible({ timeout: 15000 });
+});
+
+// ---------------------------------------------------------------------------
+// TC-E-005 — Mídias enviadas aparecem como imagens na mensagem do usuário
+// ---------------------------------------------------------------------------
+
+test('TC-E-005: mídias enviadas aparecem como <img> com URL presigned na mensagem do usuário', async ({
+  page,
+  queueLlm,
+}) => {
+  // Enfileira resposta LLM simples para o fluxo não ficar pendurado.
+  await queueLlm({
+    kind: 'record_intent',
+    envelope: {
+      intent: 'log_food',
+      confidence: 0.90,
+      user_text_summary: 'Refeição com foto.',
+      needs_clarification: false,
+      meal_slot: 'lunch',
+      food_items: [
+        {
+          detected_name: 'arroz branco cozido',
+          normalized_name: 'arroz_branco_cozido',
+          quantity: 100,
+          unit: 'g',
+          grams_estimate: 100,
+          confidence: 0.95,
+          is_estimate: false,
+        },
+      ],
+    },
+  });
+
+  await page.goto('/chat');
+
+  const composer = page.getByPlaceholder(/150 g de arroz/i);
+  await composer.fill('almoço com foto');
+
+  // Anexa 2 fotos via input file.
+  const minPng = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const fileInput = page.locator('input[type="file"]');
+  await fileInput.setInputFiles([
+    { name: 'foto1.png', mimeType: 'image/png', buffer: minPng },
+    { name: 'foto2.png', mimeType: 'image/png', buffer: minPng },
+  ]);
+
+  await page.getByRole('button', { name: /^enviar$/i }).click();
+
+  // User message aparece com o texto enviado.
+  await expect(page.getByText('almoço com foto')).toBeVisible({ timeout: 5000 });
+
+  // Após loadInitial (GET /chat/messages?limit=100), a mensagem do usuário
+  // inclui media[] com presigned URLs. O frontend renderiza <img> para cada
+  // mídia. Validamos que 2 <img> aparecem dentro do container de mensagens.
+  const messagesContainer = page.locator('main > div.overflow-y-auto');
+  const chatImages = messagesContainer.locator('img');
+  await expect(chatImages).toHaveCount(2, { timeout: 10000 });
+
+  // Cada <img> deve ter src com URL presigned do MinIO (contém assinatura
+  // AWS S3 v4 — query params X-Amz-Signature e X-Amz-Date).
+  for (let i = 0; i < 2; i++) {
+    const src = await chatImages.nth(i).getAttribute('src');
+    expect(src).toBeTruthy();
+    expect(src).toMatch(/X-Amz-Signature=/);
+    expect(src).toMatch(/X-Amz-Date=/);
+    // Path inclui o bucket e o padrão users/{uid}/media/...
+    expect(src).toContain('/registers-media/users/');
+  }
+
+  // Assistant chega (confirma que o envio foi processado pelo backend).
   await expect(page.getByText(/registrei/i)).toBeVisible({ timeout: 15000 });
 });
