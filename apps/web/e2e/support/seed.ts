@@ -11,8 +11,9 @@ import type { Page } from '@playwright/test';
 import { API_BASE } from './constants';
 
 type QueueLlmFn = (payload: {
-  kind: 'record_intent' | 'narrative' | 'weekly_narrative';
+  kind: 'record_intent' | 'record_intent_error' | 'narrative' | 'weekly_narrative';
   envelope?: Record<string, unknown>;
+  error?: string;
   text?: string | null;
 }) => Promise<void>;
 

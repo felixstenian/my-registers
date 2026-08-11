@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image, UnidentifiedImageError
+from PIL.Image import Image as PILImage
 from pydantic import ValidationError
 
 import anthropic
@@ -79,7 +80,7 @@ class LLMCallResult:
     model: str
     prompt_version: str
     error: str | None = None
-    validation_errors: list[dict[str, Any]] = field(default_factory=list)
+    validation_errors: list[Any] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -204,7 +205,7 @@ class AnthropicClient:
                     ],
                     tool_choice={"type": "tool", "name": "record_intent"},
                     messages=conversation,
-                )
+                )  # type: ignore[call-overload]
             except anthropic.APITimeoutError:
                 return LLMCallResult(
                     envelope=None,
@@ -294,7 +295,7 @@ class AnthropicClient:
             try:
                 envelope = LLMEnvelope.model_validate(tool_input)
             except ValidationError as exc:
-                last_validation_errors = exc.errors()
+                last_validation_errors = exc.errors()  # type: ignore[assignment]
                 if attempt >= max_semantic_retries:
                     return LLMCallResult(
                         envelope=None,
@@ -584,12 +585,13 @@ def _compress_image(data: bytes, content_type: str) -> tuple[bytes, str]:
             if not needs_resize and already_jpeg:
                 return data, content_type
             img.load()
-            if img.mode not in ("RGB", "L"):
-                img = img.convert("RGB")
+            converted: PILImage = img
+            if converted.mode not in ("RGB", "L"):
+                converted = converted.convert("RGB")
             if needs_resize:
-                img.thumbnail((_IMAGE_MAX_SIDE, _IMAGE_MAX_SIDE))
+                converted.thumbnail((_IMAGE_MAX_SIDE, _IMAGE_MAX_SIDE))
             buf = io.BytesIO()
-            img.save(
+            converted.save(
                 buf,
                 format="JPEG",
                 quality=_IMAGE_JPEG_QUALITY,

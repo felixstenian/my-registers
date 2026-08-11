@@ -94,7 +94,7 @@ async def list_messages(
             dispatch = raw.get("dispatch") or {}
             fid = dispatch.get("nutrient_fact_id")
             if isinstance(fid, str):
-                nutrient_fact_id = fid  # type: ignore[assignment]
+                nutrient_fact_id = uuid.UUID(fid)
         out.append(
             MessageOut(
                 id=item.message.id,

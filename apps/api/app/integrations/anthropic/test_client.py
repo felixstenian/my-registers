@@ -19,12 +19,17 @@ from app.integrations.anthropic.client import LLMCallResult, NarrativeResult
 from app.schemas.llm import LLMEnvelope
 
 _QUEUE_RECORD_INTENT: deque[LLMEnvelope] = deque()
+_QUEUE_RECORD_ERROR: deque[str] = deque()
 _QUEUE_NARRATIVE: deque[str | None] = deque()
 _QUEUE_WEEKLY_NARRATIVE: deque[str | None] = deque()
 
 
 def queue_record_intent(envelope: LLMEnvelope) -> None:
     _QUEUE_RECORD_INTENT.append(envelope)
+
+
+def queue_record_error(error: str) -> None:
+    _QUEUE_RECORD_ERROR.append(error)
 
 
 def queue_narrative(text: str | None) -> None:
@@ -37,6 +42,7 @@ def queue_weekly_narrative(text: str | None) -> None:
 
 def clear_all_queues() -> None:
     _QUEUE_RECORD_INTENT.clear()
+    _QUEUE_RECORD_ERROR.clear()
     _QUEUE_NARRATIVE.clear()
     _QUEUE_WEEKLY_NARRATIVE.clear()
 
@@ -44,6 +50,7 @@ def clear_all_queues() -> None:
 def queue_sizes() -> dict[str, int]:
     return {
         "record_intent": len(_QUEUE_RECORD_INTENT),
+        "record_error": len(_QUEUE_RECORD_ERROR),
         "narrative": len(_QUEUE_NARRATIVE),
         "weekly_narrative": len(_QUEUE_WEEKLY_NARRATIVE),
     }
@@ -74,6 +81,17 @@ class TestAnthropicClient:
         images: list[tuple[str, bytes]] | None = None,
         max_semantic_retries: int = 1,
     ) -> LLMCallResult:
+        if _QUEUE_RECORD_ERROR:
+            error = _QUEUE_RECORD_ERROR.popleft()
+            return LLMCallResult(
+                envelope=None,
+                raw_tool_input=None,
+                tokens_input=0,
+                tokens_output=0,
+                model=self.model,
+                prompt_version=self.PROMPT_VERSION,
+                error=error,
+            )
         if not _QUEUE_RECORD_INTENT:
             return LLMCallResult(
                 envelope=None,
