@@ -40,9 +40,14 @@ export function PendingItemsModal({
   onChanged: () => void;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  // FE-01: antes, se a API falhava `busyId` resetava e nada acontecia na
+  // tela — usuário clicava sem resposta. Agora exibimos erro inline
+  // (role="alert") mantendo o item na lista.
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   async function confirm(item: FoodItemRef) {
     setBusyId(item.id);
+    setErrorMsg(null);
     // SP-117: endpoint dedicado só desmarca `needs_confirmation` (sem
     // recompute de macros — o item já tem os valores computados quando
     // foi criado). Idempotente.
@@ -50,14 +55,23 @@ export function PendingItemsModal({
       method: 'POST',
     });
     setBusyId(null);
-    if (result.ok) onChanged();
+    if (result.ok) {
+      onChanged();
+    } else {
+      setErrorMsg(result.error?.message ?? 'Não foi possível confirmar o item.');
+    }
   }
 
   async function discard(item: FoodItemRef) {
     setBusyId(item.id);
+    setErrorMsg(null);
     const result = await api(`/records/food-items/${item.id}`, { method: 'DELETE' });
     setBusyId(null);
-    if (result.ok) onChanged();
+    if (result.ok) {
+      onChanged();
+    } else {
+      setErrorMsg(result.error?.message ?? 'Não foi possível descartar o item.');
+    }
   }
 
   return (
@@ -83,6 +97,15 @@ export function PendingItemsModal({
             ×
           </button>
         </div>
+
+        {errorMsg && (
+          <p
+            role="alert"
+            className="mb-2 rounded border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
+          >
+            {errorMsg}
+          </p>
+        )}
 
         {items.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">

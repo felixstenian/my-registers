@@ -10,6 +10,7 @@
 
 import { expect, test } from './support/test';
 import { seedLunchMeal } from './support/seed';
+import { API_BASE } from './support/constants';
 
 test.beforeEach(async ({ resetDb, loginAdmin, page, queueLlm }) => {
   await resetDb();
@@ -51,7 +52,11 @@ test('encerra dia via modal e navega weekly -> day read-only', async ({
   // — usar isso confirma tambem o CTA. Alternativa seria clicar "Voltar"
   // e depois navegar, mas isso testa menos.
   await page.getByRole('link', { name: /ver semana/i }).click();
-  const today = new Date().toISOString().slice(0, 10);
+  // Obtém a data do backend (fonte de verdade) — o container pode estar
+  // em timezone diferente do host Playwright, e o weekly renderiza a data
+  // do servidor, não do cliente.
+  const todayRes = await page.request.get(`${API_BASE}/days/today`);
+  const today = ((await todayRes.json()) as { date: string }).date;
   const dayLink = page.locator(`a[href="/day/${today}"]`);
   await expect(dayLink).toBeVisible();
   await dayLink.click();
