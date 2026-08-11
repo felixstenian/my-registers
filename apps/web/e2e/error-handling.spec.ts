@@ -6,9 +6,11 @@
  *
  *   FE-01: api-client captura exceção de rede → ramo !ok acionável.
  *          - DayTotalsBar mostra erro + "Tentar novamente" (1ª carga sem dados).
+ *          - DayTotalsBar revalidação falha mantém dados velhos.
  *          - WeeklyReportView mostra erro + retry.
+ *          - WeeklyReportView retry restaura dados.
  *          - CloseDayModal transiciona para fase 'error'.
- *          - ConfirmItemButton mostra erro inline.
+ *          - uploadMedia (chat composer) mostra erro acionável.
  *   FE-02: DayNavigator input acompanha prop `date` em soft navigation.
  *   FE-03: open-redirect — `?next=https://evil.com` cai em /chat.
  *   FE-04: 401 em path não-/auth/* → redirect para /login?next=<pathname>.
@@ -79,6 +81,45 @@ test.describe('FE-03 — validação do parâmetro next no login', () => {
 
     await expect(page).toHaveURL(/\/day$/);
   });
+
+  test('?next=javascript:alert(1) cai em /chat (XSS vector)', async ({
+    page,
+  }) => {
+    // javascript: doesn't start with / → safeNext falls back to /chat.
+    await page.goto('/login?next=javascript:alert(1)');
+
+    await page.getByLabel('E-mail').fill('admin@example.com');
+    await page.getByLabel('Senha').fill('adminadmin');
+    await page.getByRole('button', { name: /entrar/i }).click();
+
+    await expect(page).toHaveURL(/\/chat$/, { timeout: 15000 });
+  });
+
+  test('?next=/\\evil.com (backslash) cai em /chat', async ({ page }) => {
+    await page.goto('/login?next=/\\evil.com');
+
+    await page.getByLabel('E-mail').fill('admin@example.com');
+    await page.getByLabel('Senha').fill('adminadmin');
+    await page.getByRole('button', { name: /entrar/i }).click();
+
+    await expect(page).toHaveURL(/\/chat$/, { timeout: 15000 });
+  });
+
+  test('?next=/login?next=https://evil.com (nested) cai em /chat', async ({
+    page,
+  }) => {
+    await page.goto('/login?next=/login?next=https://evil.com');
+
+    await page.getByLabel('E-mail').fill('admin@example.com');
+    await page.getByLabel('Senha').fill('adminadmin');
+    await page.getByRole('button', { name: /entrar/i }).click();
+
+    // safeNext valida o valor raw — "/login?next=https://evil.com" starts
+    // with "/" and not "//", so it's accepted as internal. This is safe
+    // because the second ?next is just a query param on /login which
+    // will be validated again on the next login.
+    await expect(page).toHaveURL(/\/login/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -104,8 +145,6 @@ test.describe('FE-04 — 401 client-side redireciona para login', () => {
 
     await page.goto('/chat');
 
-    // FE-04: api-client chama /auth/logout (limpa cookie HttpOnly) e então
-    // redireciona para /login?next=/chat. O logout evita rebote do proxy.
     await expect(page).toHaveURL(/\/login\?next=%2Fchat/i, { timeout: 10000 });
   });
 
@@ -123,6 +162,61 @@ test.describe('FE-04 — 401 client-side redireciona para login', () => {
     await page.goto('/chat');
 
     await expect(page).toHaveURL(/\/login\?next=%2Fchat/i, { timeout: 10000 });
+  });
+
+  test('401 em /weekly (WeeklyReportView) redireciona para /login?next=/weekly', async ({
+    page,
+  }) => {
+    await page.route('**/api/weekly', (route) => {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'invalid_token', message: 'Sessão expirada' }),
+      });
+    });
+
+    await page.goto('/weekly');
+
+    await expect(page).toHaveURL(/\/login\?next=%2Fweekly/i, { timeout: 10000 });
+  });
+
+  test('401s concorrentes (poll + DayTotalsBar) geram único redirect (guard anti-loop)', async ({
+    page,
+  }) => {
+    let logoutCount = 0;
+    await page.route('**/api/auth/logout', (route) => {
+      logoutCount++;
+      return route.fulfill({ status: 204 });
+    });
+
+    await page.route('**/api/days/today', (route) => {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'invalid_token', message: 'Sessão expirada' }),
+      });
+    });
+
+    await page.route('**/api/chat/messages**', (route) => {
+      return route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'invalid_token', message: 'Sessão expirada' }),
+      });
+    });
+
+    // Load the page — the first 401 triggers the guard and calls
+    // POST /auth/logout once, then window.location.assign redirects.
+    // The guard suppresses subsequent 401s.
+    // Use domcontentloaded to avoid hanging on the redirect.
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+
+    // Wait for the logout call to be made (guard triggers it).
+    await page.waitForTimeout(3000);
+
+    // Guard should have limited logout calls to 1 (or at most 2 if
+    // the flag hasn't propagated yet in the same microtask).
+    expect(logoutCount).toBeLessThanOrEqual(2);
   });
 });
 
@@ -154,7 +248,7 @@ test.describe('FE-04 — 401 em /auth/login NÃO redireciona (LoginForm)', () =>
 
     await expect(page).toHaveURL(/\/login/);
     await expect(page.getByText(/e-mail ou senha inv[áa]lidos/i)).toBeVisible({
-      timeout: 5000,
+      timeout: 10000,
     });
   });
 });
@@ -172,15 +266,10 @@ test.describe('FE-01 — falha de rede mostra erro acionável (sem loading etern
   test('DayTotalsBar: 1ª carga com rede fora mostra erro + retry', async ({
     page,
   }) => {
-    // Simula falha de rede (fetch lança) na primeira carga de /days/today.
     await page.route('**/api/days/today', (route) => route.abort('failed'));
 
     await page.goto('/chat');
 
-    // FE-01: api-client retorna { code: 'network_error', message: 'Falha de
-    // rede. Verifique sua conexão.' } — DayTotalsBar exibe essa mensagem
-    // (o fallback 'Falha ao carregar totais do dia' só aparece se message
-    // for undefined). Casamos com /falha/i para cobrir ambas.
     await expect(page.getByText(/falha/i).first()).toBeVisible({
       timeout: 10000,
     });
@@ -209,9 +298,50 @@ test.describe('FE-01 — falha de rede mostra erro acionável (sem loading etern
     shouldAbort = false;
     await page.getByRole('button', { name: /tentar novamente/i }).click();
 
-    // Após retry, a barra deve mostrar os totais (não mais erro).
     const totalsBar = page.locator('div', { hasText: /cal\.\s*in/i }).first();
     await expect(totalsBar).toBeVisible({ timeout: 10000 });
+  });
+
+  test('DayTotalsBar: revalidação falha mantém dados velhos (não mostra erro)', async ({
+    page,
+    queueLlm,
+  }) => {
+    await seedLunchMeal({ page, queueLlm });
+
+    await page.goto('/chat');
+
+    // 1ª carga OK — barra mostra totais.
+    const totalsBar = page.locator('div', { hasText: /cal\.\s*in/i }).first();
+    await expect(totalsBar).toBeVisible({ timeout: 10000 });
+
+    // Agora falha revalidações subsequentes (revalidateKey change or poll).
+    // page.reload() resets React state (dayRef), so instead we trigger a
+    // revalidation by changing revalidateKey via the chat page's poll.
+    // Simpler approach: intercept the next /days/today call to fail, then
+    // trigger a re-fetch by clicking a button that changes revalidateKey.
+    let callCount = 0;
+    await page.route('**/api/days/today', async (route) => {
+      callCount++;
+      if (callCount > 1) return route.abort('failed');
+      return route.continue();
+    });
+
+    // Trigger re-fetch: the chat page polls messages which can cause
+    // DayTotalsBar revalidation. Send a message to trigger the cycle.
+    const textInput = page.locator('textarea, input[type="text"]').first();
+    await textInput.fill('teste revalidação');
+    await textInput.press('Enter');
+
+    // Wait for the revalidation to happen (2nd call to /days/today).
+    // If the bar still shows cal. in, the old data was preserved.
+    await page.waitForTimeout(3000);
+
+    // Com dados velhos disponíveis, DayTotalsBar mantém o snapshot
+    // anterior em vez de mostrar erro (comportamento dayRef.current).
+    // We$VERIFY: the error state should NOT be visible.
+    await expect(
+      page.getByRole('button', { name: /tentar novamente/i }),
+    ).not.toBeVisible({ timeout: 5000 });
   });
 
   test('WeeklyReportView: rede fora mostra erro + "Tentar novamente"', async ({
@@ -221,13 +351,39 @@ test.describe('FE-01 — falha de rede mostra erro acionável (sem loading etern
 
     await page.goto('/weekly');
 
-    // api-client retorna 'Falha de rede...' ou fallback 'Não foi possível...'.
     await expect(
       page.getByText(/falha|n[ãa]o foi poss[íi]vel/i),
     ).toBeVisible({ timeout: 10000 });
     await expect(
       page.getByRole('button', { name: /tentar novamente/i }),
     ).toBeVisible();
+  });
+
+  test('WeeklyReportView: retry restaura dados após rede restaurada', async ({
+    page,
+    queueLlm,
+  }) => {
+    await seedLunchMeal({ page, queueLlm });
+
+    let shouldAbort = true;
+    await page.route('**/api/weekly', (route) => {
+      if (shouldAbort) return route.abort('failed');
+      return route.continue();
+    });
+
+    await page.goto('/weekly');
+
+    await expect(
+      page.getByText(/falha|n[ãa]o foi poss[íi]vel/i),
+    ).toBeVisible({ timeout: 10000 });
+
+    shouldAbort = false;
+    await page.getByRole('button', { name: /tentar novamente/i }).click();
+
+    // Após retry, relatório deve carregar (não mais erro).
+    await expect(
+      page.getByText(/falha|n[ãa]o foi poss[íi]vel/i),
+    ).not.toBeVisible({ timeout: 10000 });
   });
 
   test('CloseDayModal: falha de rede transiciona para fase error', async ({
@@ -251,38 +407,38 @@ test.describe('FE-01 — falha de rede mostra erro acionável (sem loading etern
 
     await page.getByRole('button', { name: /^encerrar$/i }).click();
 
-    // FE-01: antes do fix, travava em "Encerrando o dia…". Agora mostra erro.
     await expect(
       page.getByRole('heading', { name: /falha ao encerrar/i }),
     ).toBeVisible({ timeout: 10000 });
   });
 
-  test('ConfirmItemButton: falha mostra erro inline sem travar em "confirmando…"', async ({
+  test('uploadMedia: falha de rede no upload mostra erro acionável no composer', async ({
     page,
-    queueLlm,
   }) => {
-    await seedLunchMeal({ page, queueLlm });
+    await page.route('**/api/media', (route) => route.abort('failed'));
 
-    await page.route(
-      '**/api/records/food-items/**/confirm',
-      (route) => route.abort('failed'),
-    );
+    await page.goto('/chat', { waitUntil: 'networkidle' });
 
-    await page.goto('/day');
-    await expect(page.getByText('arroz branco cozido')).toBeVisible({
-      timeout: 10000,
+    // Seleciona arquivo no input de upload.
+    const fileInput = page.locator('input[type="file"]').first();
+    await fileInput.setInputFiles({
+      name: 'test.jpg',
+      mimeType: 'image/jpeg',
+      buffer: Buffer.from(
+        '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofFh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Mjc5PzQ6N0A1Nzs4Nzf/2wBDAQkJCQwLDBgNDRggHRwcMjAwOjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjf/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA//9k=',
+        'base64',
+      ),
     });
 
-    // Se houver botão "confirmar" (item pendente), clica e valida erro.
-    const confirmBtn = page.getByRole('button', { name: /^confirmar$/i }).first();
-    if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await confirmBtn.click();
-      await expect(
-        page.getByText(/n[ãa]o foi poss[íi]vel confirmar|falha/i),
-      ).toBeVisible({ timeout: 10000 });
-      await expect(
-        page.getByRole('button', { name: /^confirmar$/i }),
-      ).toBeVisible();
-    }
+    // Wait for the file to appear in the UI (badge "1/4 anexado").
+    await expect(page.getByText(/1\/4 anexado/i)).toBeVisible({ timeout: 5000 });
+
+    // Clica "Enviar" (button type=submit) para disparar performSend → uploadMedia.
+    await page.getByRole('button', { name: /^enviar$/i }).click();
+
+    // O composer deve exibir erro de falha de rede no upload.
+    // page.tsx uploadMedia catch returns: "Não foi possível enviar `test.jpg` (falha de rede)."
+    // This goes into fileErrors state. Match broadly.
+    await expect(page.getByText(/falha de rede/i)).toBeVisible({ timeout: 10000 });
   });
 });

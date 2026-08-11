@@ -130,6 +130,7 @@ test('login OK com ?next=/weekly preserva destino após autenticar (AC-013/US-00
   await page.getByRole('button', { name: /entrar/i }).click();
 
   // LoginForm respeita searchParams.next -> router.replace('/weekly').
-  await expect(page).toHaveURL(/\/weekly$/);
+  // Next.js client-side navigation can race with RSC — use longer timeout.
+  await expect(page).toHaveURL(/\/weekly$/, { timeout: 15000 });
 });
 
