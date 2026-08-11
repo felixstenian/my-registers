@@ -275,7 +275,7 @@ test('TC-E-004: composer mantém foco e limpa texto após envio', async ({
 // TC-E-005 — Mídias enviadas aparecem como imagens na mensagem do usuário
 // ---------------------------------------------------------------------------
 
-test('TC-E-005: mídias enviadas aparecem como <img> com URL presigned na mensagem do usuário', async ({
+test('TC-E-005: mídias enviadas renderizam como <img> com URL presigned na mensagem do usuário', async ({
   page,
   queueLlm,
 }) => {
@@ -302,12 +302,30 @@ test('TC-E-005: mídias enviadas aparecem como <img> com URL presigned na mensag
     },
   });
 
+  // As presigned URLs geradas pelo backend apontam para http://minio:9000
+  // (rede interna do Docker), inacessível pelo browser no host. Sem isso,
+  // as <img> carregam com src válido mas a imagem fica quebrada (broken
+  // image). Interceptamos a request e servimos uma imagem de teste 50x50
+  // para validar a renderização real, não apenas a presença do <img>.
+  const testPng50 = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAIAAACRXR/mAAAAaUlEQVR4nM3OQREAIAzAsFKF83+IwQD/NQpy7gw9kiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJkiRJbgf+HqeVAeCHENgUAAAAAElFTkSuQmCC',
+    'base64',
+  );
+  await page.route('**/registers-media/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      body: testPng50,
+    });
+  });
+
   await page.goto('/chat');
 
   const composer = page.getByPlaceholder(/150 g de arroz/i);
   await composer.fill('almoço com foto');
 
-  // Anexa 2 fotos via input file.
+  // Anexa 2 fotos via input file (1x1 PNG para upload; a renderização
+  // usa a imagem interceptada pelo route acima).
   const minPng = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
     'base64',
@@ -332,13 +350,31 @@ test('TC-E-005: mídias enviadas aparecem como <img> com URL presigned na mensag
 
   // Cada <img> deve ter src com URL presigned do MinIO (contém assinatura
   // AWS S3 v4 — query params X-Amz-Signature e X-Amz-Date).
-  for (let i = 0; i < 2; i++) {
+  for (let i =  0; i < 2; i++) {
     const src = await chatImages.nth(i).getAttribute('src');
     expect(src).toBeTruthy();
     expect(src).toMatch(/X-Amz-Signature=/);
     expect(src).toMatch(/X-Amz-Date=/);
     // Path inclui o bucket e o padrão users/{uid}/media/...
     expect(src).toContain('/registers-media/users/');
+  }
+
+  // Valida que as imagens renderizaram de fato (não broken). O browser
+  // decodifica o PNG e popula naturalWidth/naturalHeight. Broken images
+  // têm naturalWidth === 0. A imagem de teste é 50x50.
+  for (let i = 0; i < 2; i++) {
+    await expect(chatImages.nth(i)).toHaveJSProperty('naturalWidth', 50);
+    await expect(chatImages.nth(i)).toHaveJSProperty('naturalHeight', 50);
+  }
+
+  // Visual: as <img> devem ter width/height renderizados (> 0) com o
+  // CSS max-h-40. Validamos que o box não está colapsado (broken imgs
+  // podem ter 0x0 layout box em alguns browsers).
+  for (let i = 0; i < 2; i++) {
+    const box = await chatImages.nth(i).boundingBox();
+    expect(box).toBeTruthy();
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.height).toBeGreaterThan(0);
   }
 
   // Assistant chega (confirma que o envio foi processado pelo backend).
