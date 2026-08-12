@@ -1,6 +1,6 @@
-> Gerado em: 2026-07-28
-> Origem: `specs/001-mvp-registro-diario/spec.md` (SP-01..SP-155) + implementação em `apps/api/app/` e `apps/web/src/`
-> Total de features: 23
+> Gerado em: 2026-08-12
+> Origem: `specs/001-mvp-registro-diario/spec.md` (SP-01..SP-155) + `specs/002-edicao-inline-day/spec.md` (SP-160..SP-169, INV-14) + implementação em `apps/api/app/` e `apps/web/src/`
+> Total de features: 24
 
 # Índice de Features — my-registers
 
@@ -66,6 +66,7 @@ Convenções e diferença para `specs/001-mvp-registro-diario/`:
 |---|---|---|---|
 | [Correção de registros](./record-correction/requirements.md) | SP-70..SP-74 | stable | `record-correction/` |
 | [Remoção de registros (soft delete)](./record-deletion/requirements.md) | SP-80..SP-82 | stable | `record-deletion/` |
+| [Edição inline de registros no /day](./inline-record-editing/requirements.md) | SP-160..SP-169, INV-14 | documented-only | `inline-record-editing/` |
 
 ### 📅 Consulta e Fechamento de Dias
 
@@ -138,9 +139,10 @@ Convenções e diferença para `specs/001-mvp-registro-diario/`:
 
 - [Recuperação manual de itens sem catálogo](./manual-catalog-recovery/requirements.md) — SP-140..142 em `feat/bloco-5-catalog-recovery` (T-B510..T-B513 e T-B520 commitados; fluxo end-to-end ainda em revisão pré-merge).
 
-### 📄 Documented Only (1)
+### 📄 Documented Only (2)
 
 - [Treino estruturado (sessão → exercícios → séries)](./workout-session-tracking/requirements.md) — SP-120..127 (Bloco 3) especificados desde v1.2 mas sem implementação; aguarda decisão de priorização pós Fase 10 e ADR-004.
+- [Edição inline de registros no /day](./inline-record-editing/requirements.md) — SP-160..SP-169, INV-14 (Bloco 7) especificados em `specs/features/inline-record-editing/` (+ SDD rascunho em `specs/002-edicao-inline-day/`); estende §3.15 da spec 001 (página `/day`). Backend já tem PATCH food-items + PATCH nutrient-facts; faltam PATCH water/beverage/activity, propagação do nutrient-fact, e UI inline.
 
 ### ❌ Deprecated (0)
 
@@ -172,6 +174,7 @@ Ordem numérica dos SPs para busca rápida a partir da spec canônica:
 | SP-128..SP-135 | [pwa-installability-offline](./pwa-installability-offline/) |
 | SP-140..SP-142 | [manual-catalog-recovery](./manual-catalog-recovery/) |
 | SP-150..SP-155 | [daily-detail-view](./daily-detail-view/) |
+| SP-160..SP-169 | [inline-record-editing](./inline-record-editing/) |
 
 ## Invariantes globais → feature primária
 
@@ -189,6 +192,7 @@ Ordem numérica dos SPs para busca rápida a partir da spec canônica:
 | INV-10 (audit total) | [audit-trail](./audit-trail/) | record-correction, record-deletion, food-logging, water-tracking, caloric-beverages, activity-cardio-logging |
 | INV-11 (SW não cacheia /api/*) | [pwa-installability-offline](./pwa-installability-offline/) | — |
 | INV-12/13 (workout invariantes) | [workout-session-tracking](./workout-session-tracking/) | — |
+| INV-14 (edição de fact propaga a registros vivos) | [inline-record-editing](./inline-record-editing/) | record-correction, daily-snapshot |
 
 ---
 
