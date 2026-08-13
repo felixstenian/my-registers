@@ -126,9 +126,7 @@ async def test_patch_water_closed_day_409(
     await db_session.commit()
 
     await _login(client)
-    resp = await client.patch(
-        f"/records/water/{result.record.id}", json={"volume_ml": 500}
-    )
+    resp = await client.patch(f"/records/water/{result.record.id}", json={"volume_ml": 500})
     assert resp.status_code == 409
     assert resp.json()["code"] == "conflict_closed_day"
 
@@ -237,9 +235,7 @@ async def test_patch_beverage_closed_day_409(
     await db_session.commit()
 
     await _login(client)
-    resp = await client.patch(
-        f"/records/beverage/{result.record.id}", json={"volume_ml": 200}
-    )
+    resp = await client.patch(f"/records/beverage/{result.record.id}", json={"volume_ml": 200})
     assert resp.status_code == 409
 
 
@@ -276,9 +272,7 @@ async def test_patch_activity_updates_duration(
     old_kcal = record.kcal_burned
 
     await _login(client)
-    resp = await client.patch(
-        f"/records/activity/{record.id}", json={"duration_minutes": 60}
-    )
+    resp = await client.patch(f"/records/activity/{record.id}", json={"duration_minutes": 60})
     assert resp.status_code == 200
     body = resp.json()
     assert body["duration_minutes"] == 60.0
@@ -300,9 +294,7 @@ async def test_patch_activity_updates_intensity(
     moderate_kcal = record.kcal_burned
 
     await _login(client)
-    resp = await client.patch(
-        f"/records/activity/{record.id}", json={"intensity": "light"}
-    )
+    resp = await client.patch(f"/records/activity/{record.id}", json={"intensity": "light"})
     assert resp.status_code == 200
     body = resp.json()
     # light: 6.0 × 80 × 40/60 = 320.00
@@ -318,9 +310,7 @@ async def test_patch_activity_explicit_kcal_override(
     record = await _create_activity(db_session, user, dl.id)
 
     await _login(client)
-    resp = await client.patch(
-        f"/records/activity/{record.id}", json={"kcal_burned": 500}
-    )
+    resp = await client.patch(f"/records/activity/{record.id}", json={"kcal_burned": 500})
     assert resp.status_code == 200
     body = resp.json()
     assert body["kcal"] == 500.0
@@ -356,15 +346,11 @@ async def test_patch_activity_closed_day_409(
     await db_session.commit()
 
     await _login(client)
-    resp = await client.patch(
-        f"/records/activity/{record.id}", json={"duration_minutes": 50}
-    )
+    resp = await client.patch(f"/records/activity/{record.id}", json={"duration_minutes": 50})
     assert resp.status_code == 409
 
 
-async def test_patch_activity_not_found(
-    client: AsyncClient, admin_user, db_session: AsyncSession
-):
+async def test_patch_activity_not_found(client: AsyncClient, admin_user, db_session: AsyncSession):
     await _login(client)
     import uuid
 

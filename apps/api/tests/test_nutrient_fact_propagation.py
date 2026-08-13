@@ -81,9 +81,7 @@ async def _create_manual_fact(
     return fact
 
 
-async def _create_food_item(
-    session: AsyncSession, user, dl_id, fact_id, grams=100
-) -> FoodItem:
+async def _create_food_item(session: AsyncSession, user, dl_id, fact_id, grams=100) -> FoodItem:
     """Create a FoodItem directly, linked to a specific NutrientFact."""
     from app.models import FoodItem, FoodRecord
 
@@ -130,9 +128,7 @@ async def _create_food_item(
     return item
 
 
-async def _create_beverage_record(
-    session: AsyncSession, user, dl_id, fact_id, volume_ml=200
-):
+async def _create_beverage_record(session: AsyncSession, user, dl_id, fact_id, volume_ml=200):
     from app.integrations.nutrition.catalog import CatalogHit
     from app.models import BeverageRecord
     from app.services.nutrition_calculator import NutritionCalculator
@@ -140,9 +136,7 @@ async def _create_beverage_record(
     fact = await session.get(NutrientFact, fact_id)
     assert fact is not None
     hit = CatalogHit.from_model(fact)
-    computed = NutritionCalculator.compute(
-        hit=hit, grams=None, ml=Decimal(str(volume_ml))
-    )
+    computed = NutritionCalculator.compute(hit=hit, grams=None, ml=Decimal(str(volume_ml)))
 
     record = BeverageRecord(
         user_id=user.id,
@@ -228,12 +222,13 @@ async def test_patch_nutrient_fact_propagates_to_beverages(
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user)
     fact = await _create_manual_fact(
-        db_session, admin_user, canonical_name="leite_integral", kcal=Decimal("57"),
+        db_session,
+        admin_user,
+        canonical_name="leite_integral",
+        kcal=Decimal("57"),
         basis="per_100ml",
     )
-    record = await _create_beverage_record(
-        db_session, admin_user, dl.id, fact.id, volume_ml=200
-    )
+    record = await _create_beverage_record(db_session, admin_user, dl.id, fact.id, volume_ml=200)
     await db_session.commit()
     # 57 × 200/100 = 114
     assert record.kcal == Decimal("114.00")

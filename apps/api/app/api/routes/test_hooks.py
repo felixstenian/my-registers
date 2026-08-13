@@ -157,9 +157,9 @@ async def set_weight(
     from app.models import User
 
     await session.execute(
-        update(User).where(User.email == get_settings().default_admin_email).values(
-            weight_kg=Decimal(str(payload.weight_kg))
-        )
+        update(User)
+        .where(User.email == get_settings().default_admin_email)
+        .values(weight_kg=Decimal(str(payload.weight_kg)))
     )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

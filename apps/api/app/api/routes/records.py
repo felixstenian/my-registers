@@ -201,9 +201,7 @@ async def patch_food_item(
             hit = CatalogHit.from_model(fact) if fact else None
         else:
             catalog = LocalTBCACatalog(session)
-            hit = await catalog.lookup(
-                LookupQuery(name=item.normalized_name, brand=item.brand)
-            )
+            hit = await catalog.lookup(LookupQuery(name=item.normalized_name, brand=item.brand))
             if hit is not None:
                 item.catalog_ref_id = uuid.UUID(hit.fact_id)
         computed = NutritionCalculator.compute(hit=hit, grams=item.grams, ml=item.ml)
@@ -368,14 +366,10 @@ async def patch_beverage(
         hit = CatalogHit.from_model(fact) if fact else None
     else:
         catalog = LocalTBCACatalog(session)
-        hit = await catalog.lookup(
-            LookupQuery(name=record.normalized_name, brand=record.brand)
-        )
+        hit = await catalog.lookup(LookupQuery(name=record.normalized_name, brand=record.brand))
         if hit is not None:
             record.catalog_ref_id = uuid.UUID(hit.fact_id)
-    computed = NutritionCalculator.compute(
-        hit=hit, grams=None, ml=Decimal(str(record.volume_ml))
-    )
+    computed = NutritionCalculator.compute(hit=hit, grams=None, ml=Decimal(str(record.volume_ml)))
     for field in (
         "kcal",
         "protein_g",
@@ -489,9 +483,7 @@ async def patch_activity(
         return RecordSummary(
             id=record.id,
             kcal=float(record.kcal_burned) if record.kcal_burned else None,
-            duration_minutes=float(record.duration_minutes)
-            if record.duration_minutes
-            else None,
+            duration_minutes=float(record.duration_minutes) if record.duration_minutes else None,
         )
 
     await session.flush()
@@ -520,7 +512,5 @@ async def patch_activity(
     return RecordSummary(
         id=record.id,
         kcal=float(record.kcal_burned) if record.kcal_burned else None,
-        duration_minutes=float(record.duration_minutes)
-        if record.duration_minutes
-        else None,
+        duration_minutes=float(record.duration_minutes) if record.duration_minutes else None,
     )

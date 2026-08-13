@@ -119,9 +119,7 @@ class NutrientFactPropagationService:
                 continue
 
             before = {f: _dec(getattr(item, f)) for f in _MACRO_FIELDS}
-            computed = NutritionCalculator.compute(
-                hit=hit, grams=item.grams, ml=item.ml
-            )
+            computed = NutritionCalculator.compute(hit=hit, grams=item.grams, ml=item.ml)
             for f in _MACRO_FIELDS:
                 setattr(item, f, getattr(computed, f))
             item.source = "user_corrected"
