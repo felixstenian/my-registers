@@ -3,9 +3,16 @@
 // elemento <details> HTML nativo pra colapso/expansão. Zero JS extra.
 
 import { fmtAmount, fmtConfidence, fmtGrams, fmtKcal, fmtMg } from './format';
+import { EditFoodItemForm } from './edit-forms';
 import { SOURCE_LABEL_PT, type FoodItem } from './types';
 
-export function FoodItemRow({ item }: { item: FoodItem }) {
+export function FoodItemRow({
+  item,
+  dayClosed = false,
+}: {
+  item: FoodItem;
+  dayClosed?: boolean;
+}) {
   const amount = fmtAmount(item.grams, item.ml, item.quantity, item.unit);
   const showMicros =
     (item.sodium_mg ?? 0) > 0 ||
@@ -55,6 +62,8 @@ export function FoodItemRow({ item }: { item: FoodItem }) {
           <MicroRow label="Confiança da LLM" value={fmtConfidence(item.confidence)} />
         )}
       </div>
+
+      <EditFoodItemForm item={item} dayClosed={dayClosed} />
     </details>
   );
 }

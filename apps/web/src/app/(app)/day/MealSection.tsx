@@ -6,7 +6,15 @@ import { FoodItemRow } from './FoodItemRow';
 import { fmtKcal, fmtTime } from './format';
 import { MEAL_SLOT_LABEL_PT, type FoodRecord, type MealSlot } from './types';
 
-export function MealSection({ slot, records }: { slot: MealSlot; records: FoodRecord[] }) {
+export function MealSection({
+  slot,
+  records,
+  dayClosed = false,
+}: {
+  slot: MealSlot;
+  records: FoodRecord[];
+  dayClosed?: boolean;
+}) {
   if (records.length === 0) return null;
 
   const kcalSum = records.reduce(
@@ -51,7 +59,9 @@ export function MealSection({ slot, records }: { slot: MealSlot; records: FoodRe
         </span>
       </div>
 
-      {records.flatMap((rec) => rec.items.map((item) => <FoodItemRow key={item.id} item={item} />))}
+      {records.flatMap((rec) =>
+        rec.items.map((item) => <FoodItemRow key={item.id} item={item} dayClosed={dayClosed} />),
+      )}
     </section>
   );
 }

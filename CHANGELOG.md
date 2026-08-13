@@ -19,6 +19,9 @@ Cada release tem tag Git `vX.Y.Z` e uma entrada correspondente em [GitHub Releas
 
 ## [Unreleased]
 
+### Adicionado
+- **SP-160..SP-169** — Edição inline de registros no `/day`: formulários expansíveis (`<details>`) para food items, água, bebidas e atividades. PATCH endpoints com recompute de snapshot + auditoria. Propagação de `nutrient_fact` (INV-14) para itens em dias abertos. E2E tests no Playwright.
+
 ## [1.3.0] — 2026-07-27
 
 Segunda onda pós-MVP: fecha a cauda funcional (encerrar dia + semanal) e liga o pipeline CI/CD.

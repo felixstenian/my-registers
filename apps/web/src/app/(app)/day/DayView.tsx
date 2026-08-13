@@ -30,6 +30,8 @@ export function DayView({
     data.records.beverage.length === 0 &&
     data.records.activity.length === 0;
 
+  const dayClosed = data.status === 'closed';
+
   return (
     <main className="mx-auto max-w-4xl space-y-4 p-4">
       <RefreshOnFocus />
@@ -67,12 +69,13 @@ export function DayView({
               key={slot}
               slot={slot}
               records={foodBySlot[slot] ?? []}
+              dayClosed={dayClosed}
             />
           ))}
 
-          <HydrationSection records={data.records.water} />
-          <BeverageSection records={data.records.beverage} />
-          <ActivitySection records={data.records.activity} />
+          <HydrationSection records={data.records.water} dayClosed={dayClosed} />
+          <BeverageSection records={data.records.beverage} dayClosed={dayClosed} />
+          <ActivitySection records={data.records.activity} dayClosed={dayClosed} />
 
           {data.narrative && <NarrativeCard text={data.narrative} />}
         </>

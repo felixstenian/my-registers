@@ -31,6 +31,13 @@ export interface FoodItem {
   has_catalog: boolean;
   is_estimate: boolean;
   source: string;
+  // SP-167: per-100g values + fact source for inline editing.
+  catalog_ref_id: string | null;
+  fact_source: string | null;
+  fact_kcal: number | null;
+  fact_protein_g: number | null;
+  fact_carbs_g: number | null;
+  fact_fat_g: number | null;
 }
 
 export interface FoodRecord {

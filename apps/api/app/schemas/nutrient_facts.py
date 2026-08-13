@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -48,6 +48,11 @@ class NutrientFactOut(BaseModel):
     calcium_mg: float | None
     iron_mg: float | None
     potassium_mg: float | None
+
+    # SP-163 / INV-14: propagation summary after PATCH.
+    propagated_food_items: int = 0
+    propagated_beverage_records: int = 0
+    propagation_skipped: list[dict[str, Any]] = []
 
 
 _CANONICAL_NAME_PATTERN = re.compile(r"^[a-z0-9_]+$")
