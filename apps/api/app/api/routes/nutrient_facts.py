@@ -92,7 +92,18 @@ async def patch_nutrient_fact(
         after=after,
     )
 
-    return NutrientFactOut.model_validate(fact)
+    # SP-163 / INV-14: propagate updated per-100g/ml values to all live
+    # food_items and beverage_records referencing this fact.
+    from app.services.nutrient_fact_propagation import NutrientFactPropagationService
+
+    propagation = NutrientFactPropagationService(session)
+    prop_result = await propagation.propagate(user_id=current_user.id, fact=fact)
+
+    out = NutrientFactOut.model_validate(fact)
+    out.propagated_food_items = prop_result.propagated_food_items
+    out.propagated_beverage_records = prop_result.propagated_beverage_records
+    out.propagation_skipped = prop_result.propagation_skipped
+    return out
 
 
 def _dec(value: Decimal | None) -> float | None:

@@ -23,6 +23,7 @@ disparar a interação na UI.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -139,3 +140,26 @@ async def queue_llm_response(payload: QueueLlmRequest) -> Response:
 async def queue_llm_status() -> QueueStatusResponse:
     _require_test_env()
     return QueueStatusResponse(**fake.queue_sizes())
+
+
+class SetWeightRequest(BaseModel):
+    weight_kg: float = Field(gt=0, le=500)
+
+
+@router.post("/set-weight", status_code=status.HTTP_204_NO_CONTENT)
+async def set_weight(
+    payload: SetWeightRequest,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    _require_test_env()
+    from sqlalchemy import update
+
+    from app.models import User
+
+    await session.execute(
+        update(User).where(User.email == get_settings().default_admin_email).values(
+            weight_kg=Decimal(str(payload.weight_kg))
+        )
+    )
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
