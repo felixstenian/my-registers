@@ -17,12 +17,12 @@ Fluxo canônico ao adicionar comportamento: `spec:` PR → `plan:` PR → `tasks
 
 Documentos SDD e commits estão em pt-BR — matenha esse padrão. Código, identificadores e comentários no código são em inglês (regra global do usuário).
 
-**Estado atual (2026-07-28, release v1.3.0):** MVP em produção em `https://myregister.felix.dev.br`.
+**Estado atual (2026-08-12, release v1.4.0):** MVP em produção em `https://myregister.felix.dev.br`.
 
 - **Fases 0-9 concluídas** — bootstrap → hardening/deploy. T-908 (smoke test em VPS real) depende do operador.
 - **Fase 10 (CI/CD) concluída** via PR #34: `.github/workflows/ci.yml` (jobs paralelos `api` — Postgres 16 service + ruff + pytest — e `web` — typecheck + build + `verify:sw`) e `.github/workflows/deploy.yml` (SSH deploy pós-CI verde em `main`, com smoke em `/api/health`). Setup manual pendente (T-1003 branch protection + T-1004 chave SSH deploy-only) documentado em `docs/fase-10-setup.md` e `docs/deploy.md` §14.
-- **Blocos pós-MVP entregues**: Bloco 1 (composer/envio), Bloco 2 (renderização de assistant messages), Bloco 4 (PWA básico — instalável, shell offline, INV-11), Bloco 6 (visão detalhada do dia + navegação temporal, SP-150..155, PRs #43 #44). Fase 4.b (leitura de rótulo nutricional) e UIs T-704/T-804 (encerrar dia + relatório semanal) também no ar.
-- **Em andamento — branch `feat/bloco-5-catalog-recovery`**: Bloco 5 (recuperação de itens sem catálogo, SP-140..142) — spec reformulada removeu fluxo de confirmação e acoplou foto de rótulo com promoção; T-B510..T-B513 já commitados, T-B520 (`promote_food_item_id` no `POST /chat/messages`) recém-feito.
+- **Blocos pós-MVP entregues**: Bloco 1 (composer/envio), Bloco 2 (renderização de assistant messages), Bloco 4 (PWA básico — instalável, shell offline, INV-11), Bloco 5 (recuperação de itens sem catálogo, SP-140..142, PRs #38 #45), Bloco 6 (visão detalhada do dia + navegação temporal, SP-150..155, PRs #43 #44), Bloco 7 (edição inline de registros no `/day`, SP-160..169, PRs #54 #55). Fase 4.b (leitura de rótulo nutricional), UIs T-704/T-804 (encerrar dia + relatório semanal) e testes E2E Playwright (#48 #51 #53) também no ar.
+- **Hotfixes de prod formalizados em v1.4.0**: #37 (`scripts/bootstrap.sh` agora roda `seed-nutrition` — macros zerados; fluxo "confirmar item" do #37 foi substituído pela recuperação card do Bloco 5 — endpoint `POST /records/food-items/{id}/confirm` removido), #41 (imagens do chat bloqueadas por CSP → nginx `location /media/` + `S3_PUBLIC_BASE_URL`).
 - **Especificado, ainda não implementado**: Bloco 3 (workout tracking, SP-120..127). Ver `tasks.md`.
 
 Ao encarar uma tarefa, sempre reconciliar com `tasks.md` (fonte de verdade) e com `CHANGELOG.md` — este bloco pode ficar defasado entre releases.

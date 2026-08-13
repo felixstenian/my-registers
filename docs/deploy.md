@@ -69,18 +69,33 @@ docker compose -f docker-compose.production.yml --env-file .env.production up -d
 Estado esperado após ~30s (usando `docker compose ps`):
 ```
 NAME              STATUS
-my-registers-nginx-1    Up (healthy)
-my-registers-api-1      Up (healthy)
-my-registers-web-1      Up
-my-registers-postgres-1 Up (healthy)
-my-registers-minio-1    Up (healthy)
-my-registers-certbot-1  Up
+my-registers-nginx-1        Up (healthy)
+my-registers-api-1          Up (healthy)
+my-registers-web-1          Up
+my-registers-postgres-1     Up (healthy)
+my-registers-minio-1        Up (healthy)
+my-registers-minio-init-1   Exited (0)     # roda uma vez e sai — normal
+my-registers-certbot-1      Up
 ```
+
+> ⚠️ **`minio-init` precisa aparecer** — é o serviço que cria o bucket
+> `registers-media` no primeiro boot. Se você deployar com um compose
+> antigo que não tem esse service, o upload de imagem quebra com
+> `NoSuchBucket` (Internal Server Error). Fix manual em
+> `docs/fix-minio-bucket-prod.md`.
+
+> ⚠️ **`S3_PUBLIC_BASE_URL` no `.env.production` precisa apontar pra
+> `https://$DOMAIN/media`** — sem isso, as URLs de imagem geradas ficam
+> em `http://minio:9000/...` (host interno, inatingível pelo browser),
+> disparando `blocked:csp` no console. O nginx tem `location /media/`
+> que faz proxy interno. Ver `.env.production.example` e
+> `infra/nginx/conf.d/app.conf`.
 
 Testes de fumaça:
 - `curl -I https://$DOMAIN/` → 200 + `Strict-Transport-Security` presente.
 - `curl -fsS https://$DOMAIN/api/health` → `{"status":"ok"}`.
 - Login manual pelo browser em `https://$DOMAIN/login` com o admin default.
+- **Upload de imagem**: no chat, anexa uma foto e envia. A mensagem deve exibir a imagem renderizada (não broken image). Ver `docs/fix-minio-bucket-prod.md` se falhar.
 
 ## 7. Backups (cron do host)
 

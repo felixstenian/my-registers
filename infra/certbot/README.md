@@ -29,6 +29,19 @@ um template mínimo HTTP.
 > como nos comandos abaixo. Isso substitui o entrypoint só naquela
 > execução; o daemon continua funcionando pro renew automático.
 
+> ⚠️ **Armadilha do entrypoint em daemon-mode.**
+>
+> O serviço `certbot` do compose declara um `entrypoint` custom que roda
+> um loop `while :; do certbot renew; sleep 12h; done` — perfeito pra
+> renovação automática, mas **ignora silenciosamente qualquer comando
+> que você passar via `run`**. Sem `--entrypoint certbot`, o comando
+> `certonly` da primeira emissão é descartado e o container só executa
+> o loop de renovação (que não faz nada porque não tem cert ainda).
+>
+> **Solução:** passe `--entrypoint certbot` em toda invocação `run`,
+> como nos comandos abaixo. Isso substitui o entrypoint só naquela
+> execução; o daemon continua funcionando pro renew automático.
+
 Passo a passo (uma vez só na vida da VPS):
 
 ```bash
