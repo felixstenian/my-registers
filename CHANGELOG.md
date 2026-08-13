@@ -20,7 +20,53 @@ Cada release tem tag Git `vX.Y.Z` e uma entrada correspondente em [GitHub Releas
 ## [Unreleased]
 
 ### Adicionado
-- **SP-160..SP-169** — Edição inline de registros no `/day`: formulários expansíveis (`<details>`) para food items, água, bebidas e atividades. PATCH endpoints com recompute de snapshot + auditoria. Propagação de `nutrient_fact` (INV-14) para itens em dias abertos. E2E tests no Playwright.
+— _vazio — próxima release_
+
+---
+
+## [1.4.0] — 2026-08-12
+
+Terceira onda pós-MVP: fecha a visão item-a-item do dia (Blocos 5/6/7), adiciona navegação temporal e valida o golden path end-to-end com Playwright. Dois hotfixes de prod (#37, #41) finalmente formalizados em release.
+
+### Adicionado
+- **Bloco 5 — Recuperação de itens sem catálogo (SP-140..SP-142)** — Quando a LLM classifica `no_catalog_hit`, a assistant message traz prompt claro com 3 CTAs por item (`Cadastrar manual` · `Foto do rótulo` · `Descartar`). Form manual cria `nutrient_fact` sem foto; `promote_food_item_id` no `POST /chat/messages` promove item legacy para o novo catálogo. Fluxo de confirmação legado removido. Spec §3.14 ([#38](https://github.com/felixstenian/my-registers/pull/38)); implementação [#45](https://github.com/felixstenian/my-registers/pull/45)).
+- **Bloco 6 — Visão detalhada do dia (SP-150..SP-154)** — Nova rota `/day/[date]` que lista item-por-item (food, água, bebidas, atividades) com macros + micros, totais do dia, badge de dia fechado. Revive parcialmente o T-409 (records item-a-item) que ficou fora do MVP. Spec §3.15 ([#40](https://github.com/felixstenian/my-registers/pull/40)); implementação [#43](https://github.com/felixstenian/my-registers/pull/43)).
+- **SP-155 — Navegação temporal no `/day`** — Botões prev/next, date picker e link a partir do `/weekly`. Fecha o loop de acesso: antes só se chegava em dias passados digitando URL. [#44](https://github.com/felixstenian/my-registers/pull/44).
+- **Bloco 7 — Edição inline de registros no `/day` (SP-160..SP-169)** — Formulários expansíveis (`<details>`) para corrigir food items (grams/ml/quantity), água (volume_ml), bebidas (volume_ml) e atividades (duration_min) direto na página. PATCH endpoints `PATCH /records/{food|water|beverage|activity}/{id}` com recompute de snapshot (Art. III §10) + auditoria (`action='correct'`, `actor='user'`). Propagação de `nutrient_fact` (INV-14) para itens em dias abertos quando o catálogo é atualizado — usuário corrige valor lido da foto do rótulo sem voltar ao chat. E2E tests no Playwright. Spec [#54](https://github.com/felixstenian/my-registers/pull/54)); implementação [#55](https://github.com/felixstenian/my-registers/pull/55)).
+- **Testes E2E — autenticação & sessão (SP-01, SP-02, SP-03, SP-04, SP-06)** — Playwright cobrindo login, sessão persistente, logout, redirect 401, refresh de sessão. [#51](https://github.com/felixstenian/my-registers/pull/51)).
+- **Testes E2E — chat-messaging (TC-E-001..TC-E-004)** — Envio de texto, upload de mídia, polling de resposta, renderização de assistant message. [#53](https://github.com/felixstenian/my-registers/pull/53)).
+- **Testes do CLI bootstrap (TC-U-001..010, TC-I-001..003)** — 11 unitários (incl. helpers hash/verify Argon2id) + 3 integração com Postgres real. [#52](https://github.com/felixstenian/my-registers/pull/52)).
+- **Testes E2E golden path — 5 specs + CI job** — Login → registrar refeição → ver dia → encerrar dia → semana → dia passado read-only. `TestAnthropicClient` HTTP-controlável responde de fila enfileirada pelo Playwright (zero custo, zero flake por variação de LLM, alinhado à Art. II). Job `e2e` adicionado ao `ci.yml`. [#48](https://github.com/felixstenian/my-registers/pull/48)).
+
+### Corrigido
+- **#37 — Macros zerados em prod** — `scripts/bootstrap.sh` só chamava `python -m app.cli bootstrap` (cria admin), nunca `seed-nutrition`. Em prod `nutrient_facts` ficava vazio, `MealService.create_from_llm` fazia lookup vazio, `NutritionCalculator.compute(hit=None)` devolvia zeros e itens persistiam com `kcal=0`/`catalog_ref_id=NULL`. Fix: `bootstrap.sh` agora chama `seed-nutrition` após `bootstrap` (ambos idempotentes); todo deploy garante catálogo populado. [#37](https://github.com/felixstenian/my-registers/pull/37)).
+- **#37 — Confirmar item não desmarca `needs_confirmation`** — `PendingItemsModal` chamava `PATCH /food-items/{id}` com `{quantity: N}` que era no-op silencioso (backend só desmarcava a flag no branch `if grams/ml`). Fix: novo endpoint `POST /records/food-items/{id}/confirm` dedicado (idempotente: 2ª chamada retorna `already_confirmed=true`). Bônus: `PATCH /food-items/{id}` agora sempre tenta lookup pelo `normalized_name` — itens criados em prod antes do seed ficavam presos com `catalog_ref_id=NULL`, agora recuperam macros. 4 testes novos. [#37](https://github.com/felixstenian/my-registers/pull/37)).
+- **#41 — Imagens do chat bloqueadas por CSP + host interno do MinIO** — URL assinada gerada pelo MinIO vinha `http://minio:9000/...` (host da rede docker interna, inatingível pelo browser) e mesmo se fosse, `img-src 'self'` bloqueava o host. Fix estrutural: nginx `location /media/` faz proxy interno para `http://minio:9000/` com `Cache-Control private, max-age=3600` (aproveita o expiry de 1h da URL assinada). Nova var de env `S3_PUBLIC_BASE_URL` reescreve o host da URL assinada de `minio:9000` para o domínio público, mantendo assinatura. Zero mudança de CSP. [#41](https://github.com/felixstenian/my-registers/pull/41)).
+- **#46 — Encerrar dia passado quando ainda aberto** — Botão "Encerrar dia" só aparecia em `/day` para o dia atual; usuário que esqueceu de encerrar um dia anterior não tinha como resolver retroativamente pela UI. Fix: o botão aparece em qualquer dia com `status='open'`. ([#46](https://github.com/felixstenian/my-registers/pull/46)).
+- **#50 — Hardening do `api-client` (FE-01..FE-05)** — `api()` envolve `fetch` em try/catch (`network_error` com `status=0`), feedback de erro visível, proteção contra open-redirect no redirect pós-login, redirect 401 automático para `/login`, `DayNavigator` não stale de datas inválidas. E2E de cobertura. ([#50](https://github.com/felixstenian/my-registers/pull/50)).
+- **#49 — Restaura ESLint (flat config) no web e no CI** — `next lint` foi removido no Next.js 16; o script `lint` falhava ("Invalid project directory provided") e o job `web` do CI silenciava. Fix: ESLint flat config + step `lint` no job `web`. ([#49](https://github.com/felixstenian/my-registers/pull/49)).
+
+### Documentação
+- **#47 — Índice + specs por feature (23 features, 161 artefatos)** — Nova pasta `specs/features/` como visão reindexada por feature do produto, sem alterar o spec-kit contratual em `specs/001-mvp-registro-diario/`. Cada feature tem 7 artefatos (`requirements.md`, `specifications.md`, `user-stories.md`, `acceptance-criteria.md`, `test-cases.md`, `architecture.md`, `trade-offs.md`). `INDEX.md` no topo. ([#47](https://github.com/felixstenian/my-registers/pull/47)).
+- **#39 — Sync do hotfix #37 + CHANGELOG v1.3.0 para dev** — Traz `dev` em par com `main` pós-v1.3.0 + checklist pós-deploy do hotfix em `docs/pos-deploy-macros-fix.md`. ([#39](https://github.com/felixstenian/my-registers/pull/39)).
+
+### Infra
+- **D-02 — nginx com `envsubst` nativo** — Substitui `sed 's|\${DOMAIN}|...|g'` manual (que exigia intervenção do operador a cada `git pull` de mudança em `app.conf`) pelo `envsubst` nativo da imagem `nginx:*-alpine`. Infra reproduzível. ([#42](https://github.com/felixstenian/my-registers/pull/42)).
+
+### Deploy
+Atualiza `web` (Blocos 5/6/7 + navegação temporal + hardening), `api` (PATCH endpoints + confirm + promote_food_item_id) e `nginx` (template envsubst já em prod via #41 e #42). Em VPS existente:
+
+```bash
+cd ~/my-registers
+git pull
+docker compose -f docker-compose.production.yml --env-file .env.production up -d --build api web nginx
+# rodar seed-nutrition uma vez garante catálogo dos deploys anteriores (idempotente):
+docker compose -f docker-compose.production.yml --env-file .env.production exec api python -m app.cli seed-nutrition
+```
+
+Após esta release, o **deploy automático via `deploy.yml`** é plenamente operacional desde que T-1003 (branch protection em `main`) e T-1004 (chave SSH deploy-only na VPS) estejam configurados conforme `docs/deploy.md` §14.2.
+
+---
 
 ## [1.3.0] — 2026-07-27
 
