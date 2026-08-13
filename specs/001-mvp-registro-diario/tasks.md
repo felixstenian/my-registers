@@ -296,6 +296,90 @@ Pré-requisitos: Fase 9 concluída (app em prod com HTTPS válido — PWA exige 
 
 ---
 
+## Bloco 5 — Recuperação de itens sem catálogo (SP-140..SP-143) — revisado 2026-07-28
+
+Meta: fechar o loop pra o usuário quando `catalog.lookup` devolve `None`, entregando **três botões clicáveis por item** direto no assistant message (Cadastrar manual, Foto do rótulo, Descartar). Remove o fluxo de "confirmação de item" que era redundante.
+
+Pré-requisitos:
+- Fase 4.b (SP-30..35) concluída (LabelCatalogService disponível).
+
+### Backend — cadastro manual (mantido do PR original)
+
+- [x] **T-B501** — Composer de assistant message detecta warnings `no_catalog_hit` e anexa marcador `<!-- catalog-recovery: id1,id2 -->` + label "Sem catálogo para: **X**, **Y**". Frontend parseia. Adaptado à revisão v1.12 — remove texto sobre "descartar via chat" e "responda apaga" (vira botão). Testes em `test_message_formatter.py`. (S)
+- [x] **T-B502** — **Não necessária** (CHECK já tinha `'manual'`).
+- [x] **T-B503** — `POST /nutrient-facts/manual` com `ManualNutrientFactIn` + migration `0008_nutrient_facts_created_by`. Audit `create`. (M)
+- [x] **T-B504** — `promote_food_item_id` no mesmo endpoint via `_try_promote_item`. Falha silenciosa com `promotion_warning`. (M)
+- [x] **T-B505** — 11 testes em `tests/test_manual_nutrient_facts.py`. (L)
+- [x] **T-B506** — `ManualCatalogForm.tsx` (modal client, form curto). (M)
+
+### Backend — remoção do fluxo de confirmação
+
+- [ ] **T-B510** — Backend não seta mais `needs_confirmation=True`. Remover a lógica em `MealService._create_item` (`if confidence < LOW_CONFIDENCE_THRESHOLD or hit is None`) e no `BeverageService` equivalente. Campo continua no schema (nunca setado), retorno de API continua expondo (frontend ignora). Ajustar testes que hoje esperam `needs_confirmation=True` — passar a esperar `False`. (M)
+- [ ] **T-B511** — Deletar endpoint `POST /records/food-items/{id}/confirm` (hotfix #37) + `ConfirmationOut` schema. Testes em `test_corrections_deletions.py` (`test_confirm_food_item_*`, 4 casos) deletados. (S)
+- [ ] **T-B512** — Deletar `apps/api/app/services/confirmation.py` (`ConfirmationService`), remover import + branch `confirm_items` do `IntentDispatcher` + `MessageProcessor._handle_confirm_items`, remover intent do enum `Intent`, remover campos `confirmation`/`ConfirmationIn` do `LLMEnvelope` + `system_v2.md` prompt + `tool_schema.py`. `tests/test_confirm_items.py` deletado. Fluxo de correção via chat ("corrija X 100g") continua funcionando via intent `correct_record` (não tocado). (L)
+- [ ] **T-B513** — `message_formatter._warnings_block` (bloco "Confirma estes itens?") deletado. `_has_approx_food_items` continua usando warnings pra decidir `≈`. Teste `test_compose_meal_warnings_listed_after_disclaimer` deletado ou reformado. (S)
+
+### Backend — foto do rótulo com promoção acoplada (SP-143)
+
+- [ ] **T-B520** — `POST /chat/messages` aceita novo campo opcional `promote_food_item_id: uuid`. Adiciona ao schema Pydantic + rota. Validação server-side de ownership no `ChatService.post_user_message` (silenciosamente descarta se falha — não bloqueia envio). Coluna nova em `messages` (nullable) ou armazenar em `raw_llm_response`? Decisão de plan: **armazenar em `raw_llm_response.metadata.promote_food_item_id`** pra evitar migration destrutiva. (M) — SP-143.
+- [ ] **T-B521** — `MessageProcessor._handle_log_nutrition_label` (fluxo Fase 4.b), depois de `LabelCatalogService.upsert_from_label` retornar sucesso: se `promote_food_item_id` está na mensagem E o item passa validação (ownership + não deletado + dia aberto), chama helper compartilhado com `_try_promote_item` do endpoint manual (extrair pra `app/services/promotion.py` ou similar). Falha silenciosa grava audit `action='promotion_failed'`. (M) — SP-143.
+- [ ] **T-B522** — Testes de integração em `tests/test_label_promotion.py` (6 casos): foto de rótulo válido + item válido → promoção completa; foto de rótulo válido + item de outro user → fact criado sem promoção; foto de rótulo válido + item deletado → idem; foto de rótulo válido + dia fechado → idem; foto que **não** é rótulo (LLM retorna clarify) → `promote_food_item_id` ignorado silenciosamente; foto de rótulo mas sem `promote_food_item_id` → comportamento original inalterado. (M)
+
+### Frontend — remoção da UX de confirmação
+
+- [ ] **T-B530** — Deletar `apps/web/src/app/(app)/chat/PendingItemsModal.tsx`. Remover import + state + render do modal em `chat/page.tsx`. `DayTotalsBar.tsx` remove badge "N item precisa de confirmação" + prop `onPendingClick`. Interface `FoodItemRef.needs_confirmation` fica no tipo (backend ainda expõe), mas nenhum consumidor no frontend. (S)
+- [ ] **T-B531** — Deletar `apps/web/src/app/(app)/day/ConfirmItemButton.tsx`. Em `FoodItemRow.tsx`, remover badge "confirmar" (mantém apenas "sem catálogo" quando `has_catalog=false`). Cor amarela do badge some. (S)
+
+### Frontend — 3 botões clicáveis no card recovery
+
+- [ ] **T-B540** — `AssistantContent.tsx` estende o parser + render do bloco `recovery` pra ter 3 botões por item (não só "Cadastrar"): **Cadastrar** (abre `ManualCatalogForm`, já feito), **Foto** (novo, ver T-B541), **Descartar** (novo, ver T-B542). Layout compacto — botões inline, ícones + label curto em mobile. (M) — SP-140.
+- [ ] **T-B541** — Novo componente `LabelPhotoUploader.tsx` (client). Botão dispara `<input type="file" accept="image/*" capture="environment">` (aproveita SP-16 pra câmera mobile). Ao selecionar: (1) POST `/media` pra subir; (2) POST `/chat/messages` com `text` mínimo ("foto do rótulo de {nome}"), `media_ids=[uploadedId]`, `promote_food_item_id={item.id}`. Sucesso → toast + `window.location.reload()` pra pegar novo assistant message. Erros de upload (SP-18) reusam mecânica existente (mensagens em pt-BR pra `file_too_large`, `invalid_image`). (M) — SP-143.
+- [ ] **T-B542** — Novo componente `DiscardItemButton.tsx` (client). Botão dispara `DELETE /records/food-items/{item.id}` diretamente (sem confirmação extra — item que ainda não gerou macros úteis pode ser deletado com 1 clique). Success → `window.location.reload()`. Erro exibe toast. (S)
+
+### Docs
+
+- [ ] **T-B508** — Docs. **Adiado** (mesmo motivo do PR original — UX autodescoberta). (XS)
+
+**Gate Bloco 5 revisado — objetivo:** usuário registra alimento fora do seed → assistant message mostra card com 3 botões por item. Clica Cadastrar → form curto + submit + item promovido + snapshot recalculado. Clica Foto → escolhe imagem → LLM lê rótulo + backend promove item automaticamente. Clica Descartar → item removido + snapshot recalculado. Nenhum fluxo de "confirmar" existe mais (endpoint, UI, intent LLM).
+
+**Não inclui:**
+- Migration destrutiva removendo `needs_confirmation` da coluna (adia).
+- Delete de fact manual (adia).
+- Sugestão automática de kcal pela LLM (viola Const. §5).
+- Compartilhamento de facts entre users (single-user por design).
+
+---
+
+## Bloco 6 — Visão detalhada do dia (SP-150..SP-154) — pendente
+
+Meta: página `/day` que lista item-por-item do dia com macros + micros, permitindo o usuário validar cada registro. Fecha o loop de confiança que ficou aberto após o bug do catálogo vazio em prod (usuário via total zerado sem saber qual item estava sem catálogo).
+
+Read-only na v1 — todas as mutações continuam via chat (mantém interface única de escrita). V2 pode ganhar ações inline.
+
+Pré-requisitos: nenhum backend novo. `GET /days/today` e `GET /days/{date}` já entregam records completos (T-408 concluído). Reaproveita `CloseDayModal` (T-704) para o botão "Encerrar dia" no header.
+
+- [x] **T-B601** — `apps/web/src/app/(app)/day/page.tsx` (server component) faz fetch de `GET /days/today` via `INTERNAL_API_URL` + delega renderização pra `DayView.tsx` (compartilhado com `/day/[date]`). `dynamic = 'force-dynamic'` porque records mudam a cada mensagem no chat. Header com data pt-BR + badge open/closed + `<CloseDayButton>` (novo client component que abre `CloseDayModal` reusado do chat; chama `useRouter().refresh()` pós-fechamento). SP-150. (M)
+- [x] **T-B602** — `MealSection.tsx` (server) recebe records agrupados por meal_slot via `groupBySlot` em `DayView`. Ordem fixa `breakfast → lunch → snack → dinner → unspecified`; slots vazios retornam null. Grid 12-col: Item/Quantidade/Calorias/P/C/G/Fib. Kcal parcial da refeição no cabeçalho + horário do primeiro registro. SP-151. (M)
+- [x] **T-B603** — `FoodItemRow.tsx` (server + `<details>` HTML nativo — zero JS extra). Grid 12-col matching o header do `MealSection`. Expansão revela sódio/cálcio/ferro/potássio + origem em pt-BR + confidence LLM (só quando `source='llm'`). Badges inline: "confirmar" (`needs_confirmation`) e "sem catálogo" (`has_catalog=false`). Valores zero renderizam `—` (formatters em `format.ts`). SP-152. (S)
+
+  **Ajuste backend:** `_load_food` em `apps/api/app/services/day_query.py` estendido pra expor `fiber_g` + os 4 micros + `confidence` + `has_catalog` (booleano derivado de `catalog_ref_id`). Zero mudança de schema — `DayRecordsOut.food` já era `list[dict[str, Any]]`. 18 testes de `test_day_close_report.py` continuam verdes.
+
+- [x] **T-B604** — `AuxiliarySections.tsx` exporta `HydrationSection` (horário + volume + total), `BeverageSection` (item/volume/kcal/P/C/G, badge confirmar), `ActivitySection` (nome + tipo pt-BR + duração + intensidade + kcal_out + método pt-BR). `ACTIVITY_TYPE_LABEL_PT` + `CALC_METHOD_LABEL_PT` + `SOURCE_LABEL_PT` em `types.ts` mapeiam enums → pt-BR. Cada seção some se sua lista estiver vazia. SP-153. (M)
+- [x] **T-B605** — Link "Hoje" no header do `(app)/layout` entre "Chat" e "Semana" apontando pra `/day`. `proxy.ts` atualizado: `/day` e `/day/:path*` adicionados a `PROTECTED_PREFIXES` e `matcher`. SP-150. (XS)
+- [x] **T-B606** — `apps/web/src/app/(app)/day/[date]/page.tsx` valida param contra `/^\d{4}-\d{2}-\d{2}$/` (rejeita path traversal + strings arbitrárias antes de bater na API); fetch de `GET /days/{date}`; 404 amigável ("Nenhum registro encontrado nesta data") + link "Voltar para hoje". Read-only: `allowClose={false}` passado pro `DayView` — botão Encerrar não aparece pra dias passados. SP-154. (S)
+- [ ] **T-B607** — Testes: **adiado**. Web não tem framework de teste (vitest/jest) instalado — adicionar só pra 1 sanity de server component é overkill. Backend cobre o novo shape de `_load_food` via os 18 testes existentes de `test_day_close_report.py` (verificam `records.food[].items[]`). E2e manual: `pnpm dev`, cadastrar 3 itens no chat, abrir `/day`. Documentação separada fica pra próxima PR se necessário.
+- [ ] **T-B608** — Navegação temporal (SP-155): componente `DayNavigator.tsx` no header do `DayView` com botões **← Dia anterior**, **Próximo dia →** (escondido no dia atual), **Hoje** (escondido no dia atual) e input `<input type="date" max="{today}">` que submit navega pra `/day/[date]`. Aritmética de datas em `format.ts` (`addDays`, `todayLocalISO`). Página `/day/[date]` bloqueia data futura com componente `FutureDateNotice` antes de bater no backend. `WeeklyReportView.tsx` transforma coluna "Dia" da tabela `per_day` em `<Link href={`/day/${row.date}`}>`. (M) — SP-155.
+
+**Gate Bloco 6 — cumprido:** `/day` mostra dia atual completo com refeições agrupadas, macros por item, expansão de micros e seções auxiliares. `/day/[date]` renderiza dias passados read-only, alcançável via setas prev/next, input date ou link da tabela do `/weekly` (T-B608). Botão "Encerrar dia" reaproveita `CloseDayModal` sem duplicação. Backend estendido sem quebrar testes existentes.
+
+**Não inclui (por design):**
+- Edição/deleção inline (v2 — hoje é via chat).
+- Filtros/ordenação (só a ordem natural: meal_slot → occurred_at).
+- Exportação CSV/PDF (feature B-06 do backlog).
+- Gráficos ou comparação com dias anteriores (v2+).
+
+---
+
 ## Backlog (pós-MVP, `may`)
 
 - **B-01** — Persistência agregada de `sugars_g`, `added_sugars_g`, `saturated_fat_g`, `trans_fat_g`.

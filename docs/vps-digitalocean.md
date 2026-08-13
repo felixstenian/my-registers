@@ -272,48 +272,55 @@ Alguns pontos que confundem:
 
 ## 11. Emitir o certificado TLS
 
-Segue exatamente `infra/certbot/README.md`. Resumo:
+Segue exatamente `infra/certbot/README.md`. Nginx expande `${DOMAIN}`
+automaticamente no boot (envsubst da imagem oficial), então não precisa
+`sed`. Resumo:
 
 ```bash
-# Backup da config real
-cp infra/nginx/conf.d/app.conf infra/nginx/conf.d/app.conf.bak
+# Backup do template real
+cp infra/nginx/templates/app.conf.template infra/nginx/templates/app.conf.template.bak
 
 # Placeholder HTTP-only pra Let's Encrypt validar
-cat > infra/nginx/conf.d/app.conf <<EOF
+cat > infra/nginx/templates/app.conf.template <<'EOF'
 server {
   listen 80;
-  server_name $DOMAIN;
+  server_name ${DOMAIN};
   location /.well-known/acme-challenge/ { root /var/www/certbot; }
   location / { return 200 "ok"; }
 }
 EOF
-# Substitui a variável (o Nginx não expande envs sozinho)
-sed -i "s|\$DOMAIN|$DOMAIN|g" infra/nginx/conf.d/app.conf
 
-# Sobe SÓ o nginx
+# Sobe SÓ o nginx (envsubst roda no boot com ${DOMAIN} do env)
 docker compose -f docker-compose.production.yml --env-file .env.production up -d nginx
 
 # Testa em staging (não bate rate limit real)
 DOMAIN=$(grep ^DOMAIN= .env.production | cut -d= -f2)
 LETSENCRYPT_EMAIL=$(grep ^LETSENCRYPT_EMAIL= .env.production | cut -d= -f2)
 
-docker compose -f docker-compose.production.yml --env-file .env.production run --rm certbot \
+docker compose -f docker-compose.production.yml --env-file .env.production run --rm \
+  --entrypoint certbot certbot \
   certonly --webroot -w /var/www/certbot \
   --staging --agree-tos --no-eff-email \
   -m "$LETSENCRYPT_EMAIL" -d "$DOMAIN"
 
-# Se "Successfully received certificate", vai pra produção:
-docker compose -f docker-compose.production.yml --env-file .env.production run --rm certbot \
+# Se "Successfully received certificate" na staging, apaga o cert
+# de teste e emite o REAL (sem --staging):
+docker compose -f docker-compose.production.yml --env-file .env.production run --rm \
+  --entrypoint certbot certbot \
+  delete --cert-name "$DOMAIN"
+
+docker compose -f docker-compose.production.yml --env-file .env.production run --rm \
+  --entrypoint certbot certbot \
   certonly --webroot -w /var/www/certbot \
-  --force-renewal --agree-tos --no-eff-email \
+  --agree-tos --no-eff-email \
   -m "$LETSENCRYPT_EMAIL" -d "$DOMAIN"
 
-# Restaura a config real (com HTTPS)
-mv infra/nginx/conf.d/app.conf.bak infra/nginx/conf.d/app.conf
-sed -i "s|\${DOMAIN}|$DOMAIN|g" infra/nginx/conf.d/app.conf
+# Restaura o template real (com HTTPS)
+mv infra/nginx/templates/app.conf.template.bak infra/nginx/templates/app.conf.template
 
-# Recarrega nginx
-docker compose -f docker-compose.production.yml --env-file .env.production restart nginx
+# Recria nginx (envsubst só roda no boot — `nginx -s reload` sozinho
+# não pega mudança de template)
+docker compose -f docker-compose.production.yml --env-file .env.production up -d --force-recreate nginx
 ```
 
 ---

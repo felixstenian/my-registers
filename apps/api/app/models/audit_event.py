@@ -8,7 +8,16 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UUIDPrimaryKeyMixin
 
-AUDIT_ACTIONS = ("create", "update", "delete", "correct")
+AUDIT_ACTIONS = (
+    "create",
+    "update",
+    "delete",
+    "correct",
+    "close",
+    "confirm",
+    "promotion_failed",
+    "propagate",
+)
 AUDIT_ACTORS = ("user", "llm")
 
 
@@ -20,7 +29,8 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "audit_events"
     __table_args__ = (
         CheckConstraint(
-            "action IN ('create','update','delete','correct')",
+            "action IN ('create','update','delete','correct','close',"
+            "  'confirm','promotion_failed','propagate')",
             name="ck_audit_events_action",
         ),
         CheckConstraint("actor IN ('user','llm')", name="ck_audit_events_actor"),

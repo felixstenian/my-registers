@@ -168,12 +168,15 @@ async def test_sp23_unknown_item_zeros_and_warning(db_session: AsyncSession, adm
     item = result.items[0]
     assert item.catalog_ref_id is None
     assert item.kcal == 0
-    assert item.needs_confirmation is True  # sem catálogo dispara flag
+    # Bloco 5 revisão v1.12: needs_confirmation nunca mais é setado.
+    # Sinal de "sem catálogo" agora é catalog_ref_id IS NULL + warning.
+    assert item.needs_confirmation is False
     assert any(w["code"] == "no_catalog_hit" for w in result.warnings)
 
 
-async def test_sp24_low_confidence_flags_needs_confirmation(db_session: AsyncSession, admin_user):
-    """SP-24: confidence < 0.5 → needs_confirmation=True."""
+async def test_sp24_low_confidence_emits_warning_no_flag(db_session: AsyncSession, admin_user):
+    """SP-24 revisado: confidence < 0.5 gera warning `low_confidence_item`
+    (usado pelo `≈`), mas needs_confirmation não é mais setado."""
     await _seed(db_session)
     dl = await _day_log(db_session, admin_user.id)
     catalog = LocalTBCACatalog(db_session)
@@ -199,7 +202,7 @@ async def test_sp24_low_confidence_flags_needs_confirmation(db_session: AsyncSes
 
     item = result.items[0]
     assert item.confidence.compare(Decimal("0.3")) == 0
-    assert item.needs_confirmation is True
+    assert item.needs_confirmation is False
     assert any(w["code"] == "low_confidence_item" for w in result.warnings)
 
 

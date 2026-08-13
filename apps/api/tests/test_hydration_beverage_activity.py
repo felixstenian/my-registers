@@ -176,7 +176,8 @@ async def test_sp52_beverage_no_catalog_zeros(db_session: AsyncSession, admin_us
 
     assert result.record.catalog_ref_id is None
     assert result.record.kcal == Decimal("0")
-    assert result.record.needs_confirmation is True
+    # Bloco 5 revisão v1.12: needs_confirmation nunca mais é setado.
+    assert result.record.needs_confirmation is False
     assert any(w["code"] == "no_catalog_hit" for w in result.warnings)
 
 

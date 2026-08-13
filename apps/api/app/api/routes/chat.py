@@ -46,7 +46,10 @@ async def post_message(
 ) -> PostMessageResponse:
     service = ChatService(session)
     message = await service.post_user_message(
-        user=current_user, text=payload.text, media_ids=payload.media_ids
+        user=current_user,
+        text=payload.text,
+        media_ids=payload.media_ids,
+        promote_food_item_id=payload.promote_food_item_id,
     )
     # BackgroundTasks rodam ANTES do cleanup da dep `get_session`; comitamos
     # explicitamente aqui para que o worker (com sua própria sessão) enxergue
@@ -94,7 +97,7 @@ async def list_messages(
             dispatch = raw.get("dispatch") or {}
             fid = dispatch.get("nutrient_fact_id")
             if isinstance(fid, str):
-                nutrient_fact_id = fid  # type: ignore[assignment]
+                nutrient_fact_id = uuid.UUID(fid)
         out.append(
             MessageOut(
                 id=item.message.id,

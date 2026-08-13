@@ -151,7 +151,8 @@ async def test_unknown_food_creates_zero_kcal_with_warning(
     db_session: AsyncSession,
 ):
     """SP-23 fluxo completo: alimento sem catálogo → kcal=0 + warning
-    exposto no snapshot; item flagado como needs_confirmation."""
+    exposto no snapshot. Bloco 5 revisão v1.12: needs_confirmation não
+    é mais setado — sinal é catalog_ref_id IS NULL + warning."""
     await _seed(db_session)
     await _login(client)
 
@@ -176,9 +177,9 @@ async def test_unknown_food_creates_zero_kcal_with_warning(
 
     item = (await db_session.execute(select(FoodItem))).scalar_one()
     assert item.kcal == 0
-    assert item.needs_confirmation is True
+    assert item.catalog_ref_id is None
+    assert item.needs_confirmation is False
 
     snap = (await db_session.execute(select(DailySnapshot))).scalar_one()
     codes = {w["code"] for w in snap.warnings}
     assert "no_catalog_hit" in codes
-    assert "needs_confirmation" in codes

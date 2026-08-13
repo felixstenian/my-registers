@@ -110,10 +110,11 @@ class MealService:
 
         computed = NutritionCalculator.compute(hit=hit, grams=grams, ml=ml)
 
-        # SP-24: item com confiança < 0.5 → needs_confirmation.
-        # SP-23: sem catálogo → macros zerados + warning por item.
-        needs_confirmation = confidence < LOW_CONFIDENCE_THRESHOLD or (hit is None)
-
+        # Bloco 5 revisão v1.12: `needs_confirmation` deixou de ser setado.
+        # Sinal de "sem catálogo" no frontend passou a ser `has_catalog=false`
+        # (derivado de catalog_ref_id IS NULL). SP-24a e todo o fluxo de
+        # "confirmação de item" foram removidos. Campo permanece no schema
+        # (não muda migration) mas é sempre False daqui pra frente.
         item = await self.food_items.create(
             food_record_id=food_record_id,
             detected_name=entry.detected_name,
@@ -126,7 +127,7 @@ class MealService:
             source="llm",
             confidence=confidence,
             is_estimate=entry.is_estimate,
-            needs_confirmation=needs_confirmation,
+            needs_confirmation=False,
             catalog_ref_id=uuid.UUID(hit.fact_id) if hit else None,
             kcal=computed.kcal,
             protein_g=computed.protein_g,

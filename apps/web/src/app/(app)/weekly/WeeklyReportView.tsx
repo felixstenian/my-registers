@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api-client';
 
 type Totals = {
@@ -65,19 +66,25 @@ export function WeeklyReportView() {
     | { phase: 'error'; message: string }
   >({ phase: 'loading' });
 
-  useEffect(() => {
-    (async () => {
-      const result = await api<WeeklyResponse>('/weekly');
-      if (result.ok) {
-        setState({ phase: 'ready', data: result.data });
-      } else {
-        setState({
-          phase: 'error',
-          message: result.error?.message ?? 'Não foi possível carregar o relatório.',
-        });
-      }
-    })();
+  // FE-01: extraído do useEffect inline para permitir retry manual quando
+  // a carga inicial falha (rede fora). A regeneração do relatório é cara no
+  // backend, mas o usuário precisa de uma saída acionável no estado de erro.
+  const load = useCallback(async () => {
+    setState({ phase: 'loading' });
+    const result = await api<WeeklyResponse>('/weekly');
+    if (result.ok) {
+      setState({ phase: 'ready', data: result.data });
+    } else {
+      setState({
+        phase: 'error',
+        message: result.error?.message ?? 'Não foi possível carregar o relatório.',
+      });
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   if (state.phase === 'loading') {
     return (
@@ -90,7 +97,14 @@ export function WeeklyReportView() {
   if (state.phase === 'error') {
     return (
       <div className="rounded border border-red-200 bg-red-50 px-4 py-6 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-        {state.message}
+        <p>{state.message}</p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="mt-3 rounded bg-red-800 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-900 dark:bg-red-900 dark:hover:bg-red-800"
+        >
+          Tentar novamente
+        </button>
       </div>
     );
   }
@@ -220,10 +234,19 @@ function PerDayTable({ rows }: { rows: DayRow[] }) {
             {rows.map((row) => (
               <tr key={row.date} className="border-t border-slate-100 dark:border-slate-800">
                 <td className="px-3 py-2">
-                  <div className="text-slate-500 dark:text-slate-400">
-                    {fmtWeekday(row.date)}
-                  </div>
-                  <div className="font-medium">{fmtDateShort(row.date)}</div>
+                  {/* SP-155: link pra visão detalhada daquele dia. */}
+                  <Link
+                    href={`/day/${row.date}`}
+                    className="block hover:opacity-80"
+                    title="Ver detalhes deste dia"
+                  >
+                    <div className="text-slate-500 dark:text-slate-400">
+                      {fmtWeekday(row.date)}
+                    </div>
+                    <div className="font-medium underline decoration-slate-300 underline-offset-2 dark:decoration-slate-700">
+                      {fmtDateShort(row.date)}
+                    </div>
+                  </Link>
                 </td>
                 <td className="px-3 py-2 text-right">{fmtInt(row.kcal_in)}</td>
                 <td className="px-3 py-2 text-right">

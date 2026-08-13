@@ -2,7 +2,7 @@
 #
 # Dois jobs em paralelo:
 #   - api:  Postgres 16 service + uv sync + ruff + pytest
-#   - web:  pnpm install + typecheck + build (garante que `next build`
+#   - web:  pnpm install + typecheck + lint + build (garante que `next build`
 #           passa antes do deploy — evita o hotfix Next 16 (#24) de novo)
 #
 # Ambos precisam passar pro PR poder mergear (T-1003 configura o gate).
@@ -75,7 +75,7 @@ jobs:
           PGPORT: "5432"
 
   web:
-    name: web (typecheck + build)
+    name: web (typecheck + lint + build)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -100,6 +100,9 @@ jobs:
       - name: Typecheck
         run: pnpm --filter web typecheck
 
+      - name: Lint (ESLint flat config — FE-05)
+        run: pnpm --filter web lint
+
       - name: Build
         run: pnpm --filter web build
         env:
@@ -111,3 +114,71 @@ jobs:
 
       - name: Verify service worker (INV-11)
         run: pnpm --filter web verify:sw
+
+  e2e:
+    name: e2e (Playwright)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # So roda depois de unit tests + build verdes: sem sentido gastar minutos
+    # rodando browser contra codigo que nao passou lint/type/pytest.
+    needs: [api, web]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Cache do bundle de browsers (~150 MB) por versao do @playwright/test.
+      # `pnpm-lock.yaml` como key funciona porque a versao esta la; se mudar,
+      # cache miss reforca reinstall.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers (with deps)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      # Cache-hit ainda precisa das system libs (libnss3, etc.) do chromium.
+      - name: Install Playwright system deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter web exec playwright install-deps chromium
+
+      - name: Bring up e2e stack (docker-compose.e2e.yml)
+        run: ./scripts/e2e-bootstrap.sh
+
+      - name: Run Playwright suite
+        run: pnpm --filter web test:e2e
+
+      - name: Dump api container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.e2e.yml logs api | tail -200
+
+      - name: Upload Playwright report + traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 7
+
+      - name: Tear down e2e stack
+        if: always()
+        run: ./scripts/e2e-bootstrap.sh --down

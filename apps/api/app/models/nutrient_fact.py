@@ -52,6 +52,13 @@ class NutrientFact(UUIDPrimaryKeyMixin, Base):
         nullable=True,
     )
     verified_by_user: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # SP-141: cadastro manual grava aqui. Facts do seed TBCA e label_ocr
+    # ficam com NULL (catálogo canônico não tem dono).
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -192,7 +192,7 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
   - Prefixo `≈` (aproximadamente) **MUST** aparecer em qualquer linha nutricional cuja origem tenha pelo menos 1 item com `is_estimate=true` ou `needs_confirmation=true`. Se todos os itens têm quantidade exata + catálogo, o `≈` **MUST NOT** aparecer.
   - Água pura e volume nunca recebem `≈` (são medidas diretas).
   - Aviso legal (Const. Art. VII §26) continua ao final, separado por linha em branco.
-- **Warnings de itens pendentes** (needs_confirmation/no_catalog_hit) aparecem em um bloco separado abaixo do disclaimer, no formato: *"Confirma estes itens? — feijão, sushi ninja"* (referencia SP-24/SP-117 para o fluxo de correção).
+- **Warnings de itens sem catálogo** (`no_catalog_hit`) aparecem em card estruturado (SP-140, revisão 2026-07-28) com botões clicáveis por item. Warning `needs_confirmation` deprecated junto com o fluxo de confirmação (ver SP-24).
 - Este SP substitui o formato livre gerado hoje pelos `_compose_meal_summary` / `_compose_water_summary` / `_compose_beverage_summary` / `_compose_activity_summary` em `services/message_processor.py`.
 
 ### 3.3 Registro de alimentos
@@ -210,8 +210,10 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 - `catalog_ref_id=null`, macros zerados, `warnings: {code: "no_catalog_hit"}`. Assistente pergunta valores por 100g **ou** marca.
 
 **SP-24** (`must`) — Confiança baixa.
-- `confidence < 0.5` → `needs_confirmation=true`, destaque na tabela, aguarda confirmação por chat ou `PATCH /records/food-items/{id}`.
-- **Chat-side (SP-24a):** "confirmo", "sim", "está certo" → `intent=confirm_items` com `confirmation.scope='all'`. "Confirma o pão", "o queijo prato tá certo" → `scope='specific'` com `target_hints=[...]` casados via `TargetMatcher`. Sem itens pendentes → clarify ("não achei item pendente"). Confirmação NÃO recomputa snapshot (macros não mudam); apenas remove `needs_confirmation` e registra `audit_events(action='confirm')`. Dia fechado bloqueia (INV-5).
+- `confidence < 0.5` → item marcado como estimativa (`is_estimate=true`) para o prefixo `≈` no display. Correção continua via chat (`corrija X 100g`) ou `PATCH /records/food-items/{id}`.
+- ~~**Chat-side (SP-24a):**~~ **DEPRECATED em 2026-07-28 (v1.11)** — intent `confirm_items` + `ConfirmationService` + fluxo "confirmo esses itens" removidos junto com toda a UX de confirmação. Ver §3.14 (revisão) para o motivador. Item sem catálogo agora tem 3 botões diretos no card (Cadastrar manual, Foto do rótulo, Descartar) — não precisa mais "confirmar".
+
+> **Nota histórica sobre `needs_confirmation`.** O campo permanece no schema (evita migration destrutiva) mas nunca mais é setado como `true`. `MealService.create_from_llm` e `BeverageService.create_from_llm` não usam mais o campo pra sinalizar "pendente". O sinal de "item sem catálogo" no frontend passou a ser `has_catalog=false` (derivado de `catalog_ref_id IS NULL`).
 
 **SP-25** (`should`) — Múltiplas fotos.
 - Até 4 fotos em uma mensagem, agrupadas em 1 `food_records` (não separa refeições distintas no MVP).
@@ -480,44 +482,137 @@ Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push
 
 ---
 
-### 3.13 Progressive Web App (pós-MVP, escopo básico)
+### 3.14 Recuperação de itens sem catálogo (pós-MVP)
 
-Feature de instalabilidade + shell offline. Não cobre fila offline (B-08), push (B-05) nem cache de dados de negócio.
+Quando `catalog.lookup()` devolve `None` para um `food_item`, o item entra no diário com `kcal=0` e `catalog_ref_id=NULL` (Const. §5-6, INV-1). Sem intervenção, o item fica zerado no snapshot pra sempre. Esta seção dá ao usuário **três ações objetivas por item** direto na assistant message, todas como botões clicáveis.
 
-**SP-128** (`must`) — Manifest publicado em `/manifest.webmanifest`.
-- Campos obrigatórios: `name`, `short_name` (≤12 chars), `icons` (192, 512, maskable), `theme_color`, `background_color`, `display: standalone`, `start_url: /chat`, `scope: /`, `orientation: portrait`.
-- MIME type correto (`application/manifest+json`) — Next.js já resolve via convenção de arquivo em `src/app/manifest.ts`.
+**Decisão de escopo (revisão 2026-07-28):** o fluxo de "confirmação de item" (`PendingItemsModal`, `POST /records/food-items/{id}/confirm`, `ConfirmItemButton` no `/day`, intent LLM `confirm_items`, `ConfirmationService`) foi **removido**. Motivação: sobreposição semântica confusa — item sem catálogo NÃO precisa de "confirmação", precisa de ação (cadastrar valores OU descartar). O campo `needs_confirmation` permanece no schema (evita migration), mas o backend **nunca mais** o seta como `true` e o frontend ignora completamente.
 
-**SP-129** (`must`) — Meta tags para instalação em iOS Safari.
-- `apple-mobile-web-app-capable=yes`, `apple-mobile-web-app-status-bar-style=default`, `apple-mobile-web-app-title=my-registers`, `apple-touch-icon` 180×180.
-- Sem essas tags, iOS Safari não trata a app como instalável em standalone.
+**SP-140** (`should`) — Card de recuperação por item na assistant message.
+- Quando `log_food` retorna warnings com `code='no_catalog_hit'`, o `message_formatter.compose_meal` anexa um marcador estruturado que o frontend transforma em card com **três botões por item afetado**:
+  1. **✏️ Cadastrar manualmente** — abre `ManualCatalogForm` (modal). Ver SP-141.
+  2. **📸 Cadastrar com foto do rótulo** — abre file picker; ao selecionar imagem, upload + envio automático de uma mensagem no chat com `promote_food_item_id={item.id}` associado. Ver SP-143.
+  3. **❌ Descartar item** — dispara `DELETE /records/food-items/{item.id}` e re-renderiza. Sem confirmação extra.
+- Cada botão opera **em um item específico** — usuário resolve um por vez.
+- Não altera cálculo. Aviso legal (Art. VII §26) continua obrigatório na assistant message.
 
-**SP-130** (`must`) — Service worker com estratégia por rota.
-- Shell estático (`/_next/static/*`, ícones, manifest, fonts): **cache-first** com revalidação em background.
-- HTML de rotas (`/chat`, `/login`, `/weekly`): **network-first** com fallback pra cache offline.
-- API (`/api/*`): **network-only, nunca cachear.** Ver `INV-11`.
-- Registro no client após hidratação (não bloqueia render inicial).
+**SP-141** (`should`) — Endpoint de cadastro manual de `nutrient_facts`.
+- `POST /nutrient-facts/manual` autenticado. Body:
+  ```json
+  {
+    "canonical_name": "pao_de_queijo_congelado",
+    "display_name": "Pão de queijo congelado",
+    "brand": "Forno de Minas",   // opcional
+    "basis": "per_100g",          // "per_100g" ou "per_100ml"
+    "kcal": 320,
+    "protein_g": 8,
+    "carbs_g": 40,
+    "fat_g": 14,
+    "fiber_g": 0.5,              // demais macros/micros opcionais
+    "sodium_mg": 380,
+    "calcium_mg": null,
+    "iron_mg": null,
+    "potassium_mg": null,
+    "aliases": ["pao de queijo", "pao_queijo"],  // opcional
+    "promote_food_item_id": "uuid"               // opcional (SP-142)
+  }
+  ```
+- Response 201 com o `nutrient_facts.id` criado.
+- Persiste com `source='manual'`, `verified_by_user=true`, `created_by=user_id`.
+- Validação: `basis ∈ {per_100g, per_100ml}`; `kcal ≥ 0`; `protein/carbs/fat ≥ 0`; `canonical_name` slug-like (`[a-z0-9_]+`).
+- Isolamento: cada usuário tem seu próprio fact (Const. §21).
 
-**SP-131** (`must`) — Assets de ícone em 4 tamanhos mínimos.
-- `192×192` (Android padrão), `512×512` (Android hi-res / splash), `180×180` (apple-touch), `512×512 maskable` (Android adaptativo).
-- Formato PNG. Cor de fundo compatível com `background_color` do manifest.
+**SP-142** (`should`) — Promoção de `food_item` legado no cadastro manual.
+- Se `POST /nutrient-facts/manual` incluir `promote_food_item_id`, o backend, na mesma transação:
+  1. Cria o `nutrient_fact` (SP-141).
+  2. Se o item pertence ao usuário e não está deletado e o dia não está fechado:
+     - Atualiza `catalog_ref_id` pro novo fact.
+     - Recalcula macros via `NutritionCalculator.compute(hit=new_fact, grams=item.grams, ml=item.ml)`.
+     - Grava audit `action='correct'`, `actor='user'`, before/after.
+     - Chama `DailyRecomputeService.recompute(item.food_record.day_log_id)` — snapshot reflete novo valor.
+- Se qualquer validação falhar (item de outro user, deletado, dia fechado), endpoint retorna 201 do fact criado + `promotion_warning='promotion_failed:{motivo}'` no body (não faz rollback).
 
-**SP-132** (`should`) — Update flow visível.
-- Quando SW detecta versão nova disponível (`updatefound` + `installed` state), exibir toast persistente "Nova versão disponível" com botão "Recarregar" que dispara `postMessage({type: 'SKIP_WAITING'})` seguido de `window.location.reload()`.
-- Sem esse fluxo, usuário fica preso em versão antiga até fechar todas as abas.
+**SP-143** (`should`) — Cadastro por foto de rótulo com promoção acoplada.
+- `POST /chat/messages` aceita novo campo opcional `promote_food_item_id: uuid`. Body existente + o campo novo:
+  ```json
+  { "text": "...", "media_ids": ["..."], "promote_food_item_id": "uuid" }
+  ```
+- Backend valida no momento do envio que `promote_food_item_id` pertence ao usuário (isolamento). Se inválido, ignora silenciosamente (não bloqueia o envio da mensagem).
+- Processo normal: `MessageProcessor` roda LLM → se intent for `log_nutrition_label` (Fase 4.b) → `LabelCatalogService.upsert_from_label` cria/atualiza fact.
+- **Novo passo**: depois do `upsert_from_label` retornar com sucesso, se `promote_food_item_id` foi passado E o item é válido (ownership + não deletado + dia aberto), backend faz a mesma promoção do SP-142 (atualiza `catalog_ref_id`, recomputa macros, recompute snapshot, audit).
+- Se intent detectado ≠ `log_nutrition_label` (usuário mandou foto que não é rótulo), `promote_food_item_id` é ignorado e a mensagem segue o fluxo normal.
+- Se a promoção falhar após o fact ter sido criado, backend grava audit_event `action='promotion_failed'` mas não bloqueia o fluxo de chat.
 
-**SP-133** (`should`) — Botão "Instalar" no header.
-- Escuta `beforeinstallprompt` (Chrome/Edge Android+desktop), guarda evento, exibe botão que chama `.prompt()`.
-- Oculto em navegadores sem o evento (Safari desktop/iOS — nesses, install é via "Adicionar à tela de início" do menu do browser).
-- Após install (`appinstalled` event), botão some.
+**Fora do escopo desta feature:**
+- Migration removendo `needs_confirmation` do schema (adia; sem impacto porque backend nunca mais seta e frontend ignora).
+- Formulário completo com micros (fica opcional; accordion).
+- Delete de fact manual (adiar).
+- Sugestão de cadastro automática por LLM (viola Const. §5).
 
-**SP-134** (`may`) — Splash iOS via `apple-touch-startup-image`.
-- Set mínimo: iPhone SE/8, iPhone 15/16 Pro (3 sizes). iPad opcional.
-- Sem isso, iOS mostra tela branca de ~500ms na abertura standalone.
+**Removidos por esta revisão:**
+- `PendingItemsModal.tsx` no chat.
+- `POST /records/food-items/{id}/confirm` (endpoint deletado).
+- `ConfirmItemButton.tsx` no `/day` (deletado).
+- Intent LLM `confirm_items` no `system_v2.md` + tool_schema + dispatcher + `ConfirmationService`.
+- Warning `needs_confirmation` no block do `message_formatter._warnings_block` (chamado "Confirma estes itens?"); substituído pelo card SP-140.
+- Badges "confirmar" e ícones amarelos em `DayTotalsBar`, `FoodItemRow`, etc.
+- SP-24a (SP-24 chat-side) fica marcada como deprecated na spec — implementação removida junto com o intent.
 
-**SP-135** (`must`) — Comportamento offline previsível.
-- Rota carregada offline (sem cache do dia) exibe página `/offline` com mensagem: "Sem conexão. Algumas ações ficam indisponíveis até você reconectar." + link "Tentar novamente".
-- Aviso legal (Constituição Art. VII §26) presente na `/offline`.
+---
+
+### 3.15 Visão detalhada do dia — página `/day` (pós-MVP)
+
+**Motivador.** `DayTotalsBar` só mostra totais agregados; `/weekly` mostra 7 dias agregados. Nenhum lugar hoje mostra **item por item** do dia com macros/micros específicos — o usuário precisa confiar no total sem conseguir validar se cada alimento foi persistido com o valor esperado. Em prod isso ficou explícito no bug do catálogo vazio (item aparece com kcal=0 no total, mas usuário só descobre indiretamente). Uma página de detalhamento fecha esse loop de confiança.
+
+Revive parcialmente a intenção do T-409 original ("DayTable renderiza totals + records"), que foi conscientemente deixado de fora do MVP. Não substitui `/weekly`; complementa.
+
+**Escopo v1:** leitura. Ações (editar, deletar, corrigir) continuam via chat na v1 — mantém a interface de mutação única e simplifica esta feature.
+
+**SP-150** (`should`) — Rota `/day` renderiza o dia atual (fuso do usuário — SP-92).
+- Server component protegido. Fetch server-side de `GET /days/today` via `INTERNAL_API_URL` (padrão do PR #25 hotfix).
+- Header: data formatada em pt-BR (`domingo, 27 de julho de 2026`), badge `status='open'|'closed'`, link "Encerrar dia" (dispara mesmo modal do `CloseDayModal` do chat) — só quando `status='open'`.
+- Link "Semana" no header do `(app)/layout` ganha peer "Detalhes" apontando pra `/day`.
+
+**SP-151** (`should`) — Refeições agrupadas por `meal_slot`.
+- Seções na ordem: `breakfast` → `lunch` → `snack` → `dinner` → `unspecified`. Slots vazios não são renderizados.
+- Cada seção tem: cabeçalho com nome pt-BR do slot + kcal parcial do slot. Lista de `food_items` como linhas de tabela.
+- Colunas: **Item** (`detected_name` + brand em cinza se houver) · **Quantidade** (`{grams}g` ou `{ml}ml` ou `{quantity} {unit}`) · **Calorias** · **P** · **C** · **G** · **Fibras**.
+- Badge amarelo "confirmar" quando `needs_confirmation=true` (link abre `PendingItemsModal` ou envia pra `/chat` — decisão de implementação).
+- Badge "sem catálogo" quando `catalog_ref_id=null` — indica item que veio zerado do bug do seed vazio (recuperável via chat).
+
+**SP-152** (`should`) — Detalhamento por item via expansão.
+- Cada linha de food_item pode ser expandida (`<details>` ou click) revelando micros básicos: sódio (mg), cálcio (mg), ferro (mg), potássio (mg).
+- Valores zero → renderiza `—` em vez de `0` (menos ruído visual).
+- Também mostra `source` (`llm`, `user_corrected`, `label_ocr`, `user_manual`) e `confidence` (LLM) — útil pra saber a origem do valor.
+
+**SP-153** (`should`) — Seções auxiliares: hidratação, bebidas, atividade.
+- **Hidratação (água pura):** lista com horário + volume; totalizador `Água: N ml`.
+- **Bebidas calóricas:** mesma tabela reduzida das refeições (item, volume, kcal + macros; sem micros — mais raro cadastrar).
+- **Atividade:** linha por registro com tipo pt-BR, duração, intensidade, kcal gastas + método (`met_estimate`, `reported_by_device`, `workout_session` quando Bloco 3 chegar).
+
+**SP-154** (`may`) — Rota `/day/[date]` para dias passados.
+- Server component idêntico ao `/day`, com `GET /days/{date}` em vez de `/today`.
+- 404 amigável se `day_log` não existe (nenhum registro naquele dia).
+- Edição de records (correção/exclusão) continua exclusivamente via chat — a página `/day/[date]` não expõe botões de mutar item (evita confusão sobre "data efetiva" da correção).
+- **Encerramento retroativo**: se o dia estiver `status='open'`, o botão "Encerrar dia" aparece igual ao `/day`. Caso comum: o usuário esqueceu de encerrar o dia anterior e quer resolver agora. `POST /days/{date}/close` funciona em qualquer data com `day_log` aberto (backend não restringe a "hoje").
+- Fica `may` porque uso primário é o dia atual; historico via `/weekly` já cobre visão agregada.
+
+**SP-155** (`should`) — Navegação temporal a partir do `/day` e do `/weekly`.
+- Header do `/day` (e do `/day/[date]`) ganha três controles logo abaixo da data:
+  - Botão **← Dia anterior** aponta pra `/day/[date-1]`. Sempre presente.
+  - Botão **Próximo dia →** aponta pra `/day/[date+1]` **quando** `date+1 <= hoje`. Escondido no dia atual (não faz sentido "próximo" existir).
+  - Botão **Hoje** aponta pra `/day` quando `date != hoje`. Escondido no dia atual.
+  - Input HTML nativo `<input type="date">` com `max` no dia atual — submit navega pra `/day/[selecionada]`.
+- Coluna **Dia** da tabela de `per_day` no `/weekly` vira link pra `/day/[date]` (para cada linha).
+- Data no futuro (`date > hoje` no fuso do usuário) → renderiza mensagem amigável "Não é possível ver o futuro" + link "Voltar para hoje". Não chama backend.
+- Datas anteriores ao primeiro `day_log` do usuário → cai no 404 amigável de SP-154 (não é caso especial).
+
+**Fora do escopo desta feature:**
+- Edição/deleção inline (v2 — hoje é via chat).
+- Filtros/ordenação (só a ordem natural: meal_slot → occurred_at).
+- Exportação CSV/PDF do dia (feature B-06 do backlog).
+- Gráficos de distribuição de macros (v2+).
+- Comparação com dias anteriores (v2+).
 
 ---
 
@@ -634,3 +729,8 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-19** — v1.5. SP-24 detalha chat-side (SP-24a): intent `confirm_items` com scopes `all`/`specific`. Sem novo SP-ID — é implementação faltante do SP-24 original que já previa "aguarda confirmação por chat".
 - **2026-07-26** — v1.6. Adicionada seção 3.13 "Registro estruturado de treino" com SP-120..SP-127 (todos `may`, pós-MVP). Modelo hierárquico sessão → exercícios → séries, coexistência com `log_activity` via consolidação em `activity_record` no encerramento (ADR-004 em `research.md`). Novos invariantes INV-11, INV-12, INV-13. Não bloqueia MVP; implementação após Fase 9.
 - **2026-07-27** — v1.7. Nova seção 3.13: PWA básico (SP-128..SP-135). Escopo: instalabilidade + shell offline, sem fila de mensagens nem cache de dados de negócio. Nova INV-11 proíbe SW de cachear `/api/*`. Item correspondente removido de "Fora do escopo". (Se PR de workout-tracking mergear primeiro, essa seção vira 3.14 no rebase; sem conflito de SP porque as faixas SP-120..127 e SP-128..135 são disjuntas.)
+- **2026-07-27** — v1.9. Nova seção 3.15 "Visão detalhada do dia" (SP-150..SP-154, todos `should`/`may`): página `/day` server-rendered com refeições agrupadas por meal_slot, food_items com macros + micros expansíveis, seções auxiliares de hidratação/bebidas/atividade, rota opcional `/day/[date]` para dias passados. Motivador: bug do catálogo vazio em prod expôs que faltava lugar pro usuário validar item-por-item. Revive parcialmente a intenção do T-409 original. Escopo v1 é read-only; mutações continuam via chat. Faixa SP-150..154 escolhida pra reservar espaço acima de SP-140..142 (§3.14 de recuperação de catálogo, ainda em PR aberta) — sem conflito.
+- **2026-07-27** — v1.10. Adicionado SP-155 (`should`) à seção 3.15: navegação temporal a partir do `/day` (botões prev/next/hoje + input date HTML nativo) e do `/weekly` (coluna "Dia" da tabela `per_day` vira link pra `/day/[date]`). Datas no futuro bloqueadas com mensagem amigável, sem bater no backend. Motivador: `/day/[date]` já existia (SP-154) mas só era acessível via URL manual.
+- **2026-07-28** — v1.11. SP-154 esclarecido: `/day/[date]` NÃO é read-only universal — quando o dia passado ainda está `status='open'`, o botão "Encerrar dia" aparece pra permitir encerramento retroativo (usuário esqueceu de encerrar). Só edição de records fica exclusiva do chat. Motivador: comportamento anterior `allowClose={false}` bloqueava indevidamente esse fluxo.
+- **2026-07-28** — v1.12. **§3.14 (Bloco 5) reformulado.** SP-140 agora produz card com 3 botões clicáveis por item (Cadastrar manual, Foto do rótulo com promoção acoplada, Descartar). Nova SP-143 (`should`): `POST /chat/messages` aceita `promote_food_item_id` para acoplar upload de rótulo → promoção do item legado numa única viagem. Removidos: `PendingItemsModal`, endpoint `POST /records/food-items/{id}/confirm`, `ConfirmItemButton` do `/day`, intent LLM `confirm_items`, `ConfirmationService`, e SP-24a deprecated. Campo `needs_confirmation` fica no schema mas nunca mais é setado — frontend usa `has_catalog` como único sinal. Motivador: sobreposição semântica confusa entre "confirmar" e "resolver item sem catálogo".
+- **2026-07-27** — v1.8. Nova seção 3.14 "Recuperação de itens sem catálogo" (SP-140..SP-142, todos `should`, pós-MVP): prompt de recuperação na assistant message quando há `no_catalog_hit`, endpoint `POST /nutrient-facts/manual` para cadastro sem foto, promoção opcional de `food_item` legado no mesmo cadastro. Também: limpeza de duplicação em §3.13 (bloco PWA aparecia duas vezes idênticas por artefato de merge).

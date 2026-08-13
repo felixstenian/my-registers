@@ -65,8 +65,9 @@ class BeverageService:
         # tiver per_100g, cai em `unknown_basis` (raro para bebidas).
         computed = NutritionCalculator.compute(hit=hit, grams=None, ml=volume_ml)
         confidence = Decimal(str(entry.confidence))
-        needs_confirmation = confidence < LOW_CONFIDENCE_THRESHOLD or hit is None
 
+        # Bloco 5 revisão v1.12: `needs_confirmation` deixou de ser setado.
+        # Ver comentário análogo em MealService._create_item.
         occurred = occurred_at or envelope.occurred_at_hint or datetime.now(UTC)
         record = await self.records.create(
             user_id=user.id,
@@ -80,7 +81,7 @@ class BeverageService:
             source="llm",
             confidence=confidence,
             is_estimate=False,
-            needs_confirmation=needs_confirmation,
+            needs_confirmation=False,
             catalog_ref_id=uuid.UUID(hit.fact_id) if hit else None,
             kcal=computed.kcal,
             protein_g=computed.protein_g,

@@ -30,6 +30,7 @@ from app.models import (
     DayLog,
     FoodItem,
     FoodRecord,
+    NutrientFact,
     User,
     WaterRecord,
 )
@@ -145,6 +146,14 @@ class DayQueryService:
             .order_by(FoodRecord.occurred_at, FoodItem.id)
         )
         rows = list((await self.session.execute(stmt)).all())
+
+        # Batch-load nutrient_facts for items that have catalog_ref_id.
+        fact_ids = {item.catalog_ref_id for _, item in rows if item.catalog_ref_id is not None}
+        facts: dict[uuid.UUID, NutrientFact] = {}
+        if fact_ids:
+            fact_stmt = select(NutrientFact).where(NutrientFact.id.in_(fact_ids))
+            facts = {f.id: f for f in (await self.session.execute(fact_stmt)).scalars()}
+
         grouped: dict[uuid.UUID, dict[str, Any]] = {}
         for record, item in rows:
             entry = grouped.setdefault(
@@ -156,6 +165,7 @@ class DayQueryService:
                     "items": [],
                 },
             )
+            fact = facts.get(item.catalog_ref_id) if item.catalog_ref_id else None
             entry["items"].append(
                 {
                     "id": str(item.id),
@@ -168,9 +178,25 @@ class DayQueryService:
                     "protein_g": _dec(item.protein_g),
                     "carbs_g": _dec(item.carbs_g),
                     "fat_g": _dec(item.fat_g),
+                    "fiber_g": _dec(item.fiber_g),
+                    # Micros — usados pela expansão de /day (SP-152).
+                    "sodium_mg": _dec(item.sodium_mg),
+                    "calcium_mg": _dec(item.calcium_mg),
+                    "iron_mg": _dec(item.iron_mg),
+                    "potassium_mg": _dec(item.potassium_mg),
+                    # Metadata útil pra badges + auditoria na página /day.
+                    "confidence": _dec(item.confidence),
+                    "has_catalog": item.catalog_ref_id is not None,
                     "is_estimate": item.is_estimate,
                     "needs_confirmation": item.needs_confirmation,
                     "source": item.source,
+                    # SP-167: per-100g values + fact source for inline editing.
+                    "catalog_ref_id": str(item.catalog_ref_id) if item.catalog_ref_id else None,
+                    "fact_source": fact.source if fact else None,
+                    "fact_kcal": _dec(fact.kcal) if fact else None,
+                    "fact_protein_g": _dec(fact.protein_g) if fact else None,
+                    "fact_carbs_g": _dec(fact.carbs_g) if fact else None,
+                    "fact_fat_g": _dec(fact.fat_g) if fact else None,
                 }
             )
         return list(grouped.values())

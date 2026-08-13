@@ -11,6 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field
 class PostMessageRequest(BaseModel):
     text: str | None = Field(default=None, max_length=8000)
     media_ids: list[uuid.UUID] = Field(default_factory=list, max_length=4)
+    # SP-143: quando o usuário envia foto de rótulo pelo card recovery
+    # do Bloco 5, o frontend passa o ID do food_item que precisa ser
+    # promovido depois de o backend criar o nutrient_fact. Ownership é
+    # validado silenciosamente no ChatService — se falha, o campo é
+    # descartado e a mensagem segue o fluxo normal (sem promoção).
+    promote_food_item_id: uuid.UUID | None = None
 
 
 class PostMessageResponse(BaseModel):

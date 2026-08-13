@@ -12,8 +12,7 @@ import {
 import { api } from '@/lib/api-client';
 import { AssistantContent } from './AssistantContent';
 import { CloseDayModal } from './CloseDayModal';
-import { DayTotalsBar, type FoodItemRef } from './DayTotalsBar';
-import { PendingItemsModal } from './PendingItemsModal';
+import { DayTotalsBar } from './DayTotalsBar';
 
 type MediaRef = {
   id: string;
@@ -63,12 +62,24 @@ const UPLOAD_REASONS: Record<string, (name: string) => string> = {
 async function uploadMedia(file: File): Promise<UploadResult> {
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch('/api/media', {
-    method: 'POST',
-    credentials: 'include',
-    cache: 'no-store',
-    body: form,
-  });
+  // FE-01: fetch próprio (FormData/multipart não passa pelo api-client).
+  // Lança em falha de rede — capturamos aqui para não virar unhandled
+  // rejection dentro de performSend (que não tem try/catch no loop).
+  let res: Response;
+  try {
+    res = await fetch('/api/media', {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      body: form,
+    });
+  } catch {
+    return {
+      ok: false,
+      file: file.name,
+      reason: `Não foi possível enviar \`${file.name}\` (falha de rede). Verifique sua conexão.`,
+    };
+  }
   if (res.status === 201) {
     const body = (await res.json()) as { id: string };
     return { ok: true, id: body.id };
@@ -119,8 +130,6 @@ export default function ChatPage() {
   // SP-116: signal para o DayTotalsBar revalidar. Incrementa a cada nova
   // assistant message chegando pelo poll (ou pós-ação em modal).
   const [totalsRevalidateKey, setTotalsRevalidateKey] = useState(0);
-  // SP-117: modal de pending items aberto quando != null.
-  const [pendingItems, setPendingItems] = useState<FoodItemRef[] | null>(null);
   // T-704: modal de encerramento aberto com a data-alvo (`YYYY-MM-DD`).
   const [closingDate, setClosingDate] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -390,19 +399,8 @@ export default function ChatPage() {
     <main className="mx-auto flex h-[calc(100vh-49px)] max-w-3xl flex-col gap-2 p-4">
       <DayTotalsBar
         revalidateKey={totalsRevalidateKey}
-        onPendingClick={(items) => setPendingItems(items)}
         onCloseDayClick={(date) => setClosingDate(date)}
       />
-      {pendingItems !== null && (
-        <PendingItemsModal
-          items={pendingItems}
-          onClose={() => setPendingItems(null)}
-          onChanged={() => {
-            setTotalsRevalidateKey((k) => k + 1);
-            setPendingItems(null);
-          }}
-        />
-      )}
       {closingDate !== null && (
         <CloseDayModal
           date={closingDate}

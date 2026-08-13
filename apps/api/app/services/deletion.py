@@ -151,9 +151,11 @@ async def _load_by_id(
         )
         entity = (await session.execute(stmt)).scalar_one_or_none()
         if entity is not None:
-            entity.day_log_id = (await session.get(FoodRecord, entity.food_record_id)).day_log_id
+            record = await session.get(FoodRecord, entity.food_record_id)
+            assert record is not None
+            entity.day_log_id = record.day_log_id  # type: ignore[attr-defined]
         return entity
-    stmt = select(model).where(model.id == entity_id, model.user_id == user_id)
+    stmt = select(model).where(model.id == entity_id, model.user_id == user_id)  # type: ignore[assignment, attr-defined]
     return (await session.execute(stmt)).scalar_one_or_none()
 
 

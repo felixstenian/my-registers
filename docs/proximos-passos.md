@@ -45,7 +45,7 @@ integração com `_handle_close_day`).
 ## Nível 5 — Dívidas técnicas descobertas nos deploys
 
 - **D-01** — `infra/certbot/README.md` documentar `--entrypoint certbot` na primeira emissão (entrypoint em daemon-mode ignora o comando).
-- **D-02** — Trocar `sed` manual em `app.conf` por envsubst nativo do nginx (config template em `/etc/nginx/templates/`).
+- ~~**D-02** — Trocar `sed` manual em `app.conf` por envsubst nativo do nginx~~ ✅ (PR aberta).
 - **D-03** — Atualizar `CLAUDE.md` (menciona Fase 0 como próxima; app está em prod).
 - **D-04** — Adicionar seção "Se ícones/manifest não atualizam após deploy" em `docs/pwa.md` — cache do SW pode servir versão antiga se update prompt for ignorado.
 

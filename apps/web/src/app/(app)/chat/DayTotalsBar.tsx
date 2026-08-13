@@ -6,15 +6,12 @@
  * Fetches `GET /days/today` no primeiro render e revalida sempre que a
  * página do chat detecta uma nova assistant message (via `revalidateKey`).
  * Colapsa em uma linha rolável horizontalmente em telas pequenas.
- *
- * Warnings de `needs_confirmation` na lista de food_items geram um badge
- * clicável que abre o `PendingItemsModal`.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api-client';
 
-export type FoodItemRef = {
+type FoodItemRef = {
   id: string;
   detected_name: string;
   grams?: number | null;
@@ -22,7 +19,6 @@ export type FoodItemRef = {
   quantity?: number | null;
   unit?: string | null;
   kcal?: number | null;
-  needs_confirmation?: boolean | null;
 };
 
 type DayResponse = {
@@ -52,33 +48,34 @@ function fmtInt(n: number): string {
   return nfInt.format(n);
 }
 
-function collectPendingItems(day: DayResponse | null): FoodItemRef[] {
-  if (!day) return [];
-  const items: FoodItemRef[] = [];
-  for (const record of day.records.food) {
-    for (const item of record.items) {
-      if (item.needs_confirmation) items.push(item);
-    }
-  }
-  return items;
-}
-
 export function DayTotalsBar({
   revalidateKey,
-  onPendingClick,
   onCloseDayClick,
 }: {
   revalidateKey: number;
-  onPendingClick: (items: FoodItemRef[]) => void;
   onCloseDayClick: (date: string) => void;
 }) {
   const [day, setDay] = useState<DayResponse | null>(null);
+  const dayRef = useRef<DayResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // FE-01: antes, falha na 1ª carga (rede fora) deixava a barra em "Carregando
+  // totais do dia…" para sempre (loading→false, day=null cairia no estado
+  // "vazio" enganoso). Agora exibimos erro discreto com retry; revalidações
+  // que falham mantêm os dados velhos (salvo quando ainda não há dados).
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const result = await api<DayResponse>('/days/today');
-    if (result.ok) setDay(result.data);
+    if (result.ok) {
+      dayRef.current = result.data;
+      setDay(result.data);
+      setErrorMsg(null);
+    } else if (dayRef.current === null) {
+      // Só exibe erro quando não há dados antigos a mostrar; com dados
+      // velhos disponíveis, mantemos o último snapshot válido.
+      setErrorMsg(result.error?.message ?? 'Falha ao carregar totais do dia.');
+    }
     setLoading(false);
   }, []);
 
@@ -86,12 +83,25 @@ export function DayTotalsBar({
     void load();
   }, [load, revalidateKey]);
 
-  const pending = collectPendingItems(day);
-
   if (loading && day === null) {
     return (
       <div className="mb-2 rounded border border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
         Carregando totais do dia…
+      </div>
+    );
+  }
+
+  if (errorMsg && day === null) {
+    return (
+      <div className="mb-2 flex items-center justify-between gap-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+        <span>{errorMsg}</span>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="shrink-0 rounded bg-red-800 px-2.5 py-1 font-medium text-white transition hover:bg-red-900 dark:bg-red-900 dark:hover:bg-red-800"
+        >
+          Tentar novamente
+        </button>
       </div>
     );
   }
@@ -136,15 +146,6 @@ export function DayTotalsBar({
       <Stat label="Água" value={`${fmtInt(totals!.water_ml)} ml`} />
       {otherLiquids > 0 && (
         <Stat label="Outros líq." value={`${fmtInt(otherLiquids)} ml`} />
-      )}
-      {pending.length > 0 && (
-        <button
-          type="button"
-          onClick={() => onPendingClick(pending)}
-          className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
-        >
-          {pending.length} {pending.length === 1 ? 'item precisa' : 'itens precisam'} de confirmação
-        </button>
       )}
       {/* T-704: botão de encerramento. Só aparece quando ainda está aberto
           e existe pelo menos um registro (INV-5: nada útil em fechar um
