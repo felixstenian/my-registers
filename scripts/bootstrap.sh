@@ -23,6 +23,10 @@ echo "→ Aplicando migrations…"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm api \
   alembic upgrade head
 
+echo "→ Revisão atual do schema:"
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm api \
+  alembic current
+
 echo "→ Bootstrap do admin default (idempotente)…"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm api \
   python -m app.cli bootstrap
