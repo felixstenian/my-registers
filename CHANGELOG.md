@@ -17,10 +17,33 @@ Cada release tem tag Git `vX.Y.Z` e uma entrada correspondente em [GitHub Releas
 
 ---
 
-## [Unreleased]
+## [1.5.0] — 2026-08-14
+
+Correção de dados legados (itens com `kcal=0`) + reseed do catálogo TBCA + endurecimento de deploy e sessão. Formaliza o hotfix aplicado em prod em 2026-08-13 (schema drift), que havia sido documentado como "v1.4.1" mas nunca recebeu tag/release.
+
+### Adicionado
+- **Backfill de itens legados + reseed do catálogo (CLI)** — Novos comandos `python -m app.cli reseed-catalog` e `python -m app.cli backfill-zeroed [--include-closed]` via `CatalogBackfillService` (`apps/api/app/services/catalog_backfill.py`). O banco foi seedado de uma **versão antiga** do `seed_tbca.csv` (35 fatos; o CSV atual tem 65): no momento do registro o lookup perdia e itens persistiam com `kcal=0`/`catalog_ref_id=NULL`. **Não há drift de `canonical_name`** — `seed.py` normaliza nomes no ingest (`brocolis_cozido`→`brocoll_cozido`) e o lookup normaliza a query; a hipótese inicial de renomear nomes foi descartada porque quebraria o matching. O `reseed-catalog` re-roda `seed_from_csv` (upsert idempotente) inserindo os fatos faltantes; o `backfill-zeroed` religa itens zerados ao catálogo, preenche `grams`/`ml` a partir do `serving_grams` quando ausentes (`is_estimate=true`), recomputa macros via `NutritionCalculator` (Art. II §5/§10), grava `audit_events` (`action='correct'`, `actor='user'` — Art. III §11) e recomputa o snapshot por dia (Art. III §10). Dias fechados são pulados por padrão (INV-5, Art. VIII §28); `--include-closed` corrige histórico de forma explícita. Runbook em `docs/catalog-backfill-runbook.md` + 7 testes novos. ([#60](https://github.com/felixstenian/my-registers/pull/60)).
 
 ### Corrigido
-- **Hotfix v1.4.1 (2026-08-13) — Schema drift por deploy sem migrations** — O Bloco 5 adicionou `NutrientFact.created_by` ao model, mas a migration `0008_nutrient_facts_created_by` nunca foi aplicada na VPS (deploy manual via `git pull && docker compose up -d` sem passar por `bootstrap.sh`). Todo registro de comida/bebida — cujo lookup faz `SELECT nutrient_facts.created_by` (`local_tbca.py`) — estourava `UndefinedColumnError`, e o catch-all `background_processor_failed` convertia o erro no fallback genérico: assistant message "Não consegui interpretar sua mensagem agora" com `llm_intent="unknown"`/`llm_confidence=NULL`. Água continuou funcionando porque o path dela não consulta `nutrient_facts`. Diagnóstico: sintoma **água OK + comida/bebida falhando = schema drift, NÃO falha de LLM** (canário em `docs/deploy.md` §10.2). Fix operacional: `./scripts/bootstrap.sh .env.production` na VPS (aplica 0008/0009/0010 + re-seed TBCA). Hardening: `bootstrap.sh` agora loga `alembic current` pós-upgrade; `docs/deploy.md` §10.1/§10.2/§14 deixa migrations obrigatórias em todo deploy (manual ou via CD).
+- **Schema drift por deploy sem migrations (incidente 2026-08-13)** — O Bloco 5 adicionou `NutrientFact.created_by` ao model, mas a migration `0008_nutrient_facts_created_by` nunca foi aplicada na VPS (deploy manual via `git pull && docker compose up -d` sem passar por `bootstrap.sh`). Todo registro de comida/bebida — cujo lookup faz `SELECT nutrient_facts.created_by` (`local_tbca.py`) — estourava `UndefinedColumnError`, e o catch-all `background_processor_failed` convertia o erro no fallback genérico: assistant message "Não consegui interpretar sua mensagem agora" com `llm_intent="unknown"`/`llm_confidence=NULL`. Água continuou funcionando porque o path dela não consulta `nutrient_facts`. Diagnóstico: sintoma **água OK + comida/bebida falhando = schema drift, NÃO falha de LLM** (canário em `docs/deploy.md` §10.2). Fix operacional: `./scripts/bootstrap.sh .env.production` na VPS (aplica 0008/0009/0010 + re-seed TBCA). Hardening: `bootstrap.sh` agora loga `alembic current` pós-upgrade; `docs/deploy.md` §10.1/§10.2/§14 deixa migrations obrigatórias em todo deploy (manual ou via CD). Observação: este hotfix foi documentado como "v1.4.1" em `AGENTS.md`/CHANGELOG mas **nunca recebeu tag/release**; v1.5.0 o formaliza. ([#58](https://github.com/felixstenian/my-registers/pull/58)).
+- **#57 — Deploy com `git fetch` + `git reset --hard origin/main`** — O `command="..."` restrito no SSH do CD usava `git pull`, que aborta com "Your local changes would be overwritten by merge" se a working tree da VPS tiver edição não commitada. Troca por `git fetch origin && git reset --hard origin/main` (a app vive no git; segredos no `.env.production`), alinhando `deploy.yml`, `docs/deploy.md` §14 e `pos-deploy-macros-fix.md`. ([#57](https://github.com/felixstenian/my-registers/pull/57)).
+- **#59 — Refresh de sessão com single-flight no `api-client` (FE-05)** — Refresh concorrente de sessão deduplicado: múltiplas chamadas simultâneas esperam a mesma promise em vez de disparar N refreshes paralelos (evita corrida na rotação do refresh token). Cobertura E2E em `e2e/session.spec.ts`. ([#59](https://github.com/felixstenian/my-registers/pull/59)).
+
+### Documentação
+- **#58 — Runbook do hotfix schema drift** — `docs/hotfix-schema-drift-v1.4.1.md` com o passo a passo do incidente; `docs/deploy.md` §10.1/§10.2/§14 tornam migrations obrigatórias em todo deploy e documentam o canário `alembic current` + `UndefinedColumnError`. ([#58](https://github.com/felixstenian/my-registers/pull/58)).
+- **Runbook de backfill** — `docs/catalog-backfill-runbook.md`: backup → `reseed-catalog` → `backfill-zeroed` → revisão de itens `unresolved` → decisão sobre dias fechados → validação. ([#60](https://github.com/felixstenian/my-registers/pull/60)).
+
+### Deploy
+Backend `api` ganha 2 comandos CLI (reseed + backfill); `web` ganha o single-flight de sessão; `deploy.yml` e o `command="..."` da VPS passam a usar `git fetch + reset --hard`. Em VPS existente:
+
+```bash
+cd ~/my-registers
+git fetch origin && git reset --hard origin/main
+./scripts/bootstrap.sh .env.production          # migrations + seed (obrigatório)
+docker compose -f docker-compose.production.yml --env-file .env.production up -d --build api web
+```
+
+Correção de dados (obrigatório para quem tem itens zerados): seguir `docs/catalog-backfill-runbook.md` — `python -m app.cli reseed-catalog` e depois `python -m app.cli backfill-zeroed`, revisando os itens `unresolved`.
 
 ---
 
