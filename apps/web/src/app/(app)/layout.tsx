@@ -1,8 +1,10 @@
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import BottomNav from './BottomNav';
 import { InstallButton } from './InstallButton';
 import { LogoutButton } from './logout-button';
+import { NAV_ITEMS } from './nav-items';
 
 type Me = {
   id: string;
@@ -33,37 +35,32 @@ export default async function ProtectedLayout({
     redirect('/login');
   }
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="flex items-center justify-between border-b border-slate-200 px-6 py-3 text-sm dark:border-slate-800">
+    <div className="flex min-h-dvh flex-col">
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 text-sm dark:border-slate-800 dark:bg-slate-950">
         <div className="flex items-center gap-4">
           <Link href="/chat" className="font-medium hover:opacity-80">
             my-registers
           </Link>
-          <nav className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
-            <Link href="/chat" className="hover:text-slate-900 dark:hover:text-slate-100">
-              Chat
-            </Link>
-            <Link
-              href="/day"
-              className="hover:text-slate-900 dark:hover:text-slate-100"
-            >
-              Hoje
-            </Link>
-            <Link
-              href="/weekly"
-              className="hover:text-slate-900 dark:hover:text-slate-100"
-            >
-              Semana
-            </Link>
+          <nav className="hidden items-center gap-3 text-slate-500 dark:text-slate-400 md:flex">
+            {NAV_ITEMS.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="hover:text-slate-900 dark:hover:text-slate-100"
+              >
+                {item.label}
+              </Link>
+            ))}
           </nav>
         </div>
         <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
-          <span>{me.email}</span>
+          <span className="hidden md:inline">{me.email}</span>
           <InstallButton />
           <LogoutButton />
         </div>
       </header>
       <div className="flex-1">{children}</div>
+      <BottomNav />
     </div>
   );
 }

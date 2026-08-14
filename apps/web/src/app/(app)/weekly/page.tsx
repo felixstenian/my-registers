@@ -15,7 +15,7 @@ export const metadata: Metadata = {
  */
 export default function WeeklyPage() {
   return (
-    <main className="mx-auto max-w-3xl p-4">
+    <main className="mx-auto max-w-3xl p-4 pb-[calc(env(safe-area-inset-bottom)+3.5rem)] md:pb-4">
       <h1 className="mb-2 text-lg font-semibold">Relatório semanal</h1>
       <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
         Últimos 7 dias com encerramento (SP-110). Dias abertos ficam de fora.

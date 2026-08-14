@@ -396,7 +396,7 @@ export default function ChatPage() {
   };
 
   return (
-    <main className="mx-auto flex h-[calc(100vh-49px)] max-w-3xl flex-col gap-2 p-4">
+    <main className="mx-auto flex h-[calc(100dvh-49px)] max-w-3xl flex-col gap-2 p-4 pb-[calc(env(safe-area-inset-bottom)+3.5rem)] md:pb-4">
       <DayTotalsBar
         revalidateKey={totalsRevalidateKey}
         onCloseDayClick={(date) => setClosingDate(date)}
