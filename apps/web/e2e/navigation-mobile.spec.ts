@@ -9,10 +9,20 @@
  *   SP-NM-05 — desktop inalterado (sem barra, nav inline no header)
  *
  * Viewports: mobile (Pixel-like 390×844) e desktop (1280×800) no mesmo
- * arquivo via `test.use`, sem reset de DB — não depende de estado.
+ * arquivo via `test.use`.
+ *
+ * `beforeEach` com resetDb+loginAdmin é OBRIGATÓRIO: specs anteriores da
+ * suíte truncam o banco e recriam o admin com um novo id — o token do
+ * storageState passa a apontar pra um usuário inexistente e o `/chat`
+ * entra em redirect loop com `/login` (ver support/test.ts).
  */
 
 import { expect, test } from './support/test';
+
+test.beforeEach(async ({ resetDb, loginAdmin }) => {
+  await resetDb();
+  await loginAdmin();
+});
 
 test.describe('navegação mobile', () => {
   test.use({ viewport: { width: 390, height: 844 } });
