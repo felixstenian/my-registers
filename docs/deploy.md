@@ -146,7 +146,7 @@ quiser um radar rápido do estado da VPS.
 cd ~/my-registers
 git fetch origin
 git checkout main
-git pull
+git reset --hard origin/main
 
 # Bootstrap (só corre migrations pendentes)
 ./scripts/bootstrap.sh .env.production
@@ -189,7 +189,7 @@ git diff --stat HEAD..origin/main -- apps/api/ docker-compose.production.yml
 git diff --name-only HEAD..origin/main -- apps/api/alembic/versions/
 ```
 
-Vazio nos três = deploy pode ser só docs/spec, provavelmente `git pull`
+Vazio nos três = deploy pode ser só docs/spec, provavelmente `git fetch origin && git reset --hard origin/main`
 sem `up -d` já basta.
 
 > **Migrations são obrigatórias em TODO deploy, não só quando o PR traz
@@ -307,7 +307,7 @@ feature branch → PR pra dev → ci.yml (bloqueante) → merge
 release: dev → PR pra main → ci.yml → merge → deploy.yml → prod
 ```
 
-Não há mais `git pull` + `docker compose up -d --build` manual — o
+Não há mais `git fetch + reset --hard` + `docker compose up -d --build` manual — o
 deploy é feito pelo próprio GitHub Actions ao mergear em `main`.
 
 > **TODO deploy — manual ou via CD — passa por `./scripts/bootstrap.sh
@@ -328,7 +328,7 @@ ssh-keygen -t ed25519 -f ~/.ssh/deploy_myregisters -N "" -C "deploy-only"
 # o que essa chave pode fazer. NÃO é uma chave shell normal — se você
 # tentar `ssh -i deploy_myregisters felix@vps` interativamente, ele roda
 # o comando de deploy e desconecta.
-DEPLOY_CMD='cd ~/my-registers && git pull && ./scripts/bootstrap.sh .env.production && docker compose -f docker-compose.production.yml --env-file .env.production up -d --build api web'
+DEPLOY_CMD='cd ~/my-registers && git fetch origin && git reset --hard origin/main && ./scripts/bootstrap.sh .env.production && docker compose -f docker-compose.production.yml --env-file .env.production up -d --build api web'
 
 # Na VPS, como usuário felix:
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -337,6 +337,21 @@ echo "command=\"$DEPLOY_CMD\",no-port-forwarding,no-x11-forwarding,no-agent-forw
   >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
 ```
+
+> ⚠️ **Por que `git fetch + git reset --hard origin/main` em vez de `git pull`?**
+>
+> `git pull` faz `fetch` + `merge --ff-only`. Se houver qualquer mudança
+> local não commitada na working tree (resto de `sed ${DOMAIN}` do fluxo
+> pré-D-02, edit de config na mão, etc.), o merge aborta com
+> `Your local changes to the following files would be overwritten by
+> merge` e o deploy trava. O `reset --hard origin/main` impõe o estado
+> do remote: descarta modificações locais em arquivos rastreados e
+> movimenta HEAD para o commit alvo sem abrir espaço pra conflito.
+> Arquivos não-rastreados (ex: backup `.bak`) ainda bloqueiam se o
+> repo os criar — operador deve removê-los. A regra de ouro é: a VPS
+> **nunca** tem trabalho local não commitado que importe (segregação
+> constitucional: estado da app vem do git, segredos vêm do
+> `.env.production` fora do versionamento).
 
 **Segredos e variáveis no GitHub:**
 
@@ -401,7 +416,7 @@ Se o rollback também depende de banco (migration destrutiva), primeiro
 
 Situações que exigem override manual:
 - **GitHub Actions fora do ar** — deploy pela via tradicional na VPS:
-  `git pull && ./scripts/bootstrap.sh && docker compose ... up -d --build`.
+  `cd ~/my-registers && git fetch origin && git reset --hard origin/main && ./scripts/bootstrap.sh .env.production && docker compose ... up -d --build api web` (mesmo padrão do `DEPLOY_CMD` em §14.2; nunca `git pull` —	restore local pode divergir).
 - **Mudança urgente em `.env.production`** (rotação de segredo) —
   editar no host, `docker compose ... up -d --force-recreate <service>`.
 - **Migration não-reversível chegando com bug** — segure o merge em

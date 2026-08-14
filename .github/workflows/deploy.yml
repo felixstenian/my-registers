@@ -3,8 +3,12 @@
 # Estrategia: SSH sem senha para conta `felix` na VPS com chave
 # `deploy-only` restrita por `command="..."` no ~/.ssh/authorized_keys
 # (T-1004). O comando restrito faz:
-#   cd ~/my-registers && git pull && ./scripts/bootstrap.sh .env.production
+#   cd ~/my-registers && git fetch origin && git reset --hard origin/main
+#   && ./scripts/bootstrap.sh .env.production
 #   && docker compose ... up -d --build api web
+# `reset --hard` (em vez de `git pull`) impede o abort "Your local changes
+# would be overwritten by merge" se a working tree da VPS tiver edit
+# não commitada — opera em academica: a app vive no git, segredos no .env.
 # Ver docs/deploy.md §14 para o command exato.
 #
 # Este workflow NAO passa senhas nem edita .env.production. Segredo
