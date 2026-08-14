@@ -129,7 +129,7 @@ Depois, avaliar item por item — não existe uma query genérica segura porque 
 
 Se você configurou T-1003 + T-1004 (branch protection + chave SSH deploy-only), o deploy foi automático. O `command="..."` do `authorized_keys` já chama `bootstrap.sh`, então **o passo 1 executou sozinho**. Apenas confirme com a query do passo 1 e faça o smoke test do passo 2.
 
-Se `command="..."` foi copiado da doc antiga (antes do PR #37 corrigir o `bootstrap.sh`), a linha já chama `./scripts/bootstrap.sh .env.production` — nada muda. O `bootstrap.sh` novo é lido do repo atualizado após `git pull`.
+Se `command="..."` foi copiado da doc antiga (antes do PR #37 corrigir o `bootstrap.sh`), a linha já chama `./scripts/bootstrap.sh .env.production` — nada muda. O `bootstrap.sh` novo é lido do repo atualizado após `git fetch origin && git reset --hard origin/main` (ver `docs/deploy.md` §14.2 — `git pull` foi trocado por `reset --hard`).
 
 ## Se o CD ainda não estiver ativo
 
@@ -137,7 +137,7 @@ Deploy manual:
 
 ```bash
 cd ~/my-registers
-git pull                                    # traz bootstrap.sh novo + código
+git fetch origin && git reset --hard origin/main   # traz bootstrap.sh novo + código
 ./scripts/bootstrap.sh .env.production      # roda seed + admin (idempotente)
 docker compose -f docker-compose.production.yml --env-file .env.production \
   up -d --build api web                     # rebuild com fix do endpoint + modal

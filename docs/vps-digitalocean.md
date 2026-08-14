@@ -443,7 +443,7 @@ Depois de mergear PRs, na VPS:
 cd ~/my-registers
 git fetch origin
 git checkout main
-git pull
+git reset --hard origin/main
 
 ./scripts/bootstrap.sh .env.production  # se tiver migration nova
 

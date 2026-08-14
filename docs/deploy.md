@@ -146,7 +146,7 @@ quiser um radar rápido do estado da VPS.
 cd ~/my-registers
 git fetch origin
 git checkout main
-git pull
+git reset --hard origin/main
 
 # Bootstrap (só corre migrations pendentes)
 ./scripts/bootstrap.sh .env.production
@@ -189,8 +189,22 @@ git diff --stat HEAD..origin/main -- apps/api/ docker-compose.production.yml
 git diff --name-only HEAD..origin/main -- apps/api/alembic/versions/
 ```
 
-Vazio nos três = deploy pode ser só docs/spec, provavelmente `git pull`
+Vazio nos três = deploy pode ser só docs/spec, provavelmente `git fetch origin && git reset --hard origin/main`
 sem `up -d` já basta.
+
+> **Migrations são obrigatórias em TODO deploy, não só quando o PR traz
+> migration nova.** `bootstrap.sh` é idempotente e roda `alembic upgrade
+> head` — executá-lo sempre cobre o caso de o PR mexer no model SQLAlchemy
+> sem migration dedicada (o `--autogenerate` nem sempre detecta) ou de
+> uma migration pendente que ficou pra trás.
+>
+> **Failure mode conhecido (2026-08-13, fix v1.4.1):** o bloco-5 adicionou
+> `NutrientFact.created_by` no model sem aplicar a migration 0008 na VPS.
+> Todo registro de comida/bebida (que faz `SELECT nutrient_facts.created_by`)
+> estourou `UndefinedColumnError`. O erro cai no fallback genérico e vira
+> `llm_intent="unknown"` com `llm_confidence=NULL` — ou seja, registros de
+> comida/bebida **pareciam falha de LLM mas eram schema drift**. Água
+> continuou funcionando porque o path dela não consulta `nutrient_facts`.
 
 ### 10.2 Verificação pós-deploy
 
@@ -208,9 +222,19 @@ curl -sSI https://$DOMAIN/api/health | head -3
 # 3. Web serve rota protegida sem quebrar?
 curl -sSI https://$DOMAIN/login | head -3
 
-# 4. Logs sem stack traces recentes?
-docker compose -f docker-compose.production.yml --env-file .env.production logs --since=2m api web | grep -iE "traceback|error " | head -10
+# 4. Migrations no head esperado?
+docker compose -f docker-compose.production.yml --env-file .env.production run --rm api alembic current
+# Espera a última revisão de apps/api/alembic/versions/ (hoje: 0010_propagate_action).
+
+# 5. Logs sem stack traces recentes?
+docker compose -f docker-compose.production.yml --env-file .env.production logs --since=2m api web | grep -iE "traceback|error |UndefinedColumnError" | head -10
 ```
+
+**Canário rápido de schema drift:** mande uma mensagem de comida ou bebida
+(ex.: "140g de feijão com 60g de arroz") no chat e confira se o registro
+persiste com macros. Registro de água funcionar e comida/bebida falharem
+com "Não consegui interpretar" é assinatura de schema drift (ver §10.1),
+não de falha de LLM.
 
 Se um container ficar em `Restarting` por mais de 30s, `logs <serviço>`
 mostra o motivo real — a maioria das vezes é config errada em
@@ -283,8 +307,14 @@ feature branch → PR pra dev → ci.yml (bloqueante) → merge
 release: dev → PR pra main → ci.yml → merge → deploy.yml → prod
 ```
 
-Não há mais `git pull` + `docker compose up -d --build` manual — o
+Não há mais `git fetch + reset --hard` + `docker compose up -d --build` manual — o
 deploy é feito pelo próprio GitHub Actions ao mergear em `main`.
+
+> **TODO deploy — manual ou via CD — passa por `./scripts/bootstrap.sh
+> .env.production`** (que roda `alembic upgrade head`). O `DEPLOY_CMD` da
+> §14.2 já a encadeia; a via manual de emergência (§14.5) também. Sem ela,
+> o schema do banco fica pra trás do model SQLAlchemy e as falhas são
+> silenciosas (ver failure mode do bloco-5 em §10.1).
 
 ### 14.2 Configuração da VPS (uma vez só)
 
@@ -298,7 +328,7 @@ ssh-keygen -t ed25519 -f ~/.ssh/deploy_myregisters -N "" -C "deploy-only"
 # o que essa chave pode fazer. NÃO é uma chave shell normal — se você
 # tentar `ssh -i deploy_myregisters felix@vps` interativamente, ele roda
 # o comando de deploy e desconecta.
-DEPLOY_CMD='cd ~/my-registers && git pull && ./scripts/bootstrap.sh .env.production && docker compose -f docker-compose.production.yml --env-file .env.production up -d --build api web'
+DEPLOY_CMD='cd ~/my-registers && git fetch origin && git reset --hard origin/main && ./scripts/bootstrap.sh .env.production && docker compose -f docker-compose.production.yml --env-file .env.production up -d --build api web'
 
 # Na VPS, como usuário felix:
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -307,6 +337,21 @@ echo "command=\"$DEPLOY_CMD\",no-port-forwarding,no-x11-forwarding,no-agent-forw
   >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
 ```
+
+> ⚠️ **Por que `git fetch + git reset --hard origin/main` em vez de `git pull`?**
+>
+> `git pull` faz `fetch` + `merge --ff-only`. Se houver qualquer mudança
+> local não commitada na working tree (resto de `sed ${DOMAIN}` do fluxo
+> pré-D-02, edit de config na mão, etc.), o merge aborta com
+> `Your local changes to the following files would be overwritten by
+> merge` e o deploy trava. O `reset --hard origin/main` impõe o estado
+> do remote: descarta modificações locais em arquivos rastreados e
+> movimenta HEAD para o commit alvo sem abrir espaço pra conflito.
+> Arquivos não-rastreados (ex: backup `.bak`) ainda bloqueiam se o
+> repo os criar — operador deve removê-los. A regra de ouro é: a VPS
+> **nunca** tem trabalho local não commitado que importe (segregação
+> constitucional: estado da app vem do git, segredos vêm do
+> `.env.production` fora do versionamento).
 
 **Segredos e variáveis no GitHub:**
 
@@ -371,7 +416,7 @@ Se o rollback também depende de banco (migration destrutiva), primeiro
 
 Situações que exigem override manual:
 - **GitHub Actions fora do ar** — deploy pela via tradicional na VPS:
-  `git pull && ./scripts/bootstrap.sh && docker compose ... up -d --build`.
+  `cd ~/my-registers && git fetch origin && git reset --hard origin/main && ./scripts/bootstrap.sh .env.production && docker compose ... up -d --build api web` (mesmo padrão do `DEPLOY_CMD` em §14.2; nunca `git pull` —	restore local pode divergir).
 - **Mudança urgente em `.env.production`** (rotação de segredo) —
   editar no host, `docker compose ... up -d --force-recreate <service>`.
 - **Migration não-reversível chegando com bug** — segure o merge em
