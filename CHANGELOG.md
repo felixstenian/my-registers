@@ -19,8 +19,8 @@ Cada release tem tag Git `vX.Y.Z` e uma entrada correspondente em [GitHub Releas
 
 ## [Unreleased]
 
-### Adicionado
-— _vazio — próxima release_
+### Corrigido
+- **Hotfix v1.4.1 (2026-08-13) — Schema drift por deploy sem migrations** — O Bloco 5 adicionou `NutrientFact.created_by` ao model, mas a migration `0008_nutrient_facts_created_by` nunca foi aplicada na VPS (deploy manual via `git pull && docker compose up -d` sem passar por `bootstrap.sh`). Todo registro de comida/bebida — cujo lookup faz `SELECT nutrient_facts.created_by` (`local_tbca.py`) — estourava `UndefinedColumnError`, e o catch-all `background_processor_failed` convertia o erro no fallback genérico: assistant message "Não consegui interpretar sua mensagem agora" com `llm_intent="unknown"`/`llm_confidence=NULL`. Água continuou funcionando porque o path dela não consulta `nutrient_facts`. Diagnóstico: sintoma **água OK + comida/bebida falhando = schema drift, NÃO falha de LLM** (canário em `docs/deploy.md` §10.2). Fix operacional: `./scripts/bootstrap.sh .env.production` na VPS (aplica 0008/0009/0010 + re-seed TBCA). Hardening: `bootstrap.sh` agora loga `alembic current` pós-upgrade; `docs/deploy.md` §10.1/§10.2/§14 deixa migrations obrigatórias em todo deploy (manual ou via CD).
 
 ---
 

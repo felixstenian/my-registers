@@ -192,6 +192,20 @@ git diff --name-only HEAD..origin/main -- apps/api/alembic/versions/
 Vazio nos três = deploy pode ser só docs/spec, provavelmente `git pull`
 sem `up -d` já basta.
 
+> **Migrations são obrigatórias em TODO deploy, não só quando o PR traz
+> migration nova.** `bootstrap.sh` é idempotente e roda `alembic upgrade
+> head` — executá-lo sempre cobre o caso de o PR mexer no model SQLAlchemy
+> sem migration dedicada (o `--autogenerate` nem sempre detecta) ou de
+> uma migration pendente que ficou pra trás.
+>
+> **Failure mode conhecido (2026-08-13, fix v1.4.1):** o bloco-5 adicionou
+> `NutrientFact.created_by` no model sem aplicar a migration 0008 na VPS.
+> Todo registro de comida/bebida (que faz `SELECT nutrient_facts.created_by`)
+> estourou `UndefinedColumnError`. O erro cai no fallback genérico e vira
+> `llm_intent="unknown"` com `llm_confidence=NULL` — ou seja, registros de
+> comida/bebida **pareciam falha de LLM mas eram schema drift**. Água
+> continuou funcionando porque o path dela não consulta `nutrient_facts`.
+
 ### 10.2 Verificação pós-deploy
 
 Após qualquer `up -d`, uma bateria rápida de checks:
@@ -208,9 +222,19 @@ curl -sSI https://$DOMAIN/api/health | head -3
 # 3. Web serve rota protegida sem quebrar?
 curl -sSI https://$DOMAIN/login | head -3
 
-# 4. Logs sem stack traces recentes?
-docker compose -f docker-compose.production.yml --env-file .env.production logs --since=2m api web | grep -iE "traceback|error " | head -10
+# 4. Migrations no head esperado?
+docker compose -f docker-compose.production.yml --env-file .env.production run --rm api alembic current
+# Espera a última revisão de apps/api/alembic/versions/ (hoje: 0010_propagate_action).
+
+# 5. Logs sem stack traces recentes?
+docker compose -f docker-compose.production.yml --env-file .env.production logs --since=2m api web | grep -iE "traceback|error |UndefinedColumnError" | head -10
 ```
+
+**Canário rápido de schema drift:** mande uma mensagem de comida ou bebida
+(ex.: "140g de feijão com 60g de arroz") no chat e confira se o registro
+persiste com macros. Registro de água funcionar e comida/bebida falharem
+com "Não consegui interpretar" é assinatura de schema drift (ver §10.1),
+não de falha de LLM.
 
 Se um container ficar em `Restarting` por mais de 30s, `logs <serviço>`
 mostra o motivo real — a maioria das vezes é config errada em
@@ -285,6 +309,12 @@ release: dev → PR pra main → ci.yml → merge → deploy.yml → prod
 
 Não há mais `git pull` + `docker compose up -d --build` manual — o
 deploy é feito pelo próprio GitHub Actions ao mergear em `main`.
+
+> **TODO deploy — manual ou via CD — passa por `./scripts/bootstrap.sh
+> .env.production`** (que roda `alembic upgrade head`). O `DEPLOY_CMD` da
+> §14.2 já a encadeia; a via manual de emergência (§14.5) também. Sem ela,
+> o schema do banco fica pra trás do model SQLAlchemy e as falhas são
+> silenciosas (ver failure mode do bloco-5 em §10.1).
 
 ### 14.2 Configuração da VPS (uma vez só)
 
