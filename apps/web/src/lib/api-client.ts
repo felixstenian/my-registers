@@ -16,6 +16,50 @@ function setRedirectingToLogin(): void {
   (globalThis as Record<string, unknown>)[REDIRECT_GUARD_KEY] = true;
 }
 
+// FE-05: sessão expirada → tenta /auth/refresh antes de deslogar. Sem
+// este passo, o access token de 15 min (JWT_ACCESS_TTL_SECONDS=900) sempre
+// terminava em logout forçado a cada 15 minutos.
+//
+// Single-flight: chamadas concorrentes (poll + revalidação do DayTotalsBar)
+// que recebem 401 ao mesmo tempo compartilham a MESMA promise de refresh.
+// Isso é obrigatório porque o refresh rotaciona o token (Const. §17): dois
+// POSTs paralelos com o mesmo refresh token fariam o segundo disparar a
+// invalidação de família (`revoke_family`) e matar a sessão inteira (BE-05).
+//
+// Assim como o REDIRECT_GUARD_KEY, usamos `globalThis` em vez de `let` no
+// escopo do módulo para o single-flight sobreviver às múltiplas instâncias
+// do módulo que o Next.js webpack dev mode cria (uma por chunk de cliente).
+const REFRESH_SINGLE_FLIGHT_KEY = '__mr_refreshSingleFlight' as const;
+function getRefreshSingleFlight(): Promise<boolean> | null {
+  const value = (globalThis as Record<string, unknown>)[REFRESH_SINGLE_FLIGHT_KEY];
+  return value instanceof Promise ? (value as Promise<boolean>) : null;
+}
+function setRefreshSingleFlight(p: Promise<boolean> | null): void {
+  (globalThis as Record<string, unknown>)[REFRESH_SINGLE_FLIGHT_KEY] = p;
+}
+
+async function tryRefreshSession(): Promise<boolean> {
+  let flight = getRefreshSingleFlight();
+  if (flight === null) {
+    flight = (async () => {
+      try {
+        const res = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        return res.ok;
+      } catch {
+        return false;
+      } finally {
+        setRefreshSingleFlight(null);
+      }
+    })();
+    setRefreshSingleFlight(flight);
+  }
+  return flight;
+}
+
 export type ApiError = {
   code: string;
   message: string;
@@ -31,8 +75,9 @@ export async function api<T = unknown>(
   path: string,
   init: RequestInit = {},
 ): Promise<ApiResult<T>> {
-  const headers = new Headers(init.headers);
-  if (init.body && !headers.has('content-type')) {
+  const { __isRetry = false, ...fetchInit } = init as RequestInit & { __isRetry?: boolean };
+  const headers = new Headers(fetchInit.headers);
+  if (fetchInit.body && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
   }
   // Cache off: o chat depende de poll bater na mesma URL enquanto o
@@ -41,7 +86,7 @@ export async function api<T = unknown>(
   let res: Response;
   try {
     res = await fetch(`/api${path}`, {
-      ...init,
+      ...fetchInit,
       credentials: 'include',
       cache: 'no-store',
       headers,
@@ -71,17 +116,29 @@ export async function api<T = unknown>(
   }
 
   if (!res.ok) {
-    // FE-04: 401 em path que não seja `/auth/*` indica cookie de sessão
-    // expirado/inválido. O proxy só checa presença do cookie, não validade,
-    // então sem este redirect o chat para de carregar e nada leva o usuário
-    // de volta ao login. `/auth/*` (login, logout) é excluído: o LoginForm
-    // exibe "credenciais inválidas" e o logout não precisa redirecionar.
+    // FE-04 + FE-05: 401 em path que não seja `/auth/*` indica cookie de
+    // sessão expirado/inválido. O proxy só checa presença do cookie, não
+    // validade. Antes de deslogar, tenta `POST /auth/refresh` (o access
+    // token dura 15 min; o refresh token, 14 dias). Só se o refresh
+    // falhar é que o usuário é deslogado e levado ao login.
+    // `/auth/*` (login, logout) é excluído: o LoginForm exibe "credenciais
+    // inválidas" e o logout não precisa redirecionar.
     if (
       status === 401 &&
       !path.startsWith('/auth/') &&
       typeof window !== 'undefined' &&
       !isRedirectingToLogin()
     ) {
+      const refreshed = await tryRefreshSession();
+      if (refreshed && !__isRetry) {
+        // Cookie novo já foi setado pelo backend; repete o request original
+        // uma única vez com o access token renovado. O flag `__isRetry`
+        // impede loop infinito caso o próprio refresh retorne 401.
+        const retryInit = { ...fetchInit, __isRetry: true } as RequestInit & {
+          __isRetry?: boolean;
+        };
+        return api(path, retryInit);
+      }
       setRedirectingToLogin();
       // O cookie de sessão é HttpOnly — não dá para limpar via
       // `document.cookie`. Sem invalidar, o proxy (`proxy.ts:24`) rebate
