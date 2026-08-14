@@ -16,12 +16,7 @@
 
 import { test as base, expect } from '@playwright/test';
 import { ADMIN_EMAIL, ADMIN_PASSWORD, API_BASE } from './constants';
-
-type LLMKind = 'record_intent' | 'record_intent_error' | 'narrative' | 'weekly_narrative';
-type QueuePayload =
-  | { kind: 'record_intent'; envelope: Record<string, unknown> }
-  | { kind: 'record_intent_error'; error: string }
-  | { kind: 'narrative' | 'weekly_narrative'; text: string | null };
+import type { LLMKind, QueuePayload } from './types';
 
 type Fixtures = {
   queueLlm: (payload: QueuePayload) => Promise<void>;
