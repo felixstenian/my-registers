@@ -101,6 +101,52 @@ test('após logout, refresh com token revogado retorna 401 (TC-E-001/AC-008)', a
   expect(body.code).toBe('invalid_refresh');
 });
 
+test('access token expirado renova via /auth/refresh sem deslogar (FE-05)', async ({
+  page,
+}) => {
+  // Simula o access token expirado (15 min) interceptando a PRIMEIRA
+  // chamada a GET /chat/messages e devolvendo 401 (igual ao backend com
+  // token vencido). O refresh_token real continua válido nos cookies.
+  // Sem o FE-05, o api-client veria 401 e imediatamente deslogaria +
+  // redirect /login (logout forçado a cada 15 min). Com o FE-05, ele
+  // chama /auth/refresh e reexecuta o request original — o usuário
+  // permanece na página.
+  let messagesRequests = 0;
+  await page.route('**/api/chat/messages*', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+    messagesRequests += 1;
+    if (messagesRequests === 1) {
+      // Primeira tentativa: token expirado → 401 igual ao backend.
+      await route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ code: 'unauthorized', message: 'Não autenticado' }) });
+      return;
+    }
+    // Retry após refresh: deixa passar para o backend real.
+    await route.continue();
+  });
+  let refreshCalls = 0;
+  await page.route('**/api/auth/refresh', async (route) => {
+    refreshCalls += 1;
+    await route.continue();
+  });
+
+  // /chat dispara várias chamadas autenticadas (messages + days/today).
+  await page.goto('/chat');
+
+  // NÃO deve redirecionar para /login — o refresh renovou a sessão.
+  await expect(page).toHaveURL(/\/chat$/);
+
+  // A página carregou conteúdo autenticado (não caiu na tela de login).
+  await expect(page.getByPlaceholder(/Ex\.: 150 g de arroz/)).toBeVisible();
+
+  // O 401 do chat/messages disparou /auth/refresh (mecanismo FE-05).
+  await expect.poll(() => refreshCalls, { timeout: 10000 }).toBeGreaterThanOrEqual(1);
+  // E o request original foi reexecutado após o refresh (>= 2 tentativas).
+  await expect.poll(() => messagesRequests, { timeout: 10000 }).toBeGreaterThanOrEqual(2);
+});
+
 test('GET /auth/me nunca expõe password_hash (AC-011/INV-7/AC-014)', async ({ page }) => {
   // page.request compartilha cookies com o contexto -> access_token valido.
   const res = await page.request.get(`${API_BASE}/auth/me`);
