@@ -287,9 +287,7 @@ async def test_backfill_reports_unresolved(db_session: AsyncSession, admin_user)
     assert item.kcal == Decimal("0")
 
 
-async def test_backfill_skips_closed_days_by_default(
-    db_session: AsyncSession, admin_user
-):
+async def test_backfill_skips_closed_days_by_default(db_session: AsyncSession, admin_user):
     """INV-5: dias fechados pulados por padrão; incluídos com flag."""
     await seed_from_csv(db_session)
     await db_session.commit()

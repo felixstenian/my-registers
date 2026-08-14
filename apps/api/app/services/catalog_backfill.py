@@ -133,9 +133,7 @@ class CatalogBackfillService:
                 result.skipped_closed.append(item.detected_name)
                 continue
 
-            hit = await catalog.lookup(
-                LookupQuery(name=item.normalized_name, brand=item.brand)
-            )
+            hit = await catalog.lookup(LookupQuery(name=item.normalized_name, brand=item.brand))
             if hit is None:
                 result.unresolved.append(item.detected_name)
                 continue
