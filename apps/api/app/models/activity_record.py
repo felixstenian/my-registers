@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 INTENSITY_VALUES = ("light", "moderate", "vigorous", "unknown")
-CALC_METHOD_VALUES = ("mets_body_weight", "llm_estimate", "user_manual")
+CALC_METHOD_VALUES = ("mets_body_weight", "llm_estimate", "user_manual", "workout_session")
 
 
 class ActivityRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -25,7 +25,7 @@ class ActivityRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="ck_activity_records_intensity",
         ),
         CheckConstraint(
-            "calc_method IN ('mets_body_weight','llm_estimate','user_manual')",
+            "calc_method IN ('mets_body_weight','llm_estimate','user_manual','workout_session')",
             name="ck_activity_records_calc_method",
         ),
         CheckConstraint("duration_minutes > 0", name="ck_activity_records_duration_positive"),
@@ -59,3 +59,8 @@ class ActivityRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    workout_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workout_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
