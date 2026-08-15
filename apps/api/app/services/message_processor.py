@@ -669,6 +669,7 @@ class MessageProcessor:
             "workout_log_set": self._handle_workout_log_set,
             "workout_end": self._handle_workout_end,
             "workout_history": self._handle_workout_history,
+            "workout_register_template": self._handle_workout_register_template,
         }
         handler = handlers.get(envelope.intent)
         if handler is None:  # pragma: no cover — guardado pelo is_workout_intent
@@ -974,6 +975,66 @@ class MessageProcessor:
             role="assistant",
             content=content,
             llm_intent="workout_history",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_workout_register_template(
+        self,
+        user_message: Message,
+        result: LLMCallResult,
+        user: User,
+        day_log_id: uuid.UUID,
+    ) -> Message:
+        """SP-171: cadastra treino reutilizável (workout_templates) pelo chat
+        de treino (`via='workout'`). Não precisa de sessão ativa."""
+        envelope = result.envelope
+        assert envelope is not None
+        if envelope.workout_template is None:
+            return await self._record_clarify(
+                user_message,
+                result,
+                'Não consegui extrair o treino. Me passe o tipo (ex.: "Musculação"), '
+                "o agrupamento muscular (ex.: Peito + ombro + triceps) e, para cada "
+                "exercício, as séries e repetições (ex.: 3 séries de 8-12 rep).",
+                code="workout_template_missing",
+            )
+
+        svc = WorkoutService(self.session)
+        try:
+            template = await svc.register_template(
+                user_id=user.id,
+                template=envelope.workout_template,
+                message_id=user_message.id,
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
+
+        exercises = await svc.repo.list_template_exercises(template.id)
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "workout_register_template",
+            "template_id": str(template.id),
+            "name": template.name,
+            "workout_type": template.workout_type,
+            "exercise_count": len(exercises),
+        }
+        content = message_formatter.compose_workout_template(template, exercises)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="workout_register_template",
             llm_model=result.model,
             llm_prompt_version=result.prompt_version,
             llm_confidence=envelope.confidence,
@@ -1468,6 +1529,10 @@ _CLARIFY_TEMPLATES = {
     "profile_no_change": (
         "Recebi seus dados, mas eles já estão iguais aos que tenho. "
         "Se quiser mudar algo, me passe o valor novo."
+    ),
+    "workout_template_plan_missing": (
+        "Para cadastrar o treino, me diga o plano de cada exercício — "
+        'ex.: "supino reto 3 séries de 8-12 rep".'
     ),
 }
 

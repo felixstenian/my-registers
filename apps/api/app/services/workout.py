@@ -25,11 +25,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.integrations.nutrition.normalize import normalize_name
-from app.models import ActivityRecord, WorkoutExercise, WorkoutSession, WorkoutSet
+from app.models import (
+    ActivityRecord,
+    WorkoutExercise,
+    WorkoutSession,
+    WorkoutSet,
+    WorkoutTemplate,
+)
 from app.repositories.activity import ActivityRecordRepository
 from app.repositories.food import AuditEventRepository
 from app.repositories.user import UserRepository
 from app.repositories.workout import WorkoutRepository
+from app.schemas.llm import WorkoutTemplateIn
 
 DEFAULT_OLYMPIC_BAR_KG = Decimal("20")
 
@@ -542,6 +549,112 @@ class WorkoutService:
         result.pr_date = pr_date
         result.first_time = pr_weight is None
         return result
+
+    async def register_template(
+        self,
+        *,
+        user_id: uuid.UUID,
+        template: WorkoutTemplateIn,
+        message_id: uuid.UUID | None = None,
+    ) -> WorkoutTemplate:
+        """SP-171. Cadastra treino reutilizável a partir do payload LLM.
+
+        Validações semânticas (ambiguidade/insuficiência → `ValidationAppError`
+        para o `MessageProcessor` converter em `clarify`):
+        - `template.name` em branco → `workout_template_name_required`.
+        - Zero exercícios → `workout_template_no_exercises`.
+        - `target_sets`/`target_reps` ambos ausentes → `clarify` pedindo o
+          plano (sem inventar séries/reps — Const. §3).
+        - Exercício sem `target_sets`/`target_reps` → `clarify` pedindo o
+          plano dele.
+
+        Cria `workout_templates` (active=true) + `workout_template_exercises`
+        com `normalized_name` derivado no backend. Auditoria em cada criação
+        (Const. Art. III §11).
+        """
+        name = (template.name or "").strip()
+        if not name:
+            raise ValidationAppError(
+                "template name is required",
+                code="workout_template_name_required",
+            )
+        if not template.exercises:
+            raise ValidationAppError(
+                "template has no exercises",
+                code="workout_template_no_exercises",
+            )
+
+        has_plan = any(
+            (ex.target_sets is not None and ex.target_reps is not None)
+            for ex in template.exercises
+        )
+        if not has_plan:
+            raise ValidationAppError(
+                "missing target plan — o plano de séries e repetições é "
+                "obrigatório para cadastrar o treino (ex.: 3 séries de 8-12 rep)",
+                code="workout_template_plan_missing",
+            )
+        exercises_missing_plan = [
+            ex.exercise_name
+            for ex in template.exercises
+            if ex.target_sets is None or ex.target_reps is None
+        ]
+        if exercises_missing_plan:
+            raise ValidationAppError(
+                "missing target plan for exercises: "
+                + ", ".join(exercises_missing_plan)
+                + " — informe séries e repetições para todos os exercícios",
+                code="workout_template_plan_missing",
+            )
+
+        created = await self.repo.create_template(
+            user_id=user_id,
+            name=name,
+            workout_type=template.workout_type,
+            muscle_groups=template.muscle_groups,
+        )
+        created_exercises = []
+        for ex in template.exercises:
+            exercise = await self.repo.create_template_exercise(
+                template_id=created.id,
+                exercise_name=ex.exercise_name,
+                normalized_name=normalize_name(ex.exercise_name),
+                target_sets=ex.target_sets,
+                target_reps=ex.target_reps,
+            )
+            created_exercises.append(exercise)
+            await self.audit.record(
+                user_id=user_id,
+                entity_type="workout_template_exercise",
+                entity_id=exercise.id,
+                action="create",
+                actor="llm",
+                message_id=message_id,
+                after={
+                    "template_id": str(created.id),
+                    "exercise_name": ex.exercise_name,
+                    "normalized_name": normalize_name(ex.exercise_name),
+                    "target_sets": ex.target_sets,
+                    "target_reps": ex.target_reps,
+                },
+            )
+
+        await self.audit.record(
+            user_id=user_id,
+            entity_type="workout_template",
+            entity_id=created.id,
+            action="create",
+            actor="llm",
+            message_id=message_id,
+            after={
+                "name": name,
+                "workout_type": template.workout_type,
+                "muscle_groups": template.muscle_groups,
+                "exercises": [ex.exercise_name for ex in created_exercises],
+                "active": True,
+            },
+        )
+        return created
 
 
 def _duration_minutes(session: WorkoutSession) -> float | None:

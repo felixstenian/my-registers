@@ -30,6 +30,8 @@ Intent = Literal[
     "workout_log_set",
     "workout_end",
     "workout_history",
+    "workout_register_template",
+    "workout_correct",
     "clarify",
     "unknown",
 ]
@@ -270,6 +272,43 @@ class WorkoutHistoryQueryIn(_LenientBase):
     exercise_name: str
 
 
+class WorkoutTemplateExerciseIn(_LenientBase):
+    """SP-171. Exercício-alvo de um treino reutilizável. `target_sets`/
+    `target_reps` opcionais (plano sugerido); `normalized_name` é derivado
+    no backend."""
+
+    exercise_name: str
+    target_sets: int | None = Field(default=None, gt=0, le=100)
+    target_reps: int | None = Field(default=None, gt=0, le=1000)
+
+
+class WorkoutTemplateIn(_LenientBase):
+    """SP-171. Cadastro de treino reutilizável por texto (intent
+    `workout_register_template`).
+
+    `workout_type` no enum canônico; `name` é um rótulo curto do treino
+    (ex. "Peito e tríceps"); `muscle_groups` opcional (agrupamento muscular
+    para musculação, ex. ["peito", "ombro", "triceps"]); `exercises` é a
+    lista de exercícios com séries/reps sugeridos.
+    """
+
+    name: str
+    workout_type: WorkoutType
+    muscle_groups: list[str] | None = None
+    exercises: list[WorkoutTemplateExerciseIn] = Field(default_factory=list)
+
+
+class WorkoutCorrectSetIn(_LenientBase):
+    """SP-175. Correção de um `workout_set` por chat (intent `workout_correct`).
+    Identificado por descrição livre (`target_hint`) — o backend resolve qual
+    vez/série — e campos opcionais a corrigir."""
+
+    target_hint: str
+    weight_kg: float | None = Field(default=None, gt=0, le=1000)
+    reps: int | None = Field(default=None, gt=0, le=1000)
+    notes: str | None = None
+
+
 class LLMEnvelope(_StrictBase):
     intent: Intent
     confidence: float = Confidence
@@ -291,3 +330,5 @@ class LLMEnvelope(_StrictBase):
     workout_log_set: WorkoutSetIn | None = None
     workout_end: WorkoutEndIn | None = None
     workout_history: WorkoutHistoryQueryIn | None = None
+    workout_template: WorkoutTemplateIn | None = None
+    workout_correct: WorkoutCorrectSetIn | None = None

@@ -283,7 +283,7 @@ Meta: expansão do núcleo como módulo de produto (spec §3.16) — templates r
 **E2 — Templates reutilizáveis:**
 
 - [x] **T-B312** — Models + migration `0014_workout_templates.py`: `workout_templates` (user_id, name, workout_type, muscle_groups JSONB, active bool default true, created_at) + `workout_template_exercises` (template_id FK, exercise_name, normalized_name, target_sets, target_reps). (M) — SP-170, SP-171, INV-18.
-- [ ] **T-B313** — `WorkoutService.register_template`: valida payload `WorkoutTemplateIn` (tipo + agrupamento + séries/reps por exercício) e cria template + exercícios; `clarify` em ambiguidade. (M) — SP-171.
+- [x] **T-B313** — `WorkoutService.register_template`: valida payload `WorkoutTemplateIn` (tipo + agrupamento + séries/reps por exercício) e cria template + exercícios; `clarify` em ambiguidade. (M) — SP-171.
 - [ ] **T-B314** — Routes `/workouts/templates` (GET listagem com `?active=`, PATCH toggle `active`) 100% `user_id`-scoped. Aba *Ativos*/*Inativos* no frontend. (M) — SP-170, SP-172, INV-18/19.
 
 **E3 — Chat de treino dedicado:**

@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ValidationAppError
 from app.integrations.anthropic.tool_schema import RECORD_INTENT_INPUT_SCHEMA
-from app.models import ActivityRecord, WorkoutExercise, WorkoutSession, WorkoutSet
+from app.models import ActivityRecord, WorkoutExercise, WorkoutSession, WorkoutSet, WorkoutTemplate
 from app.repositories.day_log import DayLogRepository
 from app.schemas.llm import WorkoutSetIn
 from app.services.workout import WorkoutService
@@ -510,3 +510,92 @@ async def test_t312_workout_templates_schema(db_session: AsyncSession):
     )
     assert "ix_workout_templates_user_active" in idx
     assert "ix_workout_template_exercises_template" in idx
+
+
+async def test_t313_register_template_creates_template_and_exercises(
+    db_session: AsyncSession, admin_user
+):
+    """T-B313 (SP-171): `register_template` cria `workout_templates`
+    active=true + `workout_template_exercises` com o plano e auditoria."""
+    from app.schemas.llm import WorkoutTemplateIn
+
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Peito e tríceps",
+            workout_type="push",
+            muscle_groups=["peito", "ombro", "triceps"],
+            exercises=[
+                {
+                    "exercise_name": "Supino reto com barra",
+                    "target_sets": 3,
+                    "target_reps": 10,
+                },
+                {
+                    "exercise_name": "Elevação lateral",
+                    "target_sets": 4,
+                    "target_reps": 12,
+                },
+            ],
+        ),
+    )
+    exercises = await svc.repo.list_template_exercises(template.id)
+    assert template.user_id == admin_user.id
+    assert template.active is True
+    assert template.workout_type == "push"
+    assert template.name == "Peito e tríceps"
+    assert {e.exercise_name for e in exercises} == {
+        "Supino reto com barra",
+        "Elevação lateral",
+    }
+    assert all(e.normalized_name for e in exercises)
+    assert {e.target_sets for e in exercises} == {3, 4}
+    assert {e.target_reps for e in exercises} == {10, 12}
+
+    templates = list(
+        (
+            await db_session.execute(
+                select(WorkoutTemplate).where(WorkoutTemplate.user_id == admin_user.id)
+            )
+        ).scalars()
+    )
+    assert len(templates) == 1
+
+
+async def test_t313_register_template_validations(db_session: AsyncSession, admin_user):
+    """T-B313 (SP-171): ambiguidade/insuficiência vira `ValidationAppError`
+    para o processor converter em `clarify` — nome vazio, sem exercícios e
+    sem plano de séries/reps são rejeitados."""
+    from app.schemas.llm import WorkoutTemplateIn
+
+    svc = WorkoutService(db_session)
+
+    with pytest.raises(ValidationAppError) as exc1:
+        await svc.register_template(
+            user_id=admin_user.id,
+            template=WorkoutTemplateIn(name="   ", workout_type="push"),
+        )
+    assert exc1.value.code == "workout_template_name_required"
+
+    with pytest.raises(ValidationAppError) as exc2:
+        await svc.register_template(
+            user_id=admin_user.id,
+            template=WorkoutTemplateIn(name="Só nome", workout_type="push"),
+        )
+    assert exc2.value.code == "workout_template_no_exercises"
+
+    with pytest.raises(ValidationAppError) as exc3:
+        await svc.register_template(
+            user_id=admin_user.id,
+            template=WorkoutTemplateIn(
+                name="Sem plano",
+                workout_type="pull",
+                exercises=[{"exercise_name": "Remada curvada"}],
+            ),
+        )
+    assert exc3.value.code == "workout_template_plan_missing"
+
+    # Nenhum template foi criado nas falhas acima.
+    count = list((await db_session.execute(select(WorkoutTemplate))).scalars())
+    assert count == []

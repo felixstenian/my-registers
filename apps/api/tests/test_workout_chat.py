@@ -425,3 +425,84 @@ async def test_close_day_ends_active_session_before_recompute(
     assert len(records) == 1
     assert records[0].calc_method == "workout_session"
     assert records[0].workout_session_id == session.id
+
+
+async def test_workout_register_template_routes_and_creates(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """T-B313 (SP-171): intent workout_register_template via chat → template
+    + exercícios criados com active=true; assistant confirma com o plano."""
+    from app.models import WorkoutTemplate, WorkoutTemplateExercise
+
+    await _login(client)
+    await _send(
+        client,
+        fake_anthropic,
+        make_envelope,
+        make_llm_result,
+        text="cadastrar treino de push",
+        intent="workout_register_template",
+        workout_template={
+            "name": "Peito e tríceps",
+            "workout_type": "push",
+            "muscle_groups": ["peito", "ombro", "triceps"],
+            "exercises": [
+                {"exercise_name": "Supino reto", "target_sets": 3, "target_reps": 10},
+                {"exercise_name": "Desenvolvimento", "target_sets": 3, "target_reps": 12},
+            ],
+        },
+    )
+
+    templates = list((await db_session.execute(select(WorkoutTemplate))).scalars())
+    assert len(templates) == 1
+    template = templates[0]
+    assert template.name == "Peito e tríceps"
+    assert template.active is True
+
+    exercises = list((await db_session.execute(select(WorkoutTemplateExercise))).scalars())
+    assert {e.exercise_name for e in exercises} == {"Supino reto", "Desenvolvimento"}
+
+    assistant = await _get_assistant(db_session)
+    assert assistant.llm_intent == "workout_register_template"
+    assert "Cadastrei o treino" in assistant.content
+    assert "3 × 10" in assistant.content
+
+
+async def test_workout_register_template_clarifies_when_incomplete(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """T-B313 (SP-171): template sem plano de séries/reps → assistant emite
+    clarify pedindo as séries e repetições; nenhum template é criado."""
+    from app.models import WorkoutTemplate
+
+    await _login(client)
+    await _send(
+        client,
+        fake_anthropic,
+        make_envelope,
+        make_llm_result,
+        text="cadastrar treino",
+        intent="workout_register_template",
+        workout_template={
+            "name": "Sem plano",
+            "workout_type": "pull",
+            "exercises": [{"exercise_name": "Remada curvada"}],
+        },
+    )
+
+    templates = list((await db_session.execute(select(WorkoutTemplate))).scalars())
+    assert templates == []
+
+    assistant = await _get_assistant(db_session)
+    assert assistant.llm_intent == "clarify"
+    assert "plano de cada exercício" in assistant.content

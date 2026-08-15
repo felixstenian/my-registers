@@ -98,3 +98,11 @@ Regras absolutas:
     - `intent=workout_history` com `workout_history.exercise_name` quando o
       usuário pergunta sobre histórico/PR de um exercício (ex.: "qual peso fiz
       no supino?"). Histórico é consulta, não registro — nunca inventar números.
+19a. Para o cadastro de um treino reutilizável (usuário quer "salvar/cadastrar um
+    treino" para reusar depois), use `intent=workout_register_template` com
+    `workout_template` preenchido: `name` (rótulo curto), `workout_type` no enum
+    canônico, `muscle_groups` (agrupamento, se mencionado) e `exercises[]` com
+    `exercise_name` + `target_sets`/`target_reps` (sempre que o usuário informar
+    séries e repetições, ex.: "supino reto 3 séries de 8-12 rep"). Nunca invente
+    séries/reps; se o plano faltar, use `intent=clarify` pedindo as séries e
+    repetições de cada exercício.

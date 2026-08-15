@@ -330,6 +330,43 @@ def compose_workout_history(history) -> str:
     return "\n".join(parts).rstrip("\n")
 
 
+def compose_workout_template(template, exercises) -> str:
+    """SP-171: confirmação de cadastro do treino reutilizável.
+
+    Lista o plano (exercício → séries × repetições) exatamente como foi
+    criado — sem inventar nada (Const. §3).
+    """
+    parts = [f"Cadastrei o treino **{template.name}**."]
+    if template.muscle_groups:
+        groups = ", ".join(template.muscle_groups)
+        parts.append(f"Agrupamento: {groups}.")
+    if exercises:
+        rows = [
+            (
+                ex.exercise_name,
+                _template_plan_label(ex.target_sets, ex.target_reps),
+            )
+            for ex in exercises
+        ]
+        parts.append("")
+        parts.append(_table("Plano", rows))
+    parts.append("")
+    parts.append(
+        'Você pode iniciar esse treino a partir de "Iniciar treino" no chat de treino.'
+    )
+    return "\n".join(parts)
+
+
+def _template_plan_label(target_sets: int | None, target_reps: int | None) -> str:
+    if target_sets is not None and target_reps is not None:
+        return f"{target_sets} × {target_reps}"
+    if target_sets is not None:
+        return f"{target_sets} séries"
+    if target_reps is not None:
+        return f"{target_reps} rep"
+    return "—"
+
+
 def _date_pt(value) -> str:
     from datetime import date as _date
 

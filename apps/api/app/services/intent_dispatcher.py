@@ -29,9 +29,10 @@ _FALLBACK_CLARIFY = (
 # extension point caso apareça algo novo no futuro.
 _STRUCTURED_INTENTS: set[str] = set()
 
-# SP-120..SP-127 (Bloco 3): intents de treino são roteados DIRETAMENTE pelo
-# `MessageProcessor` (handlers `_handle_workout_*`), sem passar por
-# `_STRUCTURED_INTENTS` nem cair no fallback `unknown` aqui.
+# SP-120..SP-127 (Bloco 3) + SP-171 (Bloco 3.b): intents de treino são
+# roteados DIRETAMENTE pelo `MessageProcessor` (handlers `_handle_workout_*`),
+# sem passar por `_STRUCTURED_INTENTS` nem cair no fallback `unknown` aqui.
+# `workout_correct` (SP-175) entra no T-B322 junto com seu handler.
 WORKOUT_INTENTS: frozenset[str] = frozenset(
     {
         "workout_start",
@@ -39,6 +40,8 @@ WORKOUT_INTENTS: frozenset[str] = frozenset(
         "workout_log_set",
         "workout_end",
         "workout_history",
+        # SP-171 (Bloco 3.b): cadastro de treino reutilizável por texto.
+        "workout_register_template",
     }
 )
 
