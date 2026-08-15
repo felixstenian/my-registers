@@ -31,6 +31,8 @@
 | SP-90 a SP-92 | Consulta do dia | §10 | `app/api/routes/days.py`, `app/services/daily_report.py` |
 | SP-100 a SP-104 | Encerramento | §6, §10 | `app/services/daily_report.py` (close) |
 | SP-110 a SP-113 | Relatório semanal | §6 (weekly_reports), §10 | `app/services/weekly_report.py` |
+| SP-120 a SP-127 | Treino — núcleo hierárquico | §3.13, ADR-004/ADR-011 | `app/services/workout.py`, `app/models/workout.py`, `app/repositories/workout.py`, `app/services/message_processor.py`, `app/services/intent_dispatcher.py` |
+| SP-170 a SP-179 | Treino — módulo (templates, chat dedicado, `/workouts`, `/day`) | §3.16, ADR-011 | `app/services/workout.py` (módulo), `app/api/routes/workouts.py`, `app/models/workout_templates.py`, `apps/web/src/app/(app)/workouts/*`, `apps/web/src/proxy.ts`, `apps/web/src/app/(app)/day/AuxiliarySections.tsx`, `apps/web/src/app/(app)/day/edit-forms.tsx` |
 
 ---
 
@@ -176,6 +178,32 @@ Nada de conteúdo em `spec.md` deve descrever HOW. Nada em `plan.md` deve descre
 
 ---
 
+## 8. Pós-MVP — Módulo de treino (SP-170..SP-179)
+
+> **Contexto:** o núcleo (SP-120..127, todas `may`) já estava planejado como Bloco 3; a v1.13 da spec adiciona a expansão de módulo (§3.16). Esta seção descreve a ordem de execução do módulo; as tarefas atômicas vivem em `tasks.md` (Bloco 3 T-B301..T-B308 + T-B3xx novos do módulo).
+
+**Ordem de execução do módulo:**
+
+| Etapa | Entrega | SPs | Arquivos | Depende de |
+|-------|---------|-----|----------|-----------|
+| E1 — Fundação do módulo | Migration `messages.via` (`'food'` default) + índice `idx_messages_user_via`; filtro por `via` em `GET /chat/messages` e `MessageProcessor`; prompt `system_v2.md` selecionado pela `via` | SP-173 | `alembic/versions/`, `app/repositories/message.py`, `app/api/routes/chat.py`, `app/services/message_processor.py`, `prompts/system_v2.md` | Bloco 3 (núcleo) feito |
+| E2 — Templates | `workout_templates` + `workout_template_exercises`; `register_template` via chat; rotas `/workouts/templates` (listagem/toggle `active`) | SP-170, SP-171, SP-172 | `alembic/versions/0011_workout_templates.py`, `app/models/workout_templates.py`, `app/repositories/workout.py`, `app/api/routes/workouts.py`, `app/services/workout.py` | E1 |
+| E3 — Chat dedicado | `/workouts/chat` + header `WorkoutTotalsHeader` (atividades do dia + kcal gastas); botões Cadastrar/Iniciar/Finalizar | SP-173 | `apps/web/src/app/(app)/workouts/chat/page.tsx`, `WorkoutTotalsHeader.tsx`, `apps/web/src/proxy.ts` | E1 |
+| E4 — Fluxo guiado + cronômetro | Template picker/exercício picker, lookup da última realização, `workout_next_exercise`, botão "Ir para o próximo exercício", `Stopwatch` | SP-178, SP-179 | `apps/web/src/app/(app)/workouts/`, `app/services/workout.py` | E2, E3 |
+| E5 — Imagem + edição | `workout_register`/`workout_correct` por imagem/texto; `WorkoutImageIn`/`WorkoutCorrectSetIn`; PATCH `/records/workout-sets/{id}` e `/records/workout-sessions/{id}`; reconsolidação de sessão encerrada (INV-20) | SP-174, SP-175 | `app/schemas/llm.py`, `app/services/message_processor.py`, `app/api/routes/records.py`, `app/services/workout.py` | E2 |
+| E6 — `/day` + histórico | Seção "Treinos" no `/day`; histórico paginado em `/workouts` | SP-176, SP-177 | `apps/web/src/app/(app)/day/AuxiliarySections.tsx` + `edit-forms.tsx`, `app/api/routes/workouts.py`, `app/repositories/workout.py` | E2 |
+
+**Gates de fase (Bloco 3 / módulo):**
+- Núcleo: probe de `tests/test_workout.py` (T-B307) cobrindo SP-120..127 + INV-15/16/17.
+- Módulo: cada etapa E1..E6 com teste (unit de service + integração ponta-a-ponta) para os SPs `must` (`SP-170..SP-175`, `SP-177..SP-179`); `SP-176` (`should`) com ao menos test de site/`day`.
+- Invariantes com teste obrigatório; INV-21 via fixture que troca cliente Anthropic por mock que devolve lixo.
+- Sem PR sem referência a SP-XX/T-XXX no body.
+
+**Divergências vs. `app_plan.md`:** nenhuma até aqui — o módulo estende `app_plan.md` §9/§11 (chat/workout) quando a primeira `feat:` for implementada; registrar nesta seção a partir daí.
+
+---
+
 ## Histórico
 
 - **2026-07-15** — v1.0. Plano inicial. Fase 0 marcada concluída.
+- **2026-08-14** — v1.1. Módulo de treino (SP-120..127 núcleo + SP-170..179 expansão da v1.13 da spec): mapeamento SP→arquivos no mapa §1 e nova seção §8 com ordem de execução (E1..E6) e gates. Corresponde à spec v1.13 (§3.13 inalterado + nova §3.16).
