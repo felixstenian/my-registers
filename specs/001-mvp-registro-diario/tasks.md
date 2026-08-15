@@ -270,15 +270,15 @@ Meta: rastrear treinos de força de forma granular (sessão → exercícios → 
 
 **Gate Bloco 3:** treino registrado por chat com histórico contextual; encerramento gera activity_record que aparece no snapshot; INV-15/16/17 verificadas.
 
-### Bloco 3.b — Módulo de treino (SP-170..SP-179) — pendente
+### Bloco 3.b — Módulo de treino (SP-170..SP-179) — em andamento (E1 feita)
 
 Meta: expansão do núcleo como módulo de produto (spec §3.16) — templates reutilizáveis, chat de treino dedicado no **mesmo pool de `messages` via `messages.via='workout'`**, tela `/workouts` (Ativos/Inativos/Histórico), fluxo guiado com cronômetro, registro por imagem, edição de peso/séries/kcal e seção de treinos no `/day`. Ordem E1..E6 conforme `plan.md` §8.
 
-**E1 — Fundação do módulo (`messages.via`):**
+**E1 — Fundação do módulo (`messages.via`):** ✅
 
-- [ ] **T-B309** — Migration: `ALTER TABLE messages ADD COLUMN via TEXT NOT NULL DEFAULT 'food'` + índice `idx_messages_user_via ON messages(user_id, via, created_at)`. Sem backfill (default cobre). (S) — SP-173.
-- [ ] **T-B310** — `MessageRepository.list_messages` e `GET /chat/messages` ganham filtro `via` (`'food'` default; `'workout'` para o chat de treino); `POST /chat/messages` aceita `via` no payload. Envelope de chat de treino reusa o mesmo pool. (M) — SP-173.
-- [ ] **T-B311** — `MessageProcessor` seleciona prompt `system_v2.md` conforme `via`; `IntentDispatcher` roteia intents de treino diretamente (fora de `_STRUCTURED_INTENTS`). Handlers `_handle_workout_*` compartilhados entre núcleo e módulo. (M) — SP-173.
+- [x] **T-B309** — Migration: `ALTER TABLE messages ADD COLUMN via TEXT NOT NULL DEFAULT 'food'` + índice `idx_messages_user_via ON messages(user_id, via, created_at)`. Sem backfill (default cobre). (S) — SP-173.
+- [x] **T-B310** — `MessageRepository.list_messages` e `GET /chat/messages` ganham filtro `via` (`'food'` default; `'workout'` para o chat de treino); `POST /chat/messages` aceita `via` no payload. Envelope de chat de treino reusa o mesmo pool. (M) — SP-173.
+- [x] **T-B311** — `MessageProcessor` seleciona prompt `system_v2.md` conforme `via` (novo `system_workout_v2.md` para `via='workout'`); `IntentDispatcher` roteia intents de treino diretamente (fora de `_STRUCTURED_INTENTS`). Handlers `_handle_workout_*` compartilhados entre núcleo e módulo. (M) — SP-173.
 
 **E2 — Templates reutilizáveis:**
 

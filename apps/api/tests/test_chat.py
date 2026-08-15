@@ -384,3 +384,111 @@ async def test_post_without_promote_id_leaves_raw_null(
     stored = await db_session.get(Message, resp.json()["message_id"])
     assert stored is not None
     assert stored.raw_llm_response is None
+
+
+# ---------------------------------------------------------------------------
+# SP-173 (Bloco 3.b) — chat dedicado de treino via `messages.via`
+# ---------------------------------------------------------------------------
+
+
+async def test_post_defaults_via_food(client: AsyncClient, admin_user, db_session: AsyncSession):
+    """T-B310: sem `via` no payload, a mensagem vai para o chat de comida
+    (`via='food'`) — compat total com o comportamento pré-Blocо 3.b."""
+    await _login(client)
+    resp = await client.post("/chat/messages", json={"text": "almocei arroz"})
+    assert resp.status_code == 202
+    stored = await db_session.get(Message, resp.json()["message_id"])
+    assert stored is not None
+    assert stored.via == "food"
+
+
+async def test_post_via_workout_persists_and_filters_listing(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """T-B310: `via='workout'` persiste no pool e `GET /chat/messages` filtra
+    por `via` — mensagens de treino só aparecem com `via=workout`; as de
+    comida continuam isoladas (default `food`)."""
+    await _login(client)
+    r1 = await client.post("/chat/messages", json={"text": "arroz e feijão"})
+    r2 = await client.post(
+        "/chat/messages", json={"text": "iniciar treino de push", "via": "workout"}
+    )
+    assert r1.status_code == 202 and r2.status_code == 202
+
+    stored = await db_session.get(Message, r2.json()["message_id"])
+    assert stored is not None
+    assert stored.via == "workout"
+
+    food = (await client.get("/chat/messages")).json()["messages"]
+    assert [m["content"] for m in food] == ["arroz e feijão"]
+
+    workout = (await client.get("/chat/messages?via=workout")).json()["messages"]
+    assert [m["content"] for m in workout] == ["iniciar treino de push"]
+
+
+async def test_post_rejects_invalid_via(client: AsyncClient, admin_user):
+    """T-B310: `via` aceita só os valores canônicos → payload inválido = 422."""
+    await _login(client)
+    resp = await client.post("/chat/messages", json={"text": "treino", "via": "swimming"})
+    assert resp.status_code == 422
+
+
+async def test_list_after_anchor_from_other_via_is_ignored(
+    client: AsyncClient, admin_user, db_session: AsyncSession
+):
+    """T-B310: anchor de polling de outro chat (`via` diferente) é ignorado —
+    nada de vazar mensagens entre os dois chats (isola os pools)."""
+    await _login(client)
+    food_ids = []
+    for i in range(3):
+        r = await client.post("/chat/messages", json={"text": f"comida {i}"})
+        food_ids.append(r.json()["message_id"])
+    for i in range(2):
+        r = await client.post("/chat/messages", json={"text": f"treino {i}", "via": "workout"})
+        assert r.status_code == 202
+
+    # `after` aponta para mensagem de comida, mas a listagem é de treino:
+    # o anchor não casa com `via=workout` e deve ser ignorado (lista recentes).
+    resp = await client.get(f"/chat/messages?via=workout&after={food_ids[1]}")
+    assert resp.status_code == 200
+    messages = resp.json()["messages"]
+    assert [m["content"] for m in messages] == ["treino 0", "treino 1"]
+
+
+async def test_message_processor_passes_via_to_anthropic(
+    client: AsyncClient, admin_user, fake_anthropic
+):
+    """T-B311: o `MessageProcessor` repassa `via` da user message ao
+    `AnthropicClient.call_record_intent` — o prompt de sistema é selecionado
+    pela `via` (food vs workout)."""
+    from app.integrations.anthropic.client import LLMCallResult
+    from app.schemas.llm import LLMEnvelope
+
+    envelope = LLMEnvelope.model_validate(
+        {
+            "intent": "workout_start",
+            "confidence": 0.9,
+            "user_text_summary": "Usuário iniciou treino de push",
+            "needs_clarification": True,
+            "workout_start": {"workout_type": "push", "detected_name": "treino de push"},
+        }
+    )
+    fake_anthropic.queue(
+        LLMCallResult(
+            envelope=envelope,
+            raw_tool_input=None,
+            tokens_input=0,
+            tokens_output=0,
+            model="fake-model",
+            prompt_version="system_v2",
+        )
+    )
+
+    await _login(client)
+    resp = await client.post(
+        "/chat/messages", json={"text": "iniciar treino de push", "via": "workout"}
+    )
+    assert resp.status_code == 202
+
+    assert fake_anthropic.calls, "esperava ao menos 1 call ao cliente"
+    assert fake_anthropic.calls[0]["via"] == "workout"

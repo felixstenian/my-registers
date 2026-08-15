@@ -404,3 +404,47 @@ async def test_inv17_soft_delete_activity_record_keeps_session(
     sets = list((await db_session.execute(select(WorkoutSet))).scalars())
     assert len(sets) == 1
     assert sets[0].sequence_index == 0
+
+
+async def test_t309_messages_via_column_and_index(db_session: AsyncSession):
+    """T-B309 (SP-173): migration 0013 adiciona `messages.via` com default
+    'food' (sem backfill) e o índice `idx_messages_user_via` que alimenta
+    listagem/polling por user_id+via."""
+    col = (
+        await db_session.execute(
+            text(
+                "SELECT column_default FROM information_schema.columns "
+                "WHERE table_name='messages' AND column_name='via'"
+            )
+        )
+    ).scalar_one_or_none()
+    assert col is not None
+    assert "food" in (col or "")
+
+    idx = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE tablename='messages' AND indexname='idx_messages_user_via'"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert idx == ["idx_messages_user_via"]
+
+
+def test_t311_system_prompt_selected_by_via():
+    """T-B311 (SP-173): `_load_system_prompt_for_via` devolve prompts
+    distintos por `via` — `food` mantém o system_v2.md (alimentação),
+    `workout` usa o system_workout_v2.md (treinos dedicados)."""
+    from app.integrations.anthropic.client import _load_system_prompt_for_via
+
+    food_prompt = _load_system_prompt_for_via("food")
+    workout_prompt = _load_system_prompt_for_via("workout")
+    assert food_prompt != workout_prompt
+    assert "nutrição" in food_prompt or "macros" in food_prompt or "log_food" in food_prompt
+    assert "workout_log_set" in workout_prompt
+    assert "log_food" not in workout_prompt

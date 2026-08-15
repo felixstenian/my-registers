@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, Text, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +14,9 @@ class Message(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "messages"
     __table_args__ = (
         CheckConstraint("role IN ('user','assistant','system')", name="ck_messages_role"),
+        # SP-173: chat de treino reusa o mesmo pool de messages com isolamento
+        # por `via`; o índice alimenta listagem e polling do chat por via+user.
+        Index("idx_messages_user_via", "user_id", "via", "created_at"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -21,6 +24,10 @@ class Message(UUIDPrimaryKeyMixin, Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # SP-173: 'food' (default) é o chat de alimentação existente; 'workout'
+    # é o chat de treino dedicado. Sem backfill na migration — o default
+    # cobre as linhas pré-existentes.
+    via: Mapped[str] = mapped_column(Text, nullable=False, server_default="food", default="food")
     day_log_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("day_logs.id", ondelete="SET NULL"),

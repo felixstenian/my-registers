@@ -44,6 +44,7 @@ from app.schemas.llm import LLMEnvelope
 logger = logging.getLogger("app.anthropic")
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "system_v2.md"
+_WORKOUT_PROMPT_PATH = Path(__file__).parent / "prompts" / "system_workout_v2.md"
 _NARRATIVE_PROMPT_PATH = Path(__file__).parent / "prompts" / "narrative_v1.md"
 _WEEKLY_NARRATIVE_PROMPT_PATH = Path(__file__).parent / "prompts" / "weekly_narrative_v1.md"
 
@@ -59,6 +60,23 @@ _HAIKU_TEXT_MAX_CHARS = 500
 @lru_cache
 def _load_system_prompt() -> str:
     return _PROMPT_PATH.read_text(encoding="utf-8")
+
+
+@lru_cache
+def _load_workout_system_prompt() -> str:
+    return _WORKOUT_PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def _load_system_prompt_for_via(via: str) -> str:
+    """SP-173: prompt de sistema selecionado pela `via` da mensagem.
+
+    `'food'` (default) mantém o `system_v2.md` com intents de alimentação,
+    hidratação, atividade, correção, chat etc.; `'workout'` usa o chat de
+    treino dedicado (`system_workout_v2.md`) com apenas os intents de treino.
+    """
+    if via == "workout":
+        return _load_workout_system_prompt()
+    return _load_system_prompt()
 
 
 @lru_cache
@@ -161,6 +179,7 @@ class AnthropicClient:
         *,
         user_text: str | None,
         images: list[tuple[str, bytes]] | None = None,
+        via: str = "food",
         max_semantic_retries: int = 1,
     ) -> LLMCallResult:
         images = images or []
@@ -178,6 +197,7 @@ class AnthropicClient:
         chosen_model = self._pick_model(has_images=bool(images), user_text=user_text)
         base_user_content = self._build_user_content(user_text, images)
         conversation: list[dict[str, Any]] = [{"role": "user", "content": base_user_content}]
+        system_prompt = _load_system_prompt_for_via(via)
 
         tokens_in_total = 0
         tokens_out_total = 0
@@ -193,7 +213,7 @@ class AnthropicClient:
                     system=[
                         {
                             "type": "text",
-                            "text": _load_system_prompt(),
+                            "text": system_prompt,
                             "cache_control": {"type": "ephemeral"},
                         }
                     ],

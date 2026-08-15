@@ -103,6 +103,7 @@ class MessageProcessor:
         result = await self.anthropic.call_record_intent(
             user_text=user_message.content,
             images=images,
+            via=user_message.via,
         )
 
         if result.error == "no_queued_result":

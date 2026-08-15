@@ -20,6 +20,7 @@ class MessageRepository:
         day_log_id: uuid.UUID | None,
         role: str,
         content: str | None = None,
+        via: str = "food",
         llm_intent: str | None = None,
         llm_model: str | None = None,
         llm_prompt_version: str | None = None,
@@ -33,6 +34,7 @@ class MessageRepository:
             day_log_id=day_log_id,
             role=role,
             content=content,
+            via=via,
             llm_intent=llm_intent,
             llm_model=llm_model,
             llm_prompt_version=llm_prompt_version,
@@ -58,6 +60,7 @@ class MessageRepository:
         self,
         *,
         user_id: uuid.UUID,
+        via: str = "food",
         after_id: uuid.UUID | None = None,
         before_id: uuid.UUID | None = None,
         limit: int = 50,
@@ -75,10 +78,16 @@ class MessageRepository:
           o refresh não trazia o que o usuário acabou de escrever
           (bug reportado em 2026-07-19).
         """
+        # SP-173: anchor só é válido dentro da mesma `via`; um after_id do
+        # chat de alimentação não deve pular a página no chat de treino.
         anchor_after = await self.get_by_id(after_id, user_id=user_id) if after_id else None
         anchor_before = await self.get_by_id(before_id, user_id=user_id) if before_id else None
+        if anchor_after is not None and anchor_after.via != via:
+            anchor_after = None
+        if anchor_before is not None and anchor_before.via != via:
+            anchor_before = None
 
-        stmt = select(Message).where(Message.user_id == user_id)
+        stmt = select(Message).where(Message.user_id == user_id, Message.via == via)
         if anchor_after is not None:
             stmt = stmt.where(Message.created_at > anchor_after.created_at)
         if anchor_before is not None:

@@ -47,6 +47,7 @@ class ChatService:
         user: User,
         text: str | None,
         media_ids: list[uuid.UUID],
+        via: str = "food",
         promote_food_item_id: uuid.UUID | None = None,
     ) -> Message:
         text_stripped = (text or "").strip() or None
@@ -96,6 +97,7 @@ class ChatService:
             day_log_id=day_log.id,
             role="user",
             content=text_stripped,
+            via=via,
             raw_llm_response=raw,
         )
         if media_ids:
@@ -108,12 +110,14 @@ class ChatService:
         self,
         *,
         user: User,
+        via: str = "food",
         after_id: uuid.UUID | None,
         before_id: uuid.UUID | None,
         limit: int,
     ) -> list[MessageWithMedia]:
         rows = await self.messages.list_messages(
             user_id=user.id,
+            via=via,
             after_id=after_id,
             before_id=before_id,
             limit=limit,
