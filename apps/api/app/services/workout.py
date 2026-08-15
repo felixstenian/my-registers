@@ -585,8 +585,7 @@ class WorkoutService:
             )
 
         has_plan = any(
-            (ex.target_sets is not None and ex.target_reps is not None)
-            for ex in template.exercises
+            (ex.target_sets is not None and ex.target_reps is not None) for ex in template.exercises
         )
         if not has_plan:
             raise ValidationAppError(

@@ -351,9 +351,7 @@ def compose_workout_template(template, exercises) -> str:
         parts.append("")
         parts.append(_table("Plano", rows))
     parts.append("")
-    parts.append(
-        'Você pode iniciar esse treino a partir de "Iniciar treino" no chat de treino.'
-    )
+    parts.append('Você pode iniciar esse treino a partir de "Iniciar treino" no chat de treino.')
     return "\n".join(parts)
 
 

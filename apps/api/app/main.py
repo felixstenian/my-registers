@@ -5,7 +5,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.middleware import RequestContextMiddleware
-from app.api.routes import auth, chat, days, health, media, nutrient_facts, records, weekly
+from app.api.routes import (
+    auth,
+    chat,
+    days,
+    health,
+    media,
+    nutrient_facts,
+    records,
+    weekly,
+    workouts,
+)
 from app.core.config import get_settings
 from app.core.exceptions import AppError
 from app.core.logging import configure_logging
@@ -43,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(days.router)
     app.include_router(weekly.router)
     app.include_router(nutrient_facts.router)
+    app.include_router(workouts.router)
 
     # Endpoints /test/* — só em APP_ENV=test. Alimentam a fila do
     # TestAnthropicClient e resetam estado entre specs do Playwright.

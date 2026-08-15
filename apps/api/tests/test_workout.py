@@ -599,3 +599,123 @@ async def test_t313_register_template_validations(db_session: AsyncSession, admi
     # Nenhum template foi criado nas falhas acima.
     count = list((await db_session.execute(select(WorkoutTemplate))).scalars())
     assert count == []
+
+
+async def _login(client) -> None:
+    resp = await client.post(
+        "/auth/login",
+        json={"email": "admin@example.com", "password": "adminadmin"},
+    )
+    assert resp.status_code == 204
+
+
+async def _seed_template(session: AsyncSession, user, *, active: bool = True):
+    from app.schemas.llm import WorkoutTemplateIn
+
+    template = await WorkoutService(session).register_template(
+        user_id=user.id,
+        template=WorkoutTemplateIn(
+            name="Peito e tríceps",
+            workout_type="push",
+            muscle_groups=["peito", "triceps"],
+            exercises=[
+                {"exercise_name": "Supino reto", "target_sets": 3, "target_reps": 10},
+            ],
+        ),
+    )
+    if not active:
+        template.active = False
+        await session.flush()
+    await session.commit()
+    return template
+
+
+async def test_t314_list_templates_filters_by_active(client, admin_user, db_session: AsyncSession):
+    """T-B314 (SP-170): GET /workouts/templates  devolve as abas — `?active=`
+    filtra; sem filtro, tudo. Tem que ser user-scoped."""
+    from app.schemas.llm import WorkoutTemplateIn
+
+    svc = WorkoutService(db_session)
+    await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Treino A",
+            workout_type="push",
+            exercises=[{"exercise_name": "Supino", "target_sets": 3, "target_reps": 10}],
+        ),
+    )
+    template_b = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Treino B",
+            workout_type="pull",
+            exercises=[{"exercise_name": "Remada", "target_sets": 4, "target_reps": 8}],
+        ),
+    )
+    template_b.active = False
+    await db_session.commit()
+
+    await _login(client)
+    resp = await client.get("/workouts/templates")
+    assert resp.status_code == 200
+    bodies = resp.json()
+    assert {b["name"] for b in bodies} == {"Treino A", "Treino B"}
+
+    resp_active = await client.get("/workouts/templates", params={"active": "true"})
+    assert resp_active.status_code == 200
+    assert {b["name"] for b in resp_active.json()} == {"Treino A"}
+
+    resp_inactive = await client.get("/workouts/templates", params={"active": "false"})
+    assert resp_inactive.status_code == 200
+    assert {b["name"] for b in resp_inactive.json()} == {"Treino B"}
+
+
+async def test_t314_get_template_detail_with_exercises(
+    client, admin_user, db_session: AsyncSession
+):
+    """T-B314 (SP-170): GET /workouts/templates/{id} inclui exercícios-alvo."""
+    template = await _seed_template(db_session, admin_user)
+
+    await _login(client)
+    resp = await client.get(f"/workouts/templates/{template.id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "Peito e tríceps"
+    assert len(body["exercises"]) == 1
+    assert body["exercises"][0]["target_sets"] == 3
+
+
+async def test_t314_toggle_template_active(client, admin_user, db_session: AsyncSession):
+    """T-B314 (SP-172): PATCH /workouts/templates/{id} com `{"active":false}`
+    arquiva o template (movendo para a aba Inativos) e audita."""
+    template = await _seed_template(db_session, admin_user, active=True)
+
+    await _login(client)
+    resp = await client.patch(f"/workouts/templates/{template.id}", json={"active": False})
+    assert resp.status_code == 200
+    assert resp.json()["active"] is False
+
+    from app.models import AuditEvent
+
+    events = list((await db_session.execute(select(AuditEvent))).scalars())
+    assert any(e.action == "update" for e in events)
+
+
+async def test_t314_template_routes_are_user_scoped(client, admin_user, db_session: AsyncSession):
+    """T-B314 (INV-18): usuário não enxerga template de outro usuário."""
+    from app.core.security import hash_password
+    from app.repositories.user import UserRepository
+
+    other = await UserRepository(db_session).create(
+        email="other@example.com",
+        password_hash=hash_password("otheradmin"),
+        display_name="Other",
+    )
+    await db_session.commit()
+    template = await _seed_template(db_session, other)
+
+    await _login(client)
+    resp = await client.get(f"/workouts/templates/{template.id}")
+    assert resp.status_code == 404
+    resp_patch = await client.patch(f"/workouts/templates/{template.id}", json={"active": False})
+    assert resp_patch.status_code == 404
