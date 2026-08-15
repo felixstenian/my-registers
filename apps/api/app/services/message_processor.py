@@ -21,6 +21,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,6 +63,7 @@ from app.services.meal import MealResult, MealService
 from app.services.profile import ProfileService, ProfileUpdateResult
 from app.services.promotion import try_promote_food_item
 from app.services.weekly_report import WeeklyReportService
+from app.services.workout import WorkoutService
 
 logger = logging.getLogger("app.message_processor")
 
@@ -152,6 +154,11 @@ class MessageProcessor:
         # SP-30..35 cadastro de produto por foto de rótulo.
         if result.envelope.intent == "log_nutrition_label":
             return await self._handle_nutrition_label(user_message, result)
+
+        # SP-120..127 treino estruturado via chat (Bloco 3). Roteados
+        # diretamente, sem passar pelo IntentDispatcher.
+        if self.dispatcher.is_workout_intent(result.envelope.intent):
+            return await self._handle_workout(user_message, result)
 
         try:
             dispatch = self.dispatcher.dispatch(result.envelope)
@@ -615,6 +622,346 @@ class MessageProcessor:
             role="assistant",
             content=content,
             llm_intent="log_nutrition_label",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    # ------------------------------------------------------------------
+    # SP-120..127 — treino estruturado via chat (Bloco 3)
+    # ------------------------------------------------------------------
+
+    async def _handle_workout(self, user_message: Message, result: LLMCallResult) -> Message:
+        """Roteia os 5 intents de treino para os handlers específicos."""
+        envelope = result.envelope
+        if envelope is None:
+            return await self._record_error(user_message, result)
+        if user_message.day_log_id is None:
+            logger.warning(
+                "workout_missing_day_log",
+                extra={"event": "message_processor", "message_id": str(user_message.id)},
+            )
+            return await self._record_error(user_message, result)
+        day_log_id = user_message.day_log_id
+
+        user = await self.session.get(User, user_message.user_id)
+        if user is None:
+            return await self._record_error(user_message, result)
+
+        handlers = {
+            "workout_start": self._handle_workout_start,
+            "workout_add_exercise": self._handle_workout_add_exercise,
+            "workout_log_set": self._handle_workout_log_set,
+            "workout_end": self._handle_workout_end,
+            "workout_history": self._handle_workout_history,
+        }
+        handler = handlers.get(envelope.intent)
+        if handler is None:  # pragma: no cover — guardado pelo is_workout_intent
+            return await self._record_error(user_message, result)
+        return await handler(user_message, result, user, day_log_id)
+
+    async def _handle_workout_start(
+        self,
+        user_message: Message,
+        result: LLMCallResult,
+        user: User,
+        day_log_id: uuid.UUID,
+    ) -> Message:
+        """SP-120: inicia sessão ativa; auto-encerra a anterior (INV-15)."""
+        envelope = result.envelope
+        assert envelope is not None
+        if envelope.workout_start is None:
+            return await self._record_clarify(
+                user_message,
+                result,
+                'Não consegui identificar o tipo de treino (ex.: "push", "legs", '
+                '"full_body"). Pode repetir?',
+                code="workout_start_missing",
+            )
+
+        svc = WorkoutService(self.session)
+        session, closed_previous = await svc.start_session(
+            user_id=user.id,
+            day_log_id=day_log_id,
+            workout_type=envelope.workout_start.workout_type,
+            detected_name=envelope.workout_start.detected_name,
+            message_id=user_message.id,
+        )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "workout_start",
+            "workout_session_id": str(session.id),
+            "workout_type": session.workout_type,
+            "closed_previous": closed_previous is not None,
+        }
+        content = message_formatter.compose_workout_start(session, closed_previous)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="workout_start",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_workout_add_exercise(
+        self,
+        user_message: Message,
+        result: LLMCallResult,
+        user: User,
+        day_log_id: uuid.UUID,
+    ) -> Message:
+        """SP-121: adiciona exercício na sessão ativa + histórico/PR."""
+        envelope = result.envelope
+        assert envelope is not None
+        if envelope.workout_add_exercise is None:
+            return await self._record_clarify(
+                user_message,
+                result,
+                "Qual exercício você quer adicionar?",
+                code="workout_exercise_missing",
+            )
+
+        svc = WorkoutService(self.session)
+        session = await svc.repo.get_active_session(user.id)
+        if session is None:
+            return await self._record_clarify(
+                user_message,
+                result,
+                "Nenhum treino em andamento. Comece dizendo, por exemplo, "
+                '"iniciar treino de push".',
+                code="workout_no_active_session",
+            )
+
+        try:
+            exercise, history = await svc.add_exercise(
+                user_id=user.id,
+                session_id=session.id,
+                exercise_name=envelope.workout_add_exercise.exercise_name,
+                message_id=user_message.id,
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "workout_add_exercise",
+            "workout_session_id": str(session.id),
+            "exercise_id": str(exercise.id),
+            "name": exercise.name,
+            "first_time": history.first_time,
+        }
+        content = message_formatter.compose_workout_add_exercise(exercise, history)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="workout_add_exercise",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_workout_log_set(
+        self,
+        user_message: Message,
+        result: LLMCallResult,
+        user: User,
+        day_log_id: uuid.UUID,
+    ) -> Message:
+        """SP-122: registra série no último exercício da sessão ativa."""
+        envelope = result.envelope
+        assert envelope is not None
+        if envelope.workout_log_set is None:
+            return await self._record_clarify(
+                user_message,
+                result,
+                "Me diz a carga e as repetições (ex.: 60 kg × 10).",
+                code="workout_set_missing",
+            )
+
+        svc = WorkoutService(self.session)
+        session = await svc.repo.get_active_session(user.id)
+        if session is None:
+            return await self._record_clarify(
+                user_message,
+                result,
+                "Nenhum treino em andamento. Comece dizendo, por exemplo, "
+                '"iniciar treino de legs".',
+                code="workout_no_active_session",
+            )
+
+        try:
+            workout_set = await svc.log_set(
+                user_id=user.id,
+                session_id=session.id,
+                weight_kg=(
+                    Decimal(str(envelope.workout_log_set.weight_kg))
+                    if envelope.workout_log_set.weight_kg is not None
+                    else None
+                ),
+                reps=envelope.workout_log_set.reps,
+                notes=envelope.workout_log_set.notes,
+                message_id=user_message.id,
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
+
+        exercise = await svc.repo.last_exercise(session.id)
+        assert exercise is not None  # INV-16: set exige exercício existente
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "workout_log_set",
+            "workout_session_id": str(session.id),
+            "exercise_id": str(exercise.id),
+            "set_id": str(workout_set.id),
+            "weight_kg": float(workout_set.weight_kg),
+            "reps": workout_set.reps,
+            "sequence_index": workout_set.sequence_index,
+        }
+        content = message_formatter.compose_workout_log_set(session, exercise, workout_set)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="workout_log_set",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_workout_end(
+        self,
+        user_message: Message,
+        result: LLMCallResult,
+        user: User,
+        day_log_id: uuid.UUID,
+    ) -> Message:
+        """SP-124: encerra sessão ativa + consolida em activity_record."""
+        svc = WorkoutService(self.session)
+        session = await svc.repo.get_active_session(user.id)
+        if session is None:
+            return await self._record_clarify(
+                user_message,
+                result,
+                "Não há treino em andamento para encerrar.",
+                code="workout_no_active_session",
+            )
+
+        ended = await svc.end_session(
+            user_id=user.id,
+            session_id=session.id,
+            end_reason="user",
+            message_id=user_message.id,
+        )
+        record = await svc.activities.get_by_workout_session(session.id)
+        duration_minutes = (
+            round((ended.ended_at - ended.started_at).total_seconds() / 60, 1)
+            if ended.ended_at and ended.started_at
+            else None
+        )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "workout_end",
+            "workout_session_id": str(session.id),
+            "end_reason": ended.end_reason,
+            "duration_minutes": duration_minutes,
+            "kcal_burned": (
+                float(record.kcal_burned) if record and record.kcal_burned is not None else None
+            ),
+        }
+        content = message_formatter.compose_workout_end(ended, record)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="workout_end",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=result.envelope.confidence if result.envelope else None,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_workout_history(
+        self,
+        user_message: Message,
+        result: LLMCallResult,
+        user: User,
+        day_log_id: uuid.UUID,
+    ) -> Message:
+        """SP-127: histórico das últimas 3 sessões + PR pessoal."""
+        envelope = result.envelope
+        assert envelope is not None
+        if envelope.workout_history is None:
+            return await self._record_clarify(
+                user_message,
+                result,
+                "De qual exercício você quer ver o histórico?",
+                code="workout_history_missing",
+            )
+
+        svc = WorkoutService(self.session)
+        try:
+            history = await svc.history(
+                user_id=user.id,
+                exercise_name=envelope.workout_history.exercise_name,
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "workout_history",
+            "exercise_name": history.exercise_name,
+            "first_time": history.first_time,
+            "pr_weight_kg": (
+                float(history.pr_weight_kg) if history.pr_weight_kg is not None else None
+            ),
+        }
+        content = message_formatter.compose_workout_history(history)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="workout_history",
             llm_model=result.model,
             llm_prompt_version=result.prompt_version,
             llm_confidence=envelope.confidence,

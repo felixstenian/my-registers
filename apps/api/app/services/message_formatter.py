@@ -20,6 +20,7 @@ Regras de formatação:
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -160,6 +161,183 @@ def _has_approx_food_items(items, warnings: list[dict]) -> bool:
 # ---------------------------------------------------------------------------
 # Composers per intent
 # ---------------------------------------------------------------------------
+
+
+def _workout_type_label(workout_type: str) -> str:
+    return {
+        "push": "Push",
+        "pull": "Pull",
+        "legs": "Pernas",
+        "upper": "Superiores",
+        "lower": "Inferiores",
+        "full_body": "Corpo inteiro",
+        "cardio": "Cardio",
+        "other": "Treino",
+    }.get(workout_type, workout_type)
+
+
+def _fmt_weight(value) -> str:
+    """`60.000` → `60 kg`. Decimal pesa 3 casas; formata como inteiro quando
+    é exato (barra olímpica 20 → `20 kg`)."""
+    if value is None:
+        return "—"
+    q = Decimal(str(value)).quantize(Decimal("0.001"))
+    if q == q.to_integral():
+        return f"{int(q)} kg"
+    return f"{_fmt_dec(q, 3)} kg"
+
+
+def figure_weights(msg, r):
+    return r
+
+
+def compose_workout_start(session, closed_previous) -> str:
+    """SP-120: cabeçalho + nota de encerramento da sessão anterior (INV-15)."""
+    parts = [
+        f"Iniciei seu treino de **{_workout_type_label(session.workout_type)}**.",
+        "",
+        'Nenhum exercício ainda — me diga o primeiro (ex.: "supino reto").',
+    ]
+    if closed_previous is not None:
+        parts.insert(
+            1,
+            (
+                "Encerrei o treino anterior automaticamente (treinos não podem "
+                "ficar ativos ao mesmo tempo)."
+            ),
+        )
+    return "\n".join(parts)
+
+
+def compose_workout_add_exercise(exercise, history) -> str:
+    """SP-121: exercício adicionado + histórico contextual (última sessão e PR)."""
+    parts = [f"Registrei o exercício **{exercise.name}** na sessão atual."]
+
+    if history.first_time:
+        parts.append("")
+        parts.append("Primeira vez registrando esse exercício.")
+        return "\n".join(parts)
+
+    last = history.sessions[-1] if history.sessions else None
+    parts.append("")
+    parts.append("📈 **Histórico do exercício:**")
+    if last is not None and last.sets:
+        rows = [
+            (
+                f"{s.sequence_index + 1}ª série",
+                f"{_fmt_weight(s.weight_kg)} × {s.reps}",
+            )
+            for s in last.sets
+        ]
+        parts.append(_table(f"Última sessão — {_date_pt(last.ended_at)}", rows))
+    if history.pr_weight_kg is not None:
+        parts.append(
+            _table(
+                "PR pessoal",
+                [
+                    ("Carga", _fmt_weight(history.pr_weight_kg)),
+                    ("Repetições", str(history.pr_reps_at_weight or "")),
+                    ("Data", _date_pt(history.pr_date)),
+                ],
+            )
+        )
+    return "\n".join(parts)
+
+
+def compose_workout_log_set(session, exercise, workout_set, last_sets=None) -> str:
+    """SP-122: confirmação da série.
+
+    `last_sets` = séries do mesmo exercício na sessão anterior (mais
+    recente) para o comparativo "da última vez" — opcional.
+    """
+    parts = [
+        f"Série **{workout_set.sequence_index + 1}** de **{exercise.name}** "
+        f"registrada: {_fmt_weight(workout_set.weight_kg)} × {workout_set.reps}."
+    ]
+    if last_sets:
+        prev = last_sets[0]
+        parts.append(f"Da última vez você fez {_fmt_weight(prev.weight_kg)} × {prev.reps}.")
+    return "\n".join(parts)
+
+
+def compose_workout_end(session, record) -> str:
+    """SP-124: resumo do treino encerrado (duração, exercícios, séries, kcal).
+
+    Exercícios/séries vêm do `notes` JSON do activity_record — o backend
+    consolida no encerramento (SP-126), então o formatter não precisa
+    consultar o DB de novo.
+    """
+    label = _workout_type_label(session.workout_type)
+    minutes = int(
+        (session.ended_at - session.started_at).total_seconds() // 60
+        if session.ended_at and session.started_at
+        else 0
+    )
+
+    notes = json.loads(record.notes) if record is not None and record.notes else None
+    exercises = (notes or {}).get("exercises", []) if notes else []
+    n_sets = sum(len(ex.get("sets", [])) for ex in exercises)
+
+    parts = [
+        f"Treino de **{label}** encerrado — {minutes} min, "
+        f"{len(exercises)} exercício(s) · {n_sets} série(s).",
+    ]
+
+    kcal = record.kcal_burned if record is not None else None
+    if kcal is not None:
+        parts.append(f"~{_fmt_int(kcal)} kcal estimados.")
+    else:
+        parts.append('Para estimar as calorias gastas, informe seu peso atual (ex.: "peso 78 kg").')
+
+    if exercises:
+        rows = [(ex.get("name", ""), f"{len(ex.get('sets', []))} série(s)") for ex in exercises]
+        parts.append("")
+        parts.append(_table("Exercícios", rows))
+    return "\n".join(parts)
+
+
+def compose_workout_history(history) -> str:
+    """SP-127: últimas 3 sessões do exercício + PR pessoal."""
+    if history.first_time:
+        return f"Nenhum histórico de **{history.exercise_name}** — primeira vez."
+
+    parts = [f"📈 Histórico de **{history.exercise_name}**:", ""]
+    for session in history.sessions:
+        date_label = _date_pt(session.ended_at)
+        rows = [
+            (
+                f"{s.sequence_index + 1}ª série",
+                f"{_fmt_weight(s.weight_kg)} × {s.reps}",
+            )
+            for s in session.sets
+        ]
+        if not rows:
+            rows = [("—", "sem séries registradas")]
+        parts.append(_table(f"{_workout_type_label(session.workout_type)} — {date_label}", rows))
+        parts.append("")
+
+    if history.pr_weight_kg is not None:
+        parts.append(
+            _table(
+                "PR pessoal",
+                [
+                    ("Carga", _fmt_weight(history.pr_weight_kg)),
+                    ("Repetições", str(history.pr_reps_at_weight or "")),
+                    ("Data", _date_pt(history.pr_date)),
+                ],
+            )
+        )
+    return "\n".join(parts).rstrip("\n")
+
+
+def _date_pt(value) -> str:
+    from datetime import date as _date
+
+    if value is None:
+        return "—"
+    if isinstance(value, _date):
+        return value.strftime("%d/%m/%Y")
+    return value.strftime("%d/%m/%Y")
 
 
 def compose_meal(meal, recompute, log_date: date) -> str:
