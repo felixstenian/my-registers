@@ -1,35 +1,53 @@
 """WorkoutService — sessões de treino estruturado (sessão → exercícios → séries).
 
-SP-120..127 (núcleo Bloco 3, T-B303). Métodos autônomos — não dependem do
+SP-120..127 (núcleo Bloco 3). Métodos autônomos — não dependem do
 MessageProcessor; testáveis isoladamente com repo real (Postgres).
 
 - INV-15: `start_session` auto-encerra a sessão ativa anterior
-  (`end_reason='auto_new_session'`).
+  (`end_reason='auto_new_session'`) e **consolida em `activity_record`**.
 - INV-16: `log_set` liga a série ao último exercício da sessão ativa.
+- SP-126: `end_session` / auto-close consolidam a sessão em 1
+  `activity_record` (`calc_method='workout_session'`, MET fixo por tipo).
 - `weight_kg=None` → barra olímpica (`DEFAULT_OLYMPIC_BAR_KG`).
 - Auditoria (Const. Art. III §11) em toda criação/encerramento.
-- Nenhum cálculo de kcal aqui — `consolidate_to_activity` é T-B304.
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.integrations.nutrition.normalize import normalize_name
-from app.models import WorkoutExercise, WorkoutSession, WorkoutSet
+from app.models import ActivityRecord, WorkoutExercise, WorkoutSession, WorkoutSet
+from app.repositories.activity import ActivityRecordRepository
 from app.repositories.food import AuditEventRepository
+from app.repositories.user import UserRepository
 from app.repositories.workout import WorkoutRepository
 
 DEFAULT_OLYMPIC_BAR_KG = Decimal("20")
 
 EndReason = Literal["user", "auto_new_session", "auto_close_day"]
+
+# SP-126: kcal = MET fixo × weight_kg × horas. Macro por tipo de treino.
+# `push/pull/upper` → 5.0; `legs/lower` → 6.0; `full_body` → 5.5.
+# `cardio`/`other` não especificados → fallback conservador 5.0.
+_WORKOUT_TYPE_MET: dict[str, Decimal] = {
+    "push": Decimal("5.0"),
+    "pull": Decimal("5.0"),
+    "upper": Decimal("5.0"),
+    "legs": Decimal("6.0"),
+    "lower": Decimal("6.0"),
+    "full_body": Decimal("5.5"),
+    "cardio": Decimal("5.0"),
+    "other": Decimal("5.0"),
+}
 
 
 @dataclass(slots=True)
@@ -65,6 +83,8 @@ class WorkoutService:
         self.session = session
         self.repo = WorkoutRepository(session)
         self.audit = AuditEventRepository(session)
+        self.activities = ActivityRecordRepository(session)
+        self.users = UserRepository(session)
 
     async def start_session(
         self,
@@ -76,7 +96,8 @@ class WorkoutService:
         message_id: uuid.UUID | None = None,
         started_at: datetime | None = None,
     ) -> tuple[WorkoutSession, WorkoutSession | None]:
-        """SP-120. Cria sessão ativa; auto-encerra a anterior (INV-15).
+        """SP-120. Cria sessão ativa; auto-encerra a anterior (INV-15) e a
+        consolida em `activity_record` (fluxo SP-120 → SP-126).
 
         Retorna `(nova_sessão, sessão_encerrada_por_auto)`.
         """
@@ -101,6 +122,11 @@ class WorkoutService:
                     "ended_at": started.isoformat(),
                     "end_reason": "auto_new_session",
                 },
+            )
+            await self.consolidate_to_activity(
+                user_id=user_id,
+                session_id=existing.id,
+                message_id=message_id,
             )
 
         session = await self.repo.create_session(
@@ -255,8 +281,8 @@ class WorkoutService:
         message_id: uuid.UUID | None = None,
         ended_at: datetime | None = None,
     ) -> WorkoutSession:
-        """SP-124. Encerra sessão ativa. Consolidação em `activity_record`
-        roda em T-B304 (`consolidate_to_activity`)."""
+        """SP-124. Encerra sessão ativa e consolida em `activity_record`
+        (SP-126)."""
         session = await self.repo.get_session(user_id, session_id)
         if session is None:
             raise NotFoundError("workout session not found", code="workout_session_not_found")
@@ -286,7 +312,142 @@ class WorkoutService:
                 "duration_minutes": _duration_minutes(session),
             },
         )
+        await self.consolidate_to_activity(
+            user_id=user_id,
+            session_id=session.id,
+            message_id=message_id,
+        )
         return session
+
+    async def consolidate_to_activity(
+        self,
+        *,
+        user_id: uuid.UUID,
+        session_id: uuid.UUID,
+        message_id: uuid.UUID | None = None,
+    ) -> ActivityRecord:
+        """SP-126. Cria/atualiza o `activity_record` da sessão encerrada.
+
+        - `duration_minutes = ended_at - started_at`.
+        - `kcal_burned = MET_fixo(workout_type) × weight_kg × horas`
+          (`calc_method='workout_session'`, `activity_type='strength'`).
+        - Sem `weight_kg` no perfil → `kcal_burned=NULL` + warning
+          `weight_kg_required_for_kcal` (treino registrado, kcal pendente).
+        - `notes` = JSON com `workout_session_id` e IDs de exercícios/séries
+          (INV-17: somente referência reversa, sem FK atividade→exercício).
+        - Idempotente: upsert por `workout_session_id` (não duplica em
+          reconsoidação).
+        """
+        session = await self.repo.get_session(user_id, session_id)
+        if session is None:
+            raise NotFoundError("workout session not found", code="workout_session_not_found")
+        if session.ended_at is None:
+            raise ValidationAppError(
+                "workout session is not ended",
+                code="workout_session_not_ended",
+            )
+
+        duration = Decimal(str(_duration_minutes(session)))
+        if duration <= 0:
+            duration = Decimal("0.01")
+
+        user = await self.users.get_by_id(user_id)
+        weight_kg = user.weight_kg if user is not None else None
+
+        met = _WORKOUT_TYPE_MET.get(session.workout_type, Decimal("5.0"))
+        kcal_burned: Decimal | None
+        warnings: list[dict[str, Any]] = []
+        if weight_kg is not None:
+            hours = duration / Decimal("60")
+            kcal_burned = (met * weight_kg * hours).quantize(Decimal("0.01"))
+        else:
+            kcal_burned = None
+            warnings.append({"code": "weight_kg_required_for_kcal"})
+
+        exercises = await self.repo.exercises_with_sets(session_id)
+        notes_payload = {
+            "workout_session_id": str(session.id),
+            "workout_type": session.workout_type,
+            "exercises": [
+                {
+                    "exercise_id": str(ex.id),
+                    "name": ex.name,
+                    "normalized_name": ex.normalized_name,
+                    "sequence_index": ex.sequence_index,
+                    "sets": [
+                        {
+                            "set_id": str(st.id),
+                            "sequence_index": st.sequence_index,
+                            "weight_kg": float(st.weight_kg),
+                            "reps": st.reps,
+                        }
+                        for st in sets
+                    ],
+                }
+                for ex, sets in exercises
+            ],
+        }
+
+        record = await self.activities.get_by_workout_session(session_id)
+        if record is not None:
+            # Reconsolidação (INV-17): atualiza o mesmo activity_record.
+            record.detected_name = session.detected_name
+            record.normalized_name = normalize_name(session.detected_name)
+            record.activity_type = "strength"
+            record.duration_minutes = duration
+            record.met_value = met
+            record.kcal_burned = kcal_burned
+            record.notes = json.dumps(notes_payload)
+            await self.session.flush()
+            await self.audit.record(
+                user_id=user_id,
+                entity_type="activity_record",
+                entity_id=record.id,
+                action="update",
+                actor="user",
+                message_id=message_id,
+                after={
+                    "workout_session_id": str(session.id),
+                    "duration_minutes": float(duration),
+                    "kcal_burned": None if kcal_burned is None else float(kcal_burned),
+                    "calc_method": "workout_session",
+                },
+            )
+            return record
+
+        record = await self.activities.create(
+            user_id=user_id,
+            day_log_id=session.day_log_id,
+            message_id=message_id,
+            occurred_at=session.started_at,
+            detected_name=session.detected_name,
+            normalized_name=normalize_name(session.detected_name),
+            activity_type="strength",
+            duration_minutes=duration,
+            distance_km=None,
+            intensity="unknown",
+            met_value=met,
+            kcal_burned=kcal_burned,
+            calc_method="workout_session",
+            confidence=None,
+            notes=json.dumps(notes_payload),
+            workout_session_id=session.id,
+        )
+        await self.audit.record(
+            user_id=user_id,
+            entity_type="activity_record",
+            entity_id=record.id,
+            action="create",
+            actor="user",
+            message_id=message_id,
+            after={
+                "workout_session_id": str(session.id),
+                "duration_minutes": float(duration),
+                "kcal_burned": None if kcal_burned is None else float(kcal_burned),
+                "calc_method": "workout_session",
+            },
+        )
+        return record
 
     async def history(
         self,

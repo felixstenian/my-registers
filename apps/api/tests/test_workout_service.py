@@ -7,7 +7,7 @@ Regressões: usa `db_session` (conftest) já com PostgreSQL de teste.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -191,4 +191,156 @@ async def test_audit_events_written_for_workout_mutations(db_session: AsyncSessi
         ).scalars()
     )
     actions = sorted(e.action for e in events)
-    assert actions == ["create", "create", "create", "update"]
+    # 4 mutações de treino + 1 activity_record de consolidação (SP-126)
+    assert actions == ["create", "create", "create", "create", "update"]
+
+
+async def test_sp126_consolidate_met_by_type(db_session: AsyncSession, admin_user):
+    """SP-126: end_session consolida em activity_record com MET fixo do
+    `workout_type` (push→5.0) × weight_kg × horas, calc_method
+    'workout_session' e activity_type 'strength'."""
+    from decimal import Decimal
+
+    from app.models import ActivityRecord
+
+    weight = Decimal("80")
+    admin_user.weight_kg = weight
+    await db_session.flush()
+
+    svc = WorkoutService(db_session)
+    ws, _ = await _start(db_session, admin_user, workout_type="push")
+    await svc.add_exercise(user_id=admin_user.id, session_id=ws.id, exercise_name="supino reto")
+    await db_session.flush()
+    await svc.log_set(user_id=admin_user.id, session_id=ws.id, weight_kg=60, reps=10)
+    await db_session.flush()
+
+    await svc.end_session(
+        user_id=admin_user.id,
+        session_id=ws.id,
+        ended_at=ws.started_at + timedelta(hours=1),
+    )
+    await db_session.flush()
+
+    rec = (
+        await db_session.execute(
+            select(ActivityRecord).where(ActivityRecord.workout_session_id == ws.id)
+        )
+    ).scalar_one()
+    assert rec.calc_method == "workout_session"
+    assert rec.activity_type == "strength"
+    assert rec.met_value == Decimal("5.0")
+    # 5.0 MET × 80 kg × 1h = 400 kcal
+    assert rec.kcal_burned == Decimal("400.00")
+    assert rec.detected_name == "Treino de push"
+
+
+async def test_sp126_consolidate_without_weight_kcal_null(db_session: AsyncSession, admin_user):
+    """SP-126: sem weight_kg no perfil → activity_record criado com
+    `kcal_burned=NULL` (treino registrado, kcal pendente)."""
+    from app.models import ActivityRecord
+
+    assert admin_user.weight_kg is None
+
+    svc = WorkoutService(db_session)
+    ws, _ = await _start(db_session, admin_user, workout_type="legs")
+    await svc.end_session(
+        user_id=admin_user.id,
+        session_id=ws.id,
+        ended_at=ws.started_at + timedelta(minutes=30),
+    )
+    await db_session.flush()
+
+    rec = (
+        await db_session.execute(
+            select(ActivityRecord).where(ActivityRecord.workout_session_id == ws.id)
+        )
+    ).scalar_one()
+    assert rec.calc_method == "workout_session"
+    assert rec.kcal_burned is None
+    assert rec.met_value is not None
+
+
+async def test_sp126_consolidate_notes_json_exercise_and_set_ids(
+    db_session: AsyncSession, admin_user
+):
+    """SP-126: `notes` guarda JSON com IDs dos exercícios e séries
+    (INV-17: somente referência reversa)."""
+    import json as json_lib
+
+    from app.models import ActivityRecord
+
+    svc = WorkoutService(db_session)
+    ws, _ = await _start(db_session, admin_user, workout_type="full_body")
+    ex, _ = await svc.add_exercise(
+        user_id=admin_user.id, session_id=ws.id, exercise_name="agachamento livre"
+    )
+    await db_session.flush()
+    st = await svc.log_set(user_id=admin_user.id, session_id=ws.id, weight_kg=80, reps=5)
+    await db_session.flush()
+    await svc.end_session(user_id=admin_user.id, session_id=ws.id)
+    await db_session.flush()
+
+    rec = (
+        await db_session.execute(
+            select(ActivityRecord).where(ActivityRecord.workout_session_id == ws.id)
+        )
+    ).scalar_one()
+    payload = json_lib.loads(rec.notes)
+    assert payload["workout_session_id"] == str(ws.id)
+    assert len(payload["exercises"]) == 1
+    assert payload["exercises"][0]["exercise_id"] == str(ex.id)
+    assert [s["set_id"] for s in payload["exercises"][0]["sets"]] == [str(st.id)]
+
+
+async def test_sp126_consolidate_idempotent(db_session: AsyncSession, admin_user):
+    """INV-17: reconsoidação não duplica activity_record (upsert por
+    workout_session_id)."""
+    from sqlalchemy import func
+
+    from app.models import ActivityRecord
+
+    svc = WorkoutService(db_session)
+    ws, _ = await _start(db_session, admin_user, workout_type="pull")
+    await svc.end_session(user_id=admin_user.id, session_id=ws.id)
+    await db_session.flush()
+    await svc.consolidate_to_activity(user_id=admin_user.id, session_id=ws.id)
+    await db_session.flush()
+
+    count = (
+        await db_session.execute(
+            select(func.count())
+            .select_from(ActivityRecord)
+            .where(ActivityRecord.workout_session_id == ws.id)
+        )
+    ).scalar_one()
+    assert count == 1
+
+
+async def test_inv15_auto_close_consolidates_previous(db_session: AsyncSession, admin_user):
+    """INV-15 + SP-126: auto-encerrar a sessão anterior consolida em
+    activity_record (fluxo start_session → SP-126)."""
+    from decimal import Decimal
+
+    from app.models import ActivityRecord
+
+    admin_user.weight_kg = Decimal("70")
+    await db_session.flush()
+
+    svc = WorkoutService(db_session)
+    ws1, _ = await _start(db_session, admin_user, workout_type="push")
+    await db_session.flush()
+
+    ws2, prev = await svc.start_session(
+        user_id=admin_user.id,
+        day_log_id=ws1.day_log_id,
+        workout_type="pull",
+    )
+    await db_session.flush()
+    assert prev is not None and prev.id == ws1.id
+
+    rec = (
+        await db_session.execute(
+            select(ActivityRecord).where(ActivityRecord.workout_session_id == ws1.id)
+        )
+    ).scalar_one()
+    assert rec is not None and rec.calc_method == "workout_session"

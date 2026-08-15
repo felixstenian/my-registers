@@ -54,7 +54,7 @@ class ActivityRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     distance_km: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
     intensity: Mapped[str] = mapped_column(Text, nullable=False, server_default="unknown")
     met_value: Mapped[Decimal | None] = mapped_column(Numeric(4, 2), nullable=True)
-    kcal_burned: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="0")
+    kcal_burned: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     calc_method: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
