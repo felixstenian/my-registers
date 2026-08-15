@@ -29,6 +29,7 @@ import {
 import { api } from '@/lib/api-client';
 import { AssistantContent } from '../../chat/AssistantContent';
 import { WorkoutHistoryCard } from '../../chat/WorkoutHistoryCard';
+import { Stopwatch } from '../Stopwatch';
 import { WorkoutTotalsHeader } from '../WorkoutTotalsHeader';
 
 type MediaRef = {
@@ -410,8 +411,11 @@ export default function WorkoutChatPage() {
     <main className="mx-auto flex h-[calc(100dvh-49px)] max-w-3xl flex-col gap-2 p-4 pb-[calc(env(safe-area-inset-bottom)+3.5rem)] md:pb-4">
       <WorkoutTotalsHeader revalidateKey={totalsRevalidateKey} />
       <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="text-slate-500 dark:text-slate-400">
-          Chat de treino {hasActiveSession ? '— treino em andamento' : ''}
+        <span className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+          Chat de treino
+          {hasActiveSession && activeSession.started_at && (
+            <Stopwatch startedAt={activeSession.started_at} />
+          )}
         </span>
         <div className="flex items-center gap-1.5">
           <button
