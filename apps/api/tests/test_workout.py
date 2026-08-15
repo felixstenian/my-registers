@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ValidationAppError
 from app.integrations.anthropic.tool_schema import RECORD_INTENT_INPUT_SCHEMA
-from app.models import ActivityRecord, WorkoutExercise, WorkoutSession, WorkoutSet
+from app.models import ActivityRecord, WorkoutExercise, WorkoutSession, WorkoutSet, WorkoutTemplate
 from app.repositories.day_log import DayLogRepository
 from app.schemas.llm import WorkoutSetIn
 from app.services.workout import WorkoutService
@@ -404,3 +404,474 @@ async def test_inv17_soft_delete_activity_record_keeps_session(
     sets = list((await db_session.execute(select(WorkoutSet))).scalars())
     assert len(sets) == 1
     assert sets[0].sequence_index == 0
+
+
+async def test_t309_messages_via_column_and_index(db_session: AsyncSession):
+    """T-B309 (SP-173): migration 0013 adiciona `messages.via` com default
+    'food' (sem backfill) e o índice `idx_messages_user_via` que alimenta
+    listagem/polling por user_id+via."""
+    col = (
+        await db_session.execute(
+            text(
+                "SELECT column_default FROM information_schema.columns "
+                "WHERE table_name='messages' AND column_name='via'"
+            )
+        )
+    ).scalar_one_or_none()
+    assert col is not None
+    assert "food" in (col or "")
+
+    idx = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE tablename='messages' AND indexname='idx_messages_user_via'"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert idx == ["idx_messages_user_via"]
+
+
+def test_t311_system_prompt_selected_by_via():
+    """T-B311 (SP-173): `_load_system_prompt_for_via` devolve prompts
+    distintos por `via` — `food` mantém o system_v2.md (alimentação),
+    `workout` usa o system_workout_v2.md (treinos dedicados)."""
+    from app.integrations.anthropic.client import _load_system_prompt_for_via
+
+    food_prompt = _load_system_prompt_for_via("food")
+    workout_prompt = _load_system_prompt_for_via("workout")
+    assert food_prompt != workout_prompt
+    assert "nutrição" in food_prompt or "macros" in food_prompt or "log_food" in food_prompt
+    assert "workout_log_set" in workout_prompt
+    assert "log_food" not in workout_prompt
+
+
+async def test_t312_workout_templates_schema(db_session: AsyncSession):
+    """T-B312 (SP-170/171/INV-18): migration 0014 cria as tabelas de
+    templates reutilizáveis com índices de isolamento por usuário."""
+    tables = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT tablename FROM pg_tables "
+                    "WHERE schemaname='public' AND tablename IN "
+                    "('workout_templates','workout_template_exercises')"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert set(tables) == {"workout_templates", "workout_template_exercises"}
+
+    cols = (
+        await db_session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='workout_templates'"
+            )
+        )
+    ).scalars()
+    colset = set(cols)
+    assert {"id", "user_id", "name", "workout_type", "muscle_groups", "active"} <= colset
+
+    ex_cols = (
+        await db_session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='workout_template_exercises'"
+            )
+        )
+    ).scalars()
+    ex_colset = set(ex_cols)
+    assert {
+        "template_id",
+        "exercise_name",
+        "normalized_name",
+        "target_sets",
+        "target_reps",
+    } <= ex_colset
+
+    idx = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes WHERE tablename "
+                    "IN ('workout_templates','workout_template_exercises')"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert "ix_workout_templates_user_active" in idx
+    assert "ix_workout_template_exercises_template" in idx
+
+
+async def test_t313_register_template_creates_template_and_exercises(
+    db_session: AsyncSession, admin_user
+):
+    """T-B313 (SP-171): `register_template` cria `workout_templates`
+    active=true + `workout_template_exercises` com o plano e auditoria."""
+    from app.schemas.llm import WorkoutTemplateIn
+
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Peito e tríceps",
+            workout_type="push",
+            muscle_groups=["peito", "ombro", "triceps"],
+            exercises=[
+                {
+                    "exercise_name": "Supino reto com barra",
+                    "target_sets": 3,
+                    "target_reps": 10,
+                },
+                {
+                    "exercise_name": "Elevação lateral",
+                    "target_sets": 4,
+                    "target_reps": 12,
+                },
+            ],
+        ),
+    )
+    exercises = await svc.repo.list_template_exercises(template.id)
+    assert template.user_id == admin_user.id
+    assert template.active is True
+    assert template.workout_type == "push"
+    assert template.name == "Peito e tríceps"
+    assert {e.exercise_name for e in exercises} == {
+        "Supino reto com barra",
+        "Elevação lateral",
+    }
+    assert all(e.normalized_name for e in exercises)
+    assert {e.target_sets for e in exercises} == {3, 4}
+    assert {e.target_reps for e in exercises} == {10, 12}
+
+    templates = list(
+        (
+            await db_session.execute(
+                select(WorkoutTemplate).where(WorkoutTemplate.user_id == admin_user.id)
+            )
+        ).scalars()
+    )
+    assert len(templates) == 1
+
+
+async def test_t313_register_template_validations(db_session: AsyncSession, admin_user):
+    """T-B313 (SP-171): ambiguidade/insuficiência vira `ValidationAppError`
+    para o processor converter em `clarify` — nome vazio, sem exercícios e
+    sem plano de séries/reps são rejeitados."""
+    from app.schemas.llm import WorkoutTemplateIn
+
+    svc = WorkoutService(db_session)
+
+    with pytest.raises(ValidationAppError) as exc1:
+        await svc.register_template(
+            user_id=admin_user.id,
+            template=WorkoutTemplateIn(name="   ", workout_type="push"),
+        )
+    assert exc1.value.code == "workout_template_name_required"
+
+    with pytest.raises(ValidationAppError) as exc2:
+        await svc.register_template(
+            user_id=admin_user.id,
+            template=WorkoutTemplateIn(name="Só nome", workout_type="push"),
+        )
+    assert exc2.value.code == "workout_template_no_exercises"
+
+    with pytest.raises(ValidationAppError) as exc3:
+        await svc.register_template(
+            user_id=admin_user.id,
+            template=WorkoutTemplateIn(
+                name="Sem plano",
+                workout_type="pull",
+                exercises=[{"exercise_name": "Remada curvada"}],
+            ),
+        )
+    assert exc3.value.code == "workout_template_plan_missing"
+
+    # Nenhum template foi criado nas falhas acima.
+    count = list((await db_session.execute(select(WorkoutTemplate))).scalars())
+    assert count == []
+
+
+async def _login(client) -> None:
+    resp = await client.post(
+        "/auth/login",
+        json={"email": "admin@example.com", "password": "adminadmin"},
+    )
+    assert resp.status_code == 204
+
+
+async def _seed_template(session: AsyncSession, user, *, active: bool = True):
+    from app.schemas.llm import WorkoutTemplateIn
+
+    template = await WorkoutService(session).register_template(
+        user_id=user.id,
+        template=WorkoutTemplateIn(
+            name="Peito e tríceps",
+            workout_type="push",
+            muscle_groups=["peito", "triceps"],
+            exercises=[
+                {"exercise_name": "Supino reto", "target_sets": 3, "target_reps": 10},
+            ],
+        ),
+    )
+    if not active:
+        template.active = False
+        await session.flush()
+    await session.commit()
+    return template
+
+
+async def test_t314_list_templates_filters_by_active(client, admin_user, db_session: AsyncSession):
+    """T-B314 (SP-170): GET /workouts/templates  devolve as abas — `?active=`
+    filtra; sem filtro, tudo. Tem que ser user-scoped."""
+    from app.schemas.llm import WorkoutTemplateIn
+
+    svc = WorkoutService(db_session)
+    await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Treino A",
+            workout_type="push",
+            exercises=[{"exercise_name": "Supino", "target_sets": 3, "target_reps": 10}],
+        ),
+    )
+    template_b = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Treino B",
+            workout_type="pull",
+            exercises=[{"exercise_name": "Remada", "target_sets": 4, "target_reps": 8}],
+        ),
+    )
+    template_b.active = False
+    await db_session.commit()
+
+    await _login(client)
+    resp = await client.get("/workouts/templates")
+    assert resp.status_code == 200
+    bodies = resp.json()
+    assert {b["name"] for b in bodies} == {"Treino A", "Treino B"}
+
+    resp_active = await client.get("/workouts/templates", params={"active": "true"})
+    assert resp_active.status_code == 200
+    assert {b["name"] for b in resp_active.json()} == {"Treino A"}
+
+    resp_inactive = await client.get("/workouts/templates", params={"active": "false"})
+    assert resp_inactive.status_code == 200
+    assert {b["name"] for b in resp_inactive.json()} == {"Treino B"}
+
+
+async def test_t314_get_template_detail_with_exercises(
+    client, admin_user, db_session: AsyncSession
+):
+    """T-B314 (SP-170): GET /workouts/templates/{id} inclui exercícios-alvo."""
+    template = await _seed_template(db_session, admin_user)
+
+    await _login(client)
+    resp = await client.get(f"/workouts/templates/{template.id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "Peito e tríceps"
+    assert len(body["exercises"]) == 1
+    assert body["exercises"][0]["target_sets"] == 3
+
+
+async def test_t314_toggle_template_active(client, admin_user, db_session: AsyncSession):
+    """T-B314 (SP-172): PATCH /workouts/templates/{id} com `{"active":false}`
+    arquiva o template (movendo para a aba Inativos) e audita."""
+    template = await _seed_template(db_session, admin_user, active=True)
+
+    await _login(client)
+    resp = await client.patch(f"/workouts/templates/{template.id}", json={"active": False})
+    assert resp.status_code == 200
+    assert resp.json()["active"] is False
+
+    from app.models import AuditEvent
+
+    events = list((await db_session.execute(select(AuditEvent))).scalars())
+    assert any(e.action == "update" for e in events)
+
+
+async def test_t314_template_routes_are_user_scoped(client, admin_user, db_session: AsyncSession):
+    """T-B314 (INV-18): usuário não enxerga template de outro usuário."""
+    from app.core.security import hash_password
+    from app.repositories.user import UserRepository
+
+    other = await UserRepository(db_session).create(
+        email="other@example.com",
+        password_hash=hash_password("otheradmin"),
+        display_name="Other",
+    )
+    await db_session.commit()
+    template = await _seed_template(db_session, other)
+
+    await _login(client)
+    resp = await client.get(f"/workouts/templates/{template.id}")
+    assert resp.status_code == 404
+    resp_patch = await client.patch(f"/workouts/templates/{template.id}", json={"active": False})
+    assert resp_patch.status_code == 404
+
+
+async def test_t317_active_session_returns_active_or_null(
+    client, admin_user, db_session: AsyncSession
+):
+    """T-B317 (SP-179): GET /workouts/session/active devolve a sessão ativa
+    do usuário (INV-15/INV-18) ou `null` quando não há nenhuma."""
+    from datetime import UTC, datetime
+
+    from app.services.workout import WorkoutService
+
+    await _login(client)
+    resp = await client.get("/workouts/session/active")
+    assert resp.status_code == 200
+    assert resp.json() is None
+
+    await WorkoutService(db_session).start_session(
+        user_id=admin_user.id,
+        day_log_id=(await _day_log(db_session, admin_user)).id,
+        workout_type="push",
+        detected_name="Peito e tríceps",
+        started_at=datetime.now(UTC),
+    )
+    await db_session.commit()
+
+    resp = await client.get("/workouts/session/active")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body is not None
+    assert body["workout_type"] == "push"
+
+
+async def test_t317_active_session_isolated_per_user(client, admin_user, db_session: AsyncSession):
+    """T-B317 (INV-18): sessão ativa de outro usuário não aparece."""
+    from app.core.security import hash_password
+    from app.repositories.user import UserRepository
+    from app.services.workout import WorkoutService
+
+    other = await UserRepository(db_session).create(
+        email="other@example.com",
+        password_hash=hash_password("otheradmin"),
+        display_name="Other",
+    )
+    await db_session.commit()
+    await WorkoutService(db_session).start_session(
+        user_id=other.id,
+        day_log_id=(await _day_log(db_session, other)).id,
+        workout_type="pull",
+        detected_name="Treino B",
+    )
+    await db_session.commit()
+
+    await _login(client)
+    resp = await client.get("/workouts/session/active")
+    assert resp.status_code == 200
+    assert resp.json() is None
+
+
+async def test_t318_start_session_with_template(db_session: AsyncSession, admin_user):
+    """T-B318 (SP-178/INV-20): `start_session(template_id=...)` liga a
+    sessão ao template ativo escolhido no fluxo guiado."""
+    from app.schemas.llm import WorkoutTemplateIn
+    from app.services.workout import WorkoutService
+
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Peito e tríceps",
+            workout_type="push",
+            exercises=[
+                {"exercise_name": "Supino reto", "target_sets": 3, "target_reps": 10},
+            ],
+        ),
+    )
+    dl = await _day_log(db_session, admin_user)
+
+    session, _ = await svc.start_session(
+        user_id=admin_user.id,
+        day_log_id=dl.id,
+        workout_type=template.workout_type,
+        detected_name=template.name,
+        template_id=template.id,
+    )
+    assert session.template_id == template.id
+    assert session.status == "active"
+
+
+async def test_t318_start_session_rejects_inactive_template(db_session: AsyncSession, admin_user):
+    """T-B318 (INV-19): template `active=false` não pode iniciar fluxo
+    guiado — o seletor só mostra ativos."""
+    from app.schemas.llm import WorkoutTemplateIn
+    from app.services.workout import WorkoutService
+
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Antigo",
+            workout_type="pull",
+            exercises=[{"exercise_name": "Remada", "target_sets": 4, "target_reps": 8}],
+        ),
+    )
+    template.active = False
+    await db_session.flush()
+    dl = await _day_log(db_session, admin_user)
+
+    with pytest.raises(ValidationAppError) as exc:
+        await svc.start_session(
+            user_id=admin_user.id,
+            day_log_id=dl.id,
+            workout_type=template.workout_type,
+            template_id=template.id,
+        )
+    assert exc.value.code == "workout_template_inactive"
+
+
+async def test_t318_start_session_template_is_user_scoped(db_session: AsyncSession, admin_user):
+    """T-B318 (INV-18): template de outro usuário não inicia sessão."""
+    from app.schemas.llm import WorkoutTemplateIn
+    from app.services.workout import WorkoutService
+
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Meu treino",
+            workout_type="push",
+            exercises=[{"exercise_name": "Supino", "target_sets": 3, "target_reps": 10}],
+        ),
+    )
+
+    other = await _new_user(db_session, "other2@example.com")
+    dl = await _day_log(db_session, other)
+
+    with pytest.raises(ValidationAppError) as exc:
+        await svc.start_session(
+            user_id=other.id,
+            day_log_id=dl.id,
+            workout_type=template.workout_type,
+            template_id=template.id,
+        )
+    assert exc.value.code == "workout_template_not_found"
+
+
+async def _new_user(session: AsyncSession, email: str):
+    from app.core.security import hash_password
+    from app.repositories.user import UserRepository
+
+    user = await UserRepository(session).create(
+        email=email,
+        password_hash=hash_password("password"),
+        display_name="Other",
+    )
+    await session.flush()
+    return user

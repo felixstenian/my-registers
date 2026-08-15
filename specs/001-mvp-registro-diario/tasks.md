@@ -270,33 +270,33 @@ Meta: rastrear treinos de força de forma granular (sessão → exercícios → 
 
 **Gate Bloco 3:** treino registrado por chat com histórico contextual; encerramento gera activity_record que aparece no snapshot; INV-15/16/17 verificadas.
 
-### Bloco 3.b — Módulo de treino (SP-170..SP-179) — pendente
+### Bloco 3.b — Módulo de treino (SP-170..SP-179) — em andamento (E1 feita)
 
 Meta: expansão do núcleo como módulo de produto (spec §3.16) — templates reutilizáveis, chat de treino dedicado no **mesmo pool de `messages` via `messages.via='workout'`**, tela `/workouts` (Ativos/Inativos/Histórico), fluxo guiado com cronômetro, registro por imagem, edição de peso/séries/kcal e seção de treinos no `/day`. Ordem E1..E6 conforme `plan.md` §8.
 
-**E1 — Fundação do módulo (`messages.via`):**
+**E1 — Fundação do módulo (`messages.via`):** ✅
 
-- [ ] **T-B309** — Migration: `ALTER TABLE messages ADD COLUMN via TEXT NOT NULL DEFAULT 'food'` + índice `idx_messages_user_via ON messages(user_id, via, created_at)`. Sem backfill (default cobre). (S) — SP-173.
-- [ ] **T-B310** — `MessageRepository.list_messages` e `GET /chat/messages` ganham filtro `via` (`'food'` default; `'workout'` para o chat de treino); `POST /chat/messages` aceita `via` no payload. Envelope de chat de treino reusa o mesmo pool. (M) — SP-173.
-- [ ] **T-B311** — `MessageProcessor` seleciona prompt `system_v2.md` conforme `via`; `IntentDispatcher` roteia intents de treino diretamente (fora de `_STRUCTURED_INTENTS`). Handlers `_handle_workout_*` compartilhados entre núcleo e módulo. (M) — SP-173.
+- [x] **T-B309** — Migration: `ALTER TABLE messages ADD COLUMN via TEXT NOT NULL DEFAULT 'food'` + índice `idx_messages_user_via ON messages(user_id, via, created_at)`. Sem backfill (default cobre). (S) — SP-173.
+- [x] **T-B310** — `MessageRepository.list_messages` e `GET /chat/messages` ganham filtro `via` (`'food'` default; `'workout'` para o chat de treino); `POST /chat/messages` aceita `via` no payload. Envelope de chat de treino reusa o mesmo pool. (M) — SP-173.
+- [x] **T-B311** — `MessageProcessor` seleciona prompt `system_v2.md` conforme `via` (novo `system_workout_v2.md` para `via='workout'`); `IntentDispatcher` roteia intents de treino diretamente (fora de `_STRUCTURED_INTENTS`). Handlers `_handle_workout_*` compartilhados entre núcleo e módulo. (M) — SP-173.
 
 **E2 — Templates reutilizáveis:**
 
-- [ ] **T-B312** — Models + migration `0011_workout_templates.py`: `workout_templates` (user_id, name, workout_type, muscle_groups JSONB, active bool default true, created_at) + `workout_template_exercises` (template_id FK, exercise_name, normalized_name, target_sets, target_reps). (M) — SP-170, SP-171, INV-18.
-- [ ] **T-B313** — `WorkoutService.register_template`: valida payload `WorkoutTemplateIn` (tipo + agrupamento + séries/reps por exercício) e cria template + exercícios; `clarify` em ambiguidade. (M) — SP-171.
-- [ ] **T-B314** — Routes `/workouts/templates` (GET listagem com `?active=`, PATCH toggle `active`) 100% `user_id`-scoped. Aba *Ativos*/*Inativos* no frontend. (M) — SP-170, SP-172, INV-18/19.
+- [x] **T-B312** — Models + migration `0014_workout_templates.py`: `workout_templates` (user_id, name, workout_type, muscle_groups JSONB, active bool default true, created_at) + `workout_template_exercises` (template_id FK, exercise_name, normalized_name, target_sets, target_reps). (M) — SP-170, SP-171, INV-18.
+- [x] **T-B313** — `WorkoutService.register_template`: valida payload `WorkoutTemplateIn` (tipo + agrupamento + séries/reps por exercício) e cria template + exercícios; `clarify` em ambiguidade. (M) — SP-171.
+- [x] **T-B314** — Routes `/workouts/templates` (GET listagem com `?active=`, PATCH toggle `active`) 100% `user_id`-scoped. Aba *Ativos*/*Inativos* no frontend. (M) — SP-170, SP-172, INV-18/19.
 
 **E3 — Chat de treino dedicado:**
 
-- [ ] **T-B315** — `/workouts/chat` page espelhando `(app)/chat/page.tsx` (composer + upload + polling `via='workout'` + `AssistantContent`). `proxy.ts`: `/workouts`, `/workouts/chat` em `PROTECTED_PREFIXES`. (L) — SP-173.
-- [ ] **T-B316** — `WorkoutTotalsHeader` (variante do `DayTotalsBar`): atividades do dia + kcal gastas (via snapshot `/days/today`). (M) — SP-173.
-- [ ] **T-B317** — Botões do header do chat de treino: "Cadastrar treino" (→ SP-171), "Iniciar treino" (→ fluxo guiado); com sessão ativa, botão da direita vira "Finalizar treino". Aviso legal Art. VII §26 quando houver dados de dia. (M) — SP-173, SP-179.
+- [x] **T-B315** — `/workouts/chat` page espelhando `(app)/chat/page.tsx` (composer + upload + polling `via='workout'` + `AssistantContent`). `proxy.ts`: `/workouts`, `/workouts/chat` em `PROTECTED_PREFIXES`. (L) — SP-173.
+- [x] **T-B316** — `WorkoutTotalsHeader` (variante do `DayTotalsBar`): atividades do dia + kcal gastas (via snapshot `/days/today`). (M) — SP-173.
+- [x] **T-B317** — Botões do header do chat de treino: "Cadastrar treino" (→ SP-171), "Iniciar treino" (→ fluxo guiado); com sessão ativa, botão da direita vira "Finalizar treino". Aviso legal Art. VII §26 quando houver dados de dia. (M) — SP-173, SP-179.
 
 **E4 — Fluxo guiado + cronômetro:**
 
-- [ ] **T-B318** — `WorkoutService.start_session` com `template_id` (SP-178): lista templates `active=true`; escolhido, cria sessão + lista exercícios; escolhido exercício, lookup da **última realização** (SP-121) e exibe cargas/reps. (L) — SP-178, INV-19/20.
-- [ ] **T-B319** — `_handle_workout_log_set` no fluxo guiado: **a partir da 1ª série**, confirma registro + recapitula o último treino + botão "Ir para o próximo exercício" (`workout_next_exercise`) → re-lista exercícios. (M) — SP-178.
-- [ ] **T-B320** — `Stopwatch` (frontend): inicia com `start_session`, para com "Finalizar treino"/`workout_end`. Tempo registrado = `ended_at - started_at` (fonte determinística do backend). (S) — SP-179.
+- [x] **T-B318** — `WorkoutService.start_session` com `template_id` (SP-178): migração 0015 (`workout_sessions.template_id` FK nullable, INV-20), start_session valida template ativo do usuário (INV-18/19 → `workout_template_not_found`/`workout_template_inactive`), `_handle_workout_start` repassa `template_id` e converte `ValidationAppError` em clarify (`_CLARIFY_TEMPLATES.workout_template_inactive`). (L) — SP-178, INV-19/20.
+- [x] **T-B319** — `_handle_workout_log_set` no fluxo guiado: **a partir da 1ª série**, confirma registro + recapitula o último treino + botão "Ir para o próximo exercício" (`workout_next_exercise`) → re-lista exercícios. Novo intent `workout_next_exercise` (enum/tool_schema/prompts) + `WorkoutService.next_exercise_prompt` re-lista o plano do template de forma determinística (Decisão 7); `compose_workout_log_set` ganha `guided`/`last_sets` (marcador `<!-- workout-next-exercise -->`); `compose_workout_start` guiado lista o plano (TC-U-003); `AssistantContent` renderiza o botão a partir do marcador. (M) — SP-178.
+- [x] **T-B320** — `Stopwatch` (frontend): `apps/web/src/app/(app)/workouts/Stopwatch.tsx` — UI-only (Decisão 8), tempo decorrido derivado de `activeSession.started_at` (`GET /workouts/session/active`), atualizado a cada 1s; some quando a sessão ativa termina (`workout_end`). Tempo registrado continua vindo do backend (`ended_at - started_at`, SP-126) — o componente não grava nada. Integrado no header do chat de treino. (S) — SP-179.
 
 **E5 — Imagem + edição:**
 

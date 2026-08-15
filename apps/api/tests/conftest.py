@@ -196,6 +196,7 @@ class FakeAnthropicClient:
         *,
         user_text: str | None,
         images=None,
+        via: str = "food",
         max_semantic_retries: int = 2,
     ):
         from app.integrations.anthropic.client import LLMCallResult
@@ -204,6 +205,7 @@ class FakeAnthropicClient:
             {
                 "user_text": user_text,
                 "images": list(images or []),
+                "via": via,
                 "max_semantic_retries": max_semantic_retries,
             }
         )

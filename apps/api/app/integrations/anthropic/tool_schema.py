@@ -33,6 +33,9 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
                 "workout_log_set",
                 "workout_end",
                 "workout_history",
+                "workout_register_template",
+                "workout_correct",
+                "workout_next_exercise",
                 "clarify",
                 "unknown",
             ],
@@ -228,6 +231,7 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
                     ],
                 },
                 "detected_name": {"type": ["string", "null"]},
+                "template_id": {"type": ["string", "null"]},
             },
         },
         "workout_add_exercise": {
@@ -253,12 +257,74 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
             "additionalProperties": False,
             "properties": {},
         },
+        "workout_next_exercise": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "properties": {},
+        },
         "workout_history": {
             "type": ["object", "null"],
             "additionalProperties": False,
             "required": ["exercise_name"],
             "properties": {
                 "exercise_name": {"type": "string"},
+            },
+        },
+        "workout_template": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "required": ["name", "workout_type"],
+            "properties": {
+                "name": {"type": "string"},
+                "workout_type": {
+                    "type": "string",
+                    "enum": [
+                        "push",
+                        "pull",
+                        "legs",
+                        "upper",
+                        "lower",
+                        "full_body",
+                        "cardio",
+                        "other",
+                    ],
+                },
+                "muscle_groups": {
+                    "type": ["array", "null"],
+                    "items": {"type": "string"},
+                },
+                "exercises": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["exercise_name"],
+                        "properties": {
+                            "exercise_name": {"type": "string"},
+                            "target_sets": {
+                                "type": ["integer", "null"],
+                                "minimum": 1,
+                                "maximum": 100,
+                            },
+                            "target_reps": {
+                                "type": ["integer", "null"],
+                                "minimum": 1,
+                                "maximum": 1000,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "workout_correct": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "required": ["target_hint"],
+            "properties": {
+                "target_hint": {"type": "string"},
+                "weight_kg": {"type": ["number", "null"], "minimum": 0, "maximum": 1000},
+                "reps": {"type": ["integer", "null"], "minimum": 1, "maximum": 1000},
+                "notes": {"type": ["string", "null"]},
             },
         },
     },

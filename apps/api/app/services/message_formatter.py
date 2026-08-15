@@ -29,6 +29,11 @@ _DISCLAIMER = (
     "acompanhamento médico ou nutricional."
 )
 
+# SP-178 (T-B319): marcador emitido no fim da confirmação de série do fluxo
+# guiado. O frontend o converte no botão "Ir para o próximo exercício"
+# (intent `workout_next_exercise`) — mesmo padrão do `catalog-recovery`.
+WORKOUT_NEXT_EXERCISE_MARKER = "<!-- workout-next-exercise -->"
+
 _MEAL_SLOT_LABELS: dict[str, str] = {
     "breakfast": "Café da manhã",
     "lunch": "Almoço",
@@ -191,21 +196,31 @@ def figure_weights(msg, r):
     return r
 
 
-def compose_workout_start(session, closed_previous) -> str:
-    """SP-120: cabeçalho + nota de encerramento da sessão anterior (INV-15)."""
-    parts = [
-        f"Iniciei seu treino de **{_workout_type_label(session.workout_type)}**.",
-        "",
-        'Nenhum exercício ainda — me diga o primeiro (ex.: "supino reto").',
-    ]
+def compose_workout_start(session, closed_previous, exercises=None) -> str:
+    """SP-120: cabeçalho + nota de encerramento da sessão anterior (INV-15).
+
+    SP-178 (fluxo guiado): com `template_id`, `exercises` do template são
+    listados como plano (TC-U-003 "lista 3 exercícios como botões") — o
+    frontend repete o ciclo a partir deles.
+    """
+    parts = [f"Iniciei seu treino de **{_workout_type_label(session.workout_type)}**."]
     if closed_previous is not None:
-        parts.insert(
-            1,
-            (
-                "Encerrei o treino anterior automaticamente (treinos não podem "
-                "ficar ativos ao mesmo tempo)."
-            ),
+        parts.append(
+            "Encerrei o treino anterior automaticamente (treinos não podem "
+            "ficar ativos ao mesmo tempo)."
         )
+    if exercises:
+        rows = [
+            (ex.exercise_name, _template_plan_label(ex.target_sets, ex.target_reps))
+            for ex in exercises
+        ]
+        parts.append("")
+        parts.append(_table("Plano do treino", rows))
+        parts.append("")
+        parts.append('Toque no exercício acima ou me diga o nome (ex.: "supino reto").')
+    else:
+        parts.append("")
+        parts.append('Nenhum exercício ainda — me diga o primeiro (ex.: "supino reto").')
     return "\n".join(parts)
 
 
@@ -244,11 +259,15 @@ def compose_workout_add_exercise(exercise, history) -> str:
     return "\n".join(parts)
 
 
-def compose_workout_log_set(session, exercise, workout_set, last_sets=None) -> str:
+def compose_workout_log_set(session, exercise, workout_set, last_sets=None, guided=False) -> str:
     """SP-122: confirmação da série.
 
     `last_sets` = séries do mesmo exercício na sessão anterior (mais
     recente) para o comparativo "da última vez" — opcional.
+    `guided` (SP-178, T-B319) = sessão do fluxo guiado (`template_id`):
+    "a partir da primeira série" a confirmação recapitula o último treino
+    e emite o marcador do botão "Ir para o próximo exercício" para o
+    frontend re-listar os exercícios (`workout_next_exercise`).
     """
     parts = [
         f"Série **{workout_set.sequence_index + 1}** de **{exercise.name}** "
@@ -257,6 +276,10 @@ def compose_workout_log_set(session, exercise, workout_set, last_sets=None) -> s
     if last_sets:
         prev = last_sets[0]
         parts.append(f"Da última vez você fez {_fmt_weight(prev.weight_kg)} × {prev.reps}.")
+    if guided:
+        parts.append("")
+        parts.append('Avance para o próximo exercício do plano: "Ir para o próximo exercício".')
+        parts.append(WORKOUT_NEXT_EXERCISE_MARKER)
     return "\n".join(parts)
 
 
@@ -328,6 +351,62 @@ def compose_workout_history(history) -> str:
             )
         )
     return "\n".join(parts).rstrip("\n")
+
+
+def compose_workout_template(template, exercises) -> str:
+    """SP-171: confirmação de cadastro do treino reutilizável.
+
+    Lista o plano (exercício → séries × repetições) exatamente como foi
+    criado — sem inventar nada (Const. §3).
+    """
+    parts = [f"Cadastrei o treino **{template.name}**."]
+    if template.muscle_groups:
+        groups = ", ".join(template.muscle_groups)
+        parts.append(f"Agrupamento: {groups}.")
+    if exercises:
+        rows = [
+            (
+                ex.exercise_name,
+                _template_plan_label(ex.target_sets, ex.target_reps),
+            )
+            for ex in exercises
+        ]
+        parts.append("")
+        parts.append(_table("Plano", rows))
+    parts.append("")
+    parts.append('Você pode iniciar esse treino a partir de "Iniciar treino" no chat de treino.')
+    return "\n".join(parts)
+
+
+def _template_plan_label(target_sets: int | None, target_reps: int | None) -> str:
+    if target_sets is not None and target_reps is not None:
+        return f"{target_sets} × {target_reps}"
+    if target_sets is not None:
+        return f"{target_sets} séries"
+    if target_reps is not None:
+        return f"{target_reps} rep"
+    return "—"
+
+
+def compose_workout_next_exercise(session, exercises) -> str:
+    """SP-178 (T-B319): re-lista os exercícios do template na sessão guiada.
+
+    Determinístico (Decisão 7) — re-lista todo o plano do template (nome +
+    séries/reps alvo) para o frontend repetir o ciclo; o usuário toca no
+    exercício e a sequência recomeça (SP-178).
+    """
+    parts = [
+        f"Continue o treino de **{session.detected_name or session.workout_type}**. "
+        "Escolha o próximo exercício do plano:",
+    ]
+    rows = [
+        (ex.exercise_name, _template_plan_label(ex.target_sets, ex.target_reps)) for ex in exercises
+    ]
+    parts.append("")
+    parts.append(_table("Plano", rows))
+    parts.append("")
+    parts.append('Toque no exercício acima ou me diga o nome (ex.: "supino reto").')
+    return "\n".join(parts)
 
 
 def _date_pt(value) -> str:

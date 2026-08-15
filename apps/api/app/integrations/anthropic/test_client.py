@@ -79,6 +79,7 @@ class TestAnthropicClient:
         *,
         user_text: str | None,
         images: list[tuple[str, bytes]] | None = None,
+        via: str = "food",
         max_semantic_retries: int = 1,
     ) -> LLMCallResult:
         if _QUEUE_RECORD_ERROR:

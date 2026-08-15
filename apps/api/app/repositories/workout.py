@@ -11,7 +11,13 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import WorkoutExercise, WorkoutSession, WorkoutSet
+from app.models import (
+    WorkoutExercise,
+    WorkoutSession,
+    WorkoutSet,
+    WorkoutTemplate,
+    WorkoutTemplateExercise,
+)
 
 # `workout_set` é `WorkoutSet | None` por conta do LEFT JOIN em
 # `exercise_history_rows` (sessões com exercício mas ainda sem séries).
@@ -49,6 +55,7 @@ class WorkoutRepository:
         workout_type: str,
         detected_name: str,
         started_at: datetime,
+        template_id: uuid.UUID | None = None,
     ) -> WorkoutSession:
         session = WorkoutSession(
             user_id=user_id,
@@ -57,6 +64,7 @@ class WorkoutRepository:
             detected_name=detected_name,
             started_at=started_at,
             status="active",
+            template_id=template_id,
         )
         self.session.add(session)
         await self.session.flush()
@@ -220,5 +228,81 @@ class WorkoutRepository:
             )
             .order_by(WorkoutSession.ended_at.desc())
             .limit(limit)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
+    # ------------------------------------------------------------------
+    # SP-170/171/172 — templates reutilizáveis (100% user_id-scoped, INV-18)
+    # ------------------------------------------------------------------
+
+    async def create_template(
+        self,
+        *,
+        user_id: uuid.UUID,
+        name: str,
+        workout_type: str,
+        muscle_groups: list[str] | None,
+    ) -> WorkoutTemplate:
+        template = WorkoutTemplate(
+            user_id=user_id,
+            name=name,
+            workout_type=workout_type,
+            muscle_groups=muscle_groups,
+            active=True,
+        )
+        self.session.add(template)
+        await self.session.flush()
+        return template
+
+    async def create_template_exercise(
+        self,
+        *,
+        template_id: uuid.UUID,
+        exercise_name: str,
+        normalized_name: str,
+        target_sets: int | None,
+        target_reps: int | None,
+    ) -> WorkoutTemplateExercise:
+        exercise = WorkoutTemplateExercise(
+            template_id=template_id,
+            exercise_name=exercise_name,
+            normalized_name=normalized_name,
+            target_sets=target_sets,
+            target_reps=target_reps,
+        )
+        self.session.add(exercise)
+        await self.session.flush()
+        return exercise
+
+    async def list_templates(
+        self,
+        user_id: uuid.UUID,
+        *,
+        active: bool | None = None,
+    ) -> list[WorkoutTemplate]:
+        """SP-170/INV-19: filtro por `active` alimenta as abas do `/workouts`
+        e o seletor do fluxo guiado (só `active=true` aparece)."""
+        stmt = select(WorkoutTemplate).where(WorkoutTemplate.user_id == user_id)
+        if active is not None:
+            stmt = stmt.where(WorkoutTemplate.active == active)
+        stmt = stmt.order_by(WorkoutTemplate.created_at.asc())
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def get_template(
+        self, user_id: uuid.UUID, template_id: uuid.UUID
+    ) -> WorkoutTemplate | None:
+        stmt = select(WorkoutTemplate).where(
+            WorkoutTemplate.id == template_id,
+            WorkoutTemplate.user_id == user_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_template_exercises(
+        self, template_id: uuid.UUID
+    ) -> list[WorkoutTemplateExercise]:
+        stmt = (
+            select(WorkoutTemplateExercise)
+            .where(WorkoutTemplateExercise.template_id == template_id)
+            .order_by(WorkoutTemplateExercise.created_at.asc())
         )
         return list((await self.session.execute(stmt)).scalars())

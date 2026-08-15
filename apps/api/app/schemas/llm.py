@@ -8,6 +8,7 @@ carregam payload; para `clarify`/`unknown`/`query_day`/etc, os campos ficam
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime
 from typing import Literal
 
@@ -30,6 +31,9 @@ Intent = Literal[
     "workout_log_set",
     "workout_end",
     "workout_history",
+    "workout_register_template",
+    "workout_correct",
+    "workout_next_exercise",
     "clarify",
     "unknown",
 ]
@@ -236,11 +240,14 @@ WorkoutType = Literal[
 
 class WorkoutStartIn(_LenientBase):
     """SP-120. `workout_type` no enum canônico; `detected_name` livre
-    (copy do usuário). Sem `template_id` no núcleo (reservado ao módulo
-    de fluxo guiado, SP-178)."""
+    (copy do usuário). `template_id` (SP-178/INV-20): UUID do template
+    do fluxo guiado — o frontend o injeta quando o usuário escolhe um
+    template no picker (o LLM não conhece UUIDs; nunca deve inventá-lo).
+    Sem `template_id` → sessão livre (SP-120)."""
 
     workout_type: WorkoutType
     detected_name: str | None = None
+    template_id: uuid.UUID | None = None
 
 
 class WorkoutExerciseIn(_LenientBase):
@@ -263,11 +270,57 @@ class WorkoutEndIn(_LenientBase):
     """SP-124. Encerramento explícito da sessão — sem payload extra."""
 
 
+class WorkoutNextExerciseIn(_LenientBase):
+    """SP-178 (T-B319). Botão "Ir para o próximo exercício" no fluxo guiado.
+
+    Intent de navegação sem payload: o backend re-lista os exercícios do
+    template da sessão ativa de forma determinística (`next_exercise_prompt`)
+    — o LLM não precisa lembrar a sequência (Decisão 7).
+    """
+
+
 class WorkoutHistoryQueryIn(_LenientBase):
     """SP-127. Consulta de histórico por exercício. `exercise_name`
     obrigatório; se ausente o backend emite `clarify`."""
 
     exercise_name: str
+
+
+class WorkoutTemplateExerciseIn(_LenientBase):
+    """SP-171. Exercício-alvo de um treino reutilizável. `target_sets`/
+    `target_reps` opcionais (plano sugerido); `normalized_name` é derivado
+    no backend."""
+
+    exercise_name: str
+    target_sets: int | None = Field(default=None, gt=0, le=100)
+    target_reps: int | None = Field(default=None, gt=0, le=1000)
+
+
+class WorkoutTemplateIn(_LenientBase):
+    """SP-171. Cadastro de treino reutilizável por texto (intent
+    `workout_register_template`).
+
+    `workout_type` no enum canônico; `name` é um rótulo curto do treino
+    (ex. "Peito e tríceps"); `muscle_groups` opcional (agrupamento muscular
+    para musculação, ex. ["peito", "ombro", "triceps"]); `exercises` é a
+    lista de exercícios com séries/reps sugeridos.
+    """
+
+    name: str
+    workout_type: WorkoutType
+    muscle_groups: list[str] | None = None
+    exercises: list[WorkoutTemplateExerciseIn] = Field(default_factory=list)
+
+
+class WorkoutCorrectSetIn(_LenientBase):
+    """SP-175. Correção de um `workout_set` por chat (intent `workout_correct`).
+    Identificado por descrição livre (`target_hint`) — o backend resolve qual
+    vez/série — e campos opcionais a corrigir."""
+
+    target_hint: str
+    weight_kg: float | None = Field(default=None, gt=0, le=1000)
+    reps: int | None = Field(default=None, gt=0, le=1000)
+    notes: str | None = None
 
 
 class LLMEnvelope(_StrictBase):
@@ -291,3 +344,6 @@ class LLMEnvelope(_StrictBase):
     workout_log_set: WorkoutSetIn | None = None
     workout_end: WorkoutEndIn | None = None
     workout_history: WorkoutHistoryQueryIn | None = None
+    workout_template: WorkoutTemplateIn | None = None
+    workout_correct: WorkoutCorrectSetIn | None = None
+    workout_next_exercise: WorkoutNextExerciseIn | None = None

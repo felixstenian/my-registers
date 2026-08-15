@@ -49,6 +49,7 @@ async def post_message(
         user=current_user,
         text=payload.text,
         media_ids=payload.media_ids,
+        via=payload.via,
         promote_food_item_id=payload.promote_food_item_id,
     )
     # BackgroundTasks rodam ANTES do cleanup da dep `get_session`; comitamos
@@ -68,6 +69,7 @@ async def post_message(
 @router.get("/messages", response_model=MessagesListResponse)
 async def list_messages(
     response: Response,
+    via: str = Query(default="food", pattern="^(food|workout)$"),
     after: uuid.UUID | None = Query(default=None),
     before: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
@@ -81,7 +83,7 @@ async def list_messages(
     response.headers["Cache-Control"] = "no-store"
     service = ChatService(session)
     items = await service.list_messages(
-        user=current_user, after_id=after, before_id=before, limit=limit
+        user=current_user, via=via, after_id=after, before_id=before, limit=limit
     )
     out: list[MessageOut] = []
     for item in items:

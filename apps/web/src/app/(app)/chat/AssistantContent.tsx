@@ -24,11 +24,15 @@ type RecoveryItem = { id: string; name: string };
 type Block =
   | { type: 'table'; rows: string[][] }
   | { type: 'paragraph'; text: string }
-  | { type: 'recovery'; items: RecoveryItem[] };
+  | { type: 'recovery'; items: RecoveryItem[] }
+  | { type: 'workout-next-exercise' };
 
 // SP-140: marcador emitido pelo backend em `message_formatter._no_catalog_recovery_block`.
 // Formato: `<!-- catalog-recovery: id1,id2,... -->`
 const RECOVERY_MARKER = /^\s*<!--\s*catalog-recovery:\s*(.+?)\s*-->\s*$/;
+// T-B319 (SP-178): marcador emitido em `message_formatter.compose_workout_log_set`
+// (fluxo guiado) — vira o botão "Ir para o próximo exercício".
+const WORKOUT_NEXT_EXERCISE_MARKER = /^\s*<!--\s*workout-next-exercise\s*-->\s*$/;
 // Extrai nomes em **bold** na ordem em que aparecem no bloco de recovery.
 const BOLD_INLINE = /\*\*(.+?)\*\*/g;
 
@@ -70,6 +74,12 @@ function parseBlocks(content: string): Block[] {
       const nameCandidates = names.length === ids.length + 1 ? names.slice(1) : names;
       const items = ids.map((id, idx) => ({ id, name: nameCandidates[idx] ?? '' }));
       blocks.push({ type: 'recovery', items });
+      continue;
+    }
+    // T-B319: marcador do botão "Ir para o próximo exercício" (fluxo guiado).
+    if (WORKOUT_NEXT_EXERCISE_MARKER.test(line)) {
+      blocks.push({ type: 'workout-next-exercise' });
+      i += 1;
       continue;
     }
     // Início de tabela: linha começa com | e a próxima é divisor `| --- |`.
@@ -128,7 +138,15 @@ function isPendingRowLabel(text: string): boolean {
   return text.endsWith('*');
 }
 
-export function AssistantContent({ content, intent }: { content: string; intent?: string | null }) {
+export function AssistantContent({
+  content,
+  intent,
+  onWorkoutNextExercise,
+}: {
+  content: string;
+  intent?: string | null;
+  onWorkoutNextExercise?: () => void;
+}) {
   const blocks = parseBlocks(content);
   const [openForm, setOpenForm] = useState<RecoveryItem | null>(null);
   const [openPhoto, setOpenPhoto] = useState<RecoveryItem | null>(null);
@@ -163,6 +181,20 @@ export function AssistantContent({ content, intent }: { content: string; intent?
         <p key={idx} className="whitespace-pre-wrap leading-relaxed">
           {renderInline(block.text)}
         </p>
+      );
+      return;
+    }
+    if (block.type === 'workout-next-exercise') {
+      if (!onWorkoutNextExercise) return;
+      children.push(
+        <button
+          key={idx}
+          type="button"
+          onClick={onWorkoutNextExercise}
+          className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-700"
+        >
+          Ir para o próximo exercício
+        </button>
       );
       return;
     }
