@@ -13,8 +13,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.anthropic.tool_schema import RECORD_INTENT_INPUT_SCHEMA
 from app.models import WorkoutExercise, WorkoutSession, WorkoutSet
 from app.repositories.day_log import DayLogRepository
+from app.schemas.llm import WorkoutSetIn
 
 
 async def _day_log(session: AsyncSession, user) -> object:
@@ -144,3 +146,55 @@ async def test_exercise_and_set_insert_with_cascade(db_session: AsyncSession, ad
     ).scalar_one()
     assert rem_sets == 0
     assert rem_ex == 0
+
+
+def test_t302_intent_enum_includes_workout():
+    """T-B302: enum de intents exposto pela tool contém os 5 intents de treino."""
+    intents = RECORD_INTENT_INPUT_SCHEMA["properties"]["intent"]["enum"]
+    assert "workout_start" in intents
+    assert "workout_add_exercise" in intents
+    assert "workout_log_set" in intents
+    assert "workout_end" in intents
+    assert "workout_history" in intents
+
+
+def test_t302_envelope_validates_workout_payloads(make_envelope):
+    """T-B302: LLMEnvelope aceita payloads de treino nos 5 intents."""
+    env = make_envelope(
+        intent="workout_start",
+        workout_start={"workout_type": "push", "detected_name": "iniciando treino de push"},
+    )
+    assert env.workout_start is not None
+    assert env.workout_start.workout_type == "push"
+
+    env = make_envelope(
+        intent="workout_add_exercise",
+        workout_add_exercise={"exercise_name": "supino reto com barra"},
+    )
+    assert env.workout_add_exercise is not None
+    assert env.workout_add_exercise.exercise_name == "supino reto com barra"
+
+    env = make_envelope(
+        intent="workout_log_set",
+        workout_log_set={"weight_kg": 60, "reps": 10, "notes": "última série pesada"},
+    )
+    assert env.workout_log_set is not None
+    assert env.workout_log_set.weight_kg == 60
+    assert env.workout_log_set.reps == 10
+
+    env = make_envelope(intent="workout_end", workout_end={})
+    assert env.workout_end is not None
+
+    env = make_envelope(
+        intent="workout_history",
+        workout_history={"exercise_name": "agachamento"},
+    )
+    assert env.workout_history is not None
+    assert env.workout_history.exercise_name == "agachamento"
+
+
+def test_t302_workout_set_empty_weight_defaults_to_none():
+    """T-B302: `weight_kg` ausente vira None (backend assume barra olímpica)."""
+    result = WorkoutSetIn.model_validate({"reps": 8})
+    assert result.weight_kg is None
+    assert result.reps == 8

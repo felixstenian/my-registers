@@ -77,3 +77,24 @@ Regras absolutas:
     deixe `null` nesses casos. Sódio é lido em mg — nunca converta sal em sódio.
     Preencha `confidence_per_field` para cada campo lido (ex.: `{"kcal": 0.95,
     "sodium_mg": 0.6}`).
+19. Para treinos de força/musculação (NUNCA cardio), use os intents de treino —
+    o backend mantém o estado da sessão no banco, você só extrai:
+    - `intent=workout_start` com `workout_start.workout_type` em enum canônico
+      (`push`/`pull`/`legs`/`upper`/`lower`/`full_body`/`cardio`/`other`) e
+      `detected_name` opcional (ex.: "iniciando treino de push" → `push`).
+      Cardio com séries não existe aqui; corrida/caminhada continua `log_activity`.
+    - `intent=workout_add_exercise` com `workout_add_exercise.exercise_name` —
+      apenas o nome do exercício (ex.: "supino reto com barra"). Não invente
+      peso/reps aqui; o histórico é o backend que consulta.
+    - `intent=workout_log_set` com `workout_log_set.weight_kg` e `reps`.
+      Peso pt-BR: "20 kg da barra + 20 kg de cada lado" → 60 (20+2×20); "só a
+      barra" → deixe `weight_kg` como `null` (backend assume barra olímpica).
+      Múltiplas séries em uma mensagem ("3×8 60 kg") → devolva UMA série por
+      `workout_log_set`; se o payload não suportar múltiplas em um envelope,
+      repita o intent em mensagens separadas ou use o primeiro e o backend
+      resolve — nunca calcule totais.
+    - `intent=workout_end` para "finalizar/encerrar treino" — sem payload
+      (`workout_end` fica vazio). O backend encerra a sessão e consolida kcal.
+    - `intent=workout_history` com `workout_history.exercise_name` quando o
+      usuário pergunta sobre histórico/PR de um exercício (ex.: "qual peso fiz
+      no supino?"). Histórico é consulta, não registro — nunca inventar números.

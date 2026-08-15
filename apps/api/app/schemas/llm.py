@@ -25,6 +25,11 @@ Intent = Literal[
     "close_day",
     "weekly_summary",
     "set_profile",
+    "workout_start",
+    "workout_add_exercise",
+    "workout_log_set",
+    "workout_end",
+    "workout_history",
     "clarify",
     "unknown",
 ]
@@ -217,6 +222,54 @@ class ProfileUpdateIn(_StrictBase):
     sex: Sex | None = None
 
 
+WorkoutType = Literal[
+    "push",
+    "pull",
+    "legs",
+    "upper",
+    "lower",
+    "full_body",
+    "cardio",
+    "other",
+]
+
+
+class WorkoutStartIn(_LenientBase):
+    """SP-120. `workout_type` no enum canônico; `detected_name` livre
+    (copy do usuário). Sem `template_id` no núcleo (reservado ao módulo
+    de fluxo guiado, SP-178)."""
+
+    workout_type: WorkoutType
+    detected_name: str | None = None
+
+
+class WorkoutExerciseIn(_LenientBase):
+    """SP-121. Nome do exercício como dito pelo usuário; `normalized_name`
+    é derivado no backend."""
+
+    exercise_name: str
+
+
+class WorkoutSetIn(_LenientBase):
+    """SP-122. Peso/reps de uma série. `weight_kg=None` → barra olímpica
+    (20kg default, resolvido no backend). `reps` obrigatório."""
+
+    weight_kg: float | None = Field(default=None, gt=0, le=1000)
+    reps: int = Field(gt=0, le=1000)
+    notes: str | None = None
+
+
+class WorkoutEndIn(_LenientBase):
+    """SP-124. Encerramento explícito da sessão — sem payload extra."""
+
+
+class WorkoutHistoryQueryIn(_LenientBase):
+    """SP-127. Consulta de histórico por exercício. `exercise_name`
+    obrigatório; se ausente o backend emite `clarify`."""
+
+    exercise_name: str
+
+
 class LLMEnvelope(_StrictBase):
     intent: Intent
     confidence: float = Confidence
@@ -233,3 +286,8 @@ class LLMEnvelope(_StrictBase):
     deletion: DeletionIn | None = None
     nutrition_label: NutritionLabelIn | None = None
     profile_update: ProfileUpdateIn | None = None
+    workout_start: WorkoutStartIn | None = None
+    workout_add_exercise: WorkoutExerciseIn | None = None
+    workout_log_set: WorkoutSetIn | None = None
+    workout_end: WorkoutEndIn | None = None
+    workout_history: WorkoutHistoryQueryIn | None = None
