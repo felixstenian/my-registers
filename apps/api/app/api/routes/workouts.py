@@ -21,6 +21,7 @@ from app.core.exceptions import NotFoundError
 from app.models import User
 from app.repositories.food import AuditEventRepository
 from app.schemas.workout import (
+    WorkoutSessionActiveOut,
     WorkoutTemplateDetailOut,
     WorkoutTemplateExerciseOut,
     WorkoutTemplateOut,
@@ -28,6 +29,30 @@ from app.schemas.workout import (
 )
 
 router = APIRouter(prefix="/workouts", tags=["workouts"])
+
+
+@router.get("/session/active", response_model=WorkoutSessionActiveOut | None)
+async def get_active_session(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> WorkoutSessionActiveOut | None:
+    """SP-179 (T-B317): sessão de treino ativa do usuário, ou `null`.
+
+    Frontend alterna o botão "Iniciar treino" → "Finalizar treino" e liga
+    o cronômetro (T-B320). `user_id`-scoped (INV-18); INV-15 garante no
+    máximo uma sessão `active` por usuário.
+    """
+    from app.repositories.workout import WorkoutRepository
+
+    active = await WorkoutRepository(session).get_active_session(current_user.id)
+    if active is None:
+        return None
+    return WorkoutSessionActiveOut(
+        id=active.id,
+        workout_type=active.workout_type,
+        detected_name=active.detected_name,
+        started_at=active.started_at,
+    )
 
 
 @router.get("/templates", response_model=list[WorkoutTemplateOut])

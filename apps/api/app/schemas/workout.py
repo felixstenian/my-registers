@@ -40,3 +40,17 @@ class WorkoutTemplateDetailOut(WorkoutTemplateOut):
 
 class WorkoutTemplateToggleIn(BaseModel):
     active: bool
+
+
+class WorkoutSessionActiveOut(BaseModel):
+    """SP-179 (via SP-173/T-B317): sessão ativa do usuário (ou null).
+
+    Alimenta a troca "Iniciar treino" → "Finalizar treino" no header do
+    chat de treino e o `Stopwatch` (T-B320). Sempre `user_id`-scoped
+    (INV-18); no máximo uma sessão `active` por usuário (INV-15).
+    """
+
+    id: uuid.UUID
+    workout_type: str | None = None
+    detected_name: str | None = None
+    started_at: datetime | None = None

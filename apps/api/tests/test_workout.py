@@ -719,3 +719,59 @@ async def test_t314_template_routes_are_user_scoped(client, admin_user, db_sessi
     assert resp.status_code == 404
     resp_patch = await client.patch(f"/workouts/templates/{template.id}", json={"active": False})
     assert resp_patch.status_code == 404
+
+
+async def test_t317_active_session_returns_active_or_null(
+    client, admin_user, db_session: AsyncSession
+):
+    """T-B317 (SP-179): GET /workouts/session/active devolve a sessão ativa
+    do usuário (INV-15/INV-18) ou `null` quando não há nenhuma."""
+    from datetime import UTC, datetime
+
+    from app.services.workout import WorkoutService
+
+    await _login(client)
+    resp = await client.get("/workouts/session/active")
+    assert resp.status_code == 200
+    assert resp.json() is None
+
+    await WorkoutService(db_session).start_session(
+        user_id=admin_user.id,
+        day_log_id=(await _day_log(db_session, admin_user)).id,
+        workout_type="push",
+        detected_name="Peito e tríceps",
+        started_at=datetime.now(UTC),
+    )
+    await db_session.commit()
+
+    resp = await client.get("/workouts/session/active")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body is not None
+    assert body["workout_type"] == "push"
+
+
+async def test_t317_active_session_isolated_per_user(client, admin_user, db_session: AsyncSession):
+    """T-B317 (INV-18): sessão ativa de outro usuário não aparece."""
+    from app.core.security import hash_password
+    from app.repositories.user import UserRepository
+    from app.services.workout import WorkoutService
+
+    other = await UserRepository(db_session).create(
+        email="other@example.com",
+        password_hash=hash_password("otheradmin"),
+        display_name="Other",
+    )
+    await db_session.commit()
+    await WorkoutService(db_session).start_session(
+        user_id=other.id,
+        day_log_id=(await _day_log(db_session, other)).id,
+        workout_type="pull",
+        detected_name="Treino B",
+    )
+    await db_session.commit()
+
+    await _login(client)
+    resp = await client.get("/workouts/session/active")
+    assert resp.status_code == 200
+    assert resp.json() is None
