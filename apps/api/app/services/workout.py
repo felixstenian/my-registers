@@ -319,6 +319,27 @@ class WorkoutService:
         )
         return session
 
+    async def end_active_session(
+        self,
+        *,
+        user_id: uuid.UUID,
+        end_reason: EndReason = "user",
+        message_id: uuid.UUID | None = None,
+        ended_at: datetime | None = None,
+    ) -> WorkoutSession | None:
+        """SP-125. Encerra a sessão ativa do usuário, se houver, consolidando
+        em `activity_record`. Retorna `None` quando não há sessão ativa."""
+        active = await self.repo.get_active_session(user_id)
+        if active is None:
+            return None
+        return await self.end_session(
+            user_id=user_id,
+            session_id=active.id,
+            end_reason=end_reason,
+            message_id=message_id,
+            ended_at=ended_at,
+        )
+
     async def consolidate_to_activity(
         self,
         *,

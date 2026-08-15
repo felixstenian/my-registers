@@ -12,6 +12,7 @@ formatação dos 5 intents.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from httpx import AsyncClient
@@ -372,3 +373,55 @@ async def test_workout_history_returns_pr(
     assert "Histórico de" in assistant.content
     assert "60 kg" in assistant.content
     assert "PR pessoal" in assistant.content
+
+
+async def test_close_day_ends_active_session_before_recompute(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """SP-125: fechar o dia encerra a sessão de treino ativa (end_reason
+    auto_close_day) ANTES do recompute — o activity_record consolidado entra
+    no snapshot fechado."""
+    from app.repositories.day_log import DayLogRepository
+    from app.services.workout import WorkoutService
+
+    admin_user.weight_kg = Decimal("80")
+    await db_session.flush()
+
+    dl = await DayLogRepository(db_session).get_or_create(
+        user_id=admin_user.id, log_date=datetime.now(UTC).date()
+    )
+    svc = WorkoutService(db_session)
+    session, _ = await svc.start_session(
+        user_id=admin_user.id, day_log_id=dl.id, workout_type="push"
+    )
+    await svc.add_exercise(
+        user_id=admin_user.id, session_id=session.id, exercise_name="supino reto"
+    )
+    await svc.log_set(user_id=admin_user.id, session_id=session.id, weight_kg=60, reps=10)
+    await db_session.commit()
+
+    await _login(client)
+    await _send(
+        client,
+        fake_anthropic,
+        make_envelope,
+        make_llm_result,
+        text="encerrar o dia",
+        intent="close_day",
+    )
+
+    db_session.expire_all()
+    await db_session.refresh(session)
+
+    assert session.status == "ended"
+    assert session.end_reason == "auto_close_day"
+
+    records = list((await db_session.execute(select(ActivityRecord))).scalars())
+    assert len(records) == 1
+    assert records[0].calc_method == "workout_session"
+    assert records[0].workout_session_id == session.id

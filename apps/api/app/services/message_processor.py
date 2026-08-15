@@ -446,6 +446,17 @@ class MessageProcessor:
         if user is None:
             return await self._record_error(user_message, result)
 
+        # SP-125: sessão de treino ativa é encerrada ANTES do recompute para
+        # o activity_record consolidado entrar no snapshot do dia fechado.
+        from app.services.workout import WorkoutService
+
+        await WorkoutService(self.session).end_active_session(
+            user_id=user.id,
+            end_reason="auto_close_day",
+            message_id=user_message.id,
+        )
+        await self.session.flush()
+
         close_result = await DayCloseService(self.session, anthropic=self.anthropic).close_today(
             user=user, message_id=user_message.id
         )
