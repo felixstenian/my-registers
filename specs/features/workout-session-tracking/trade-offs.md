@@ -1,236 +1,245 @@
-# Trade-offs — Treino estruturado (Bloco 3)
+# Trade-offs — Módulo de Treino (Workout Module)
 
-> **Rastreabilidade**: SP-120..SP-127, ADR-011 (`research.md`) · Bloco 3 (T-B301..T-B308) em [`tasks.md`](../../001-mvp-registro-diario/tasks.md). Status: **`documented-only`** — ADR-011 aceita; implementação pendente desde v1.2/v1.6.
+> **Rastreabilidade**: SP-120..SP-127, ADR-011 (`research.md`), Bloco 3 (T-B301..T-B308) em [`tasks.md`](../../001-mvp-registro-diario/tasks.md) · Expansão do cliente (SP-170..179 propostos), 2026-08-14. Status: **`documented-only`** — ADR-011 aceita; implementação pendente.
 
 ## Decisão 1 — Coexistência com `log_activity` via consolidação (ADR-011)
 
 ### Contexto
-SP-120..127 introduzem modelo hierárquico (sessão → exercício → séries) que é fundamentalmente mais granular que `activity_records` flat atual. Como integrar sem alterar snapshot/semanal?
+SP-120..127 introduzem modelo hierárquico (sessão → exercício → séries) mais granular que `activity_records` flat. Como integrar sem alterar snapshot/semanal?
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — Coexistir + consolidar em 1 `activity_record` no encerramento (SP-126)** (escolhida) | Snapshot/semanal agnósticos; baixa superfície de impacto; detalhamento no histórico (SP-121/127) | Dados duplicados (séries + `activity_record`); unlink INV-13 |
+| **A — Coexistir + consolidar em 1 `activity_record` no encerramento (SP-126)** (escolhida) | Snapshot/semanal agnósticos; baixa superfície de impacto; detalhamento no histórico | Dados duplicados (séries + `activity_record`); unlink INV-17 |
 | B — Substituir `log_activity` por sessão para tudo | Unificação | Overhead pra cardio ("corri 40 min" não precisa de 3 tabelas) |
-| C — Duas tabelas separadas sem consolidação | Stats granulares por séries | Snapshot/semanal precisaria ler duas fontes (quebra INV-1 — fonte única `kcal_out`) |
+| C — Duas tabelas separadas sem consolidação | Stats granulares por séries | Snapshot/semanal precisaria ler duas fontes (quebra INV-1) |
 | D — Consolidação em tempo real (a cada série) | Atualização instantânea | Disparar `recompute` por série é caro; dado parcial não faz sentido |
 
 ### Decisão tomada
-**Opção A** — ADR-011 accepted. Implementação T-B301..T-B304/T-B306. Justificativa: snapshot agnóstico < impacto mínimo; MVP-de-treino herda calculadora existente.
+**Opção A** — ADR-011 accepted. Implementação T-B301..T-B304/T-B306.
 
 ### Consequências
-- Positivas: snapshot/semanal sem mudança; `activity_records` continua única fonte de `kcal_out` (INV-1 preservado); correções/deleções existentes continuam válidas.
-- Negativas / dívida técnica:INV-13 (unlink); sessões órfãs possíveis; MET fixo aproximado.
+- Positivas: snapshot/semanal sem mudança; `activity_records` única fonte de `kcal_out` (INV-1); correções/deleções existentes válidas.
+- Negativas/dívida: INV-17 (unlink); sessões órfãs; MET fixo aproximado.
 
 ---
 
 ## Decisão 2 — Estado conversacional 100% no banco (sem memória LLM)
 
 ### Contexto
-LLM precisa saber "sessão atual ativa" e "último exercício" a cada mensagem. Avaliava-se memória de conversa vs consulta DB.
+LLM precisa saber "sessão atual ativa", "último exercício" e "template guiado" a cada mensagem.
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — Lookup DB em cada handler** (escolhida) | Multi-device consistente; idempotente; INV-1 fácil de testar (mock LLM não "lembra") | 1+ query por intent; complexidade no service |
-| B — Memória de conversa (Anthropic messages array) |latência reduz | LLM "lembra" errado entre dias; difícil reset |
-| C — Cache Redis state | Rápida lookup | Infra adicional (single VPS evita) |
+| **A — Lookup DB em cada handler** (escolhida) | Multi-device consistente; idempotente; INV-1 testável | 1+ query por intent |
+| B — Memória de conversa (Anthropic messages array) | Latência reduzida | LLM "lembra" errado entre dias; difícil reset |
+| C — Cache Redis state | Lookup rápida | Infra adicional (single VPS evita) |
 
 ### Decisão tomada
-**Opção A** — Consulta ao DB no handler. Index parcial `(user_id WHERE status='active')` faz lookup barato. INS-1 garante determinismo mesmo com LLM mock.
-
-### Consequências
-- Positivas: multi-device; reset por commit consiste; mock LLM em tests funciona.
-- Negativas: 5+ queries em uma sessão longa; desprezível devido à escala single-user.
+**Opção A**. Index parcial `(user_id WHERE status='active')` torna o lookup barato.
 
 ---
 
 ## Decisão 3 — Consolidação no encerramento (não a cada série)
 
 ### Contexto
-`activity_record.kcal_burned` final só faz sentido quando sessão completa.
+`activity_record.kcal_burned` final só faz sentido quando a sessão completa.
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
 | **A — `consolidate_to_activity` em `end_session` + `_handle_close_day`** (escolhida) | Snapshot só muda quando faz sentido; 1 recompute por sessão | Latência até encerramento pra ver kcal |
-| B — Recompute a cada `log_set` | Atualização real-time | Disparar `recompute` por série é caro; dado parcial enganador |
-| C — Stream events → batch | Event-sourced | Quebra INV-4 (snapshots from-scratch); complexo |
+| B — Recompute a cada `log_set` | Real-time | `recompute` por série caro; dado parcial enganador |
+| C — Stream events → batch | Event-sourced | Quebra INV-4 (snapshots from-scratch) |
 
 ### Decisão tomada
-**Opção A** — Encerramento é o momento natural (SP-124/SP-125). ADR-011 explicita.
-
-### Consequências
-- Positivas: snapshot consistente; menos churn.
-- Negativas: usuário vê "calorias estimadas" só ao final (aceito).
+**Opção A**. INV-20 adiciona reconsolidação **sob demanda** quando a sessão já encerrada é editada.
 
 ---
 
-## Decisão 4 — MET fixo por `workout_type`
+## Decisão 4 — kcal: reportada pelo usuário (INV-21) vs MET fixo
 
 ### Contexto
-`kcal = MET × weight × horas`. MET real varia muito por carga/descanso/perfil. Como estimar?
+Cliente pediu calorias gastas "quando forem passadas" (texto/imagem/edição) entrando no resumo do dia. Como conciliar com MET fixo?
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — MET hardcoded por `workout_type`** (escolhida) | Simples; reproduzível; OK p/ MVP | Aproximação grosseira |
-| B — Lookup MET por exercício + intensidade | Precision | Database MET; complexo |
-| C — Fórmula "volume total × densidade" (peso × reps × sets) | Modela esforço real | Fora do escopo MVP sem normativas |
-| D — LLM estima | — | Violado INV-1 (Art. II) — LLM não calcula |
+| **A — `kcal_burned_reported` como fonte quando informada; senão MET fixo por `workout_type`** (escolhida) | Respeita valor real do usuário/equipamento (esteira/pulso); fallback determinístico; INV-21 | Dados "dupla origem" (reportada vs estimada) precisam semântica clara no `calc_method` |
+| B — Sempre MET fixo | Consistente | Ignora calorias que o usuário tem (ex.: foto de esteira) — cliente quer exibi-las |
+| C — LLM calcula | — | Violado INV-1 (Art. II) |
+| D — MET por exercício + intensidade | Preciso | Database MET; complexo |
 
 ### Decisão tomada
-**Opção A** — MET fixo: `push`/`pull`/`upper` = 5.0; `legs`/`lower` = 6.0; `full_body` = 5.5. Justificativa: ADR-011 aceita aproximação pra MVP; refinamento é feature pós-MVP ("volume × densidade").
+**Opção A**. `workout_sessions.kcal_burned_reported` persiste o valor informado; `consolidate_to_activity` usa reportada se existir (`met_value=NULL`), senão MET. `calc_method='workout_session'` permanece; origem via `met_value`/`kcal_burned_reported` em `notes`.
 
 ### Consequências
-- Positivas: 1 cálculo determinístico; teste fácil.
-- Negativas: para musculação intensa de pk, 5.0 MET pode ser sub-estimado; aceito.
+- Positivas: cliente vê kcal reais da atividade; fallback MET intacto.
+- Negativas: dois caminhos de kcal na sessão — mitigado por INV-21 + labels de origem.
 
 ---
 
-## Decisão 5 — `weight_kg` do perfil (sem default)
+## Decisão 5 — `workout_templates`: entidade de catálogo separada
 
 ### Contexto
-Fórmula kcal precisa do peso do usuário. Avaliava-se default e não bloquear.
+Cliente quer cadastrar treinos reutilizáveis (RF-015), com status ativo/inativo (RF-016) e fluxo guiado (RF-020). Onde viver?
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — Sem `weight_kg` no perfil → `kcal_burned=NULL` + warning** (escolhida) | Treino persiste; usuário define depois; sem fricção | kcal fica pendente |
-| B — Bloquear sessão até preencher perfil | Sem pendências | UX má; perfil é opcional na spec |
-| C — Default 70 kg generic | Funciona | Generic wrong; kcal skew |
+| **A — Tabela nova `workout_templates` + `workout_template_exercises`, sessões referenciam `template_id`** (escolhida) | Catálogo ≠ execução; histórico preservado (INV-20); lista/abas triviais | 2 tabelas novas; sessões livres sem template coexistindo |
+| B — Templates como sessões `active` só | Zero tabelas | Confunde catálogo com execução; inativar template apagaria/confundiria sessão |
+| C — Templates em `activity_records` | Zero schema | Perde estrutura de séries-alvo; histórico ambíguo |
 
 ### Decisão tomada
-**Opção A** — `warning 'weight_kg_required_for_kcal'`; treino persiste. Implementação T-B304.
+**Opção A**. `active` boolean no template (INV-19); `workout_sessions.template_id` FK SET NULL (INV-20).
 
 ### Consequências
-- Positivas: usuário nunca perde dados por perfil incompleto.
-- Negativas: snapshot tem `kcal_burned=NULL` em treino; ajusta ao preencher perfil (possible follow-up).
+- Positivas: abas Ativos/Inativos/Histórico triviais; fluxo guiado simples; edição não vaza.
+- Negativas/dívida: novas tabelas; sessões órfãs de template (template deletado → `template_id=NULL`, sessão permanece).
 
 ---
 
-## Decisão 6 — INV-13 unlink bidirectional (delete não propaga)
+## Decisão 6 — Chat de treino dedicado (espaço separado)
 
 ### Contexto
-Após consolidação, `activity_record` e `workout_sessions/exercises/sets` coexistem com link FK. Apagar um deve propagar?
+Cliente quer "o próprio chat de workouts", no mesmo padrão do chat de alimentação, com header de atividades do dia + kcal e botões próprios (RF-018/019).
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — Unlink: delete não propaga** (escolhida) | Simples; histórico de séries preservado | Consistência requer recompute manual (fora MVP) |
-| B — Cascade delete em ambos | Consistente | Perder dados detalhados |
-| C — Trigger automático recompute | Eventual consistência | Over-engineering pra single-user MVP |
+| **A — Página dedicada `/workouts/chat` espelhando `(app)/chat` + `messages.via='workout'`** (escolhida) | UX consistente com alimentação; header/botões específicos; reuso total de mídia/audit/polling; backward-compatible (default `via='food'`) | Coluna nova + filtro em todas as queries de chat; branch de prompt no `MessageProcessor` |
+| B — Reusar `/chat` com toggle de modo | Sem rota nova | Estado global confuso; prompt diferente; header/botões condicionais |
+| C — Dois pools/`workout_messages` separada | Isolamento absoluto | Duplica Message + ponte mídia + FK audit; poll duplicado; LLM não recebe histórico → isolamento de memória não se aplica (Art. II §2) |
 
 ### Decisão tomada
-**Opção A** — INV-13 explicita unlink bidirectional; ADR-011 assume dívida técnica aceitável.
+**Opção A** (confirmada em 2026-08-14). `messages` ganha coluna `via` (`'food'` default / `'workout'`); `GET /chat/messages` e `MessageProcessor` filtram por `via`. Prompt do treino selecionado pela `via` da mensagem de entrada.
 
 ### Consequências
-- Positivas: histórico preservado após apagar `activity_record`.
-- Negativas / dívida técnica: se usuário apaga cardio genérico (correção), treino consolidado permanece; recompute manual pra refletir. Feature futura se incomodar.
+- Positivas: cada chat tem prompt/contexto próprio (alimentação não polui treino); header e botões dedicados; mídia/audit/polling intactos; default `'food'` elimina backfill.
+- Negativas/dívida: toda query de listagem de chat precisa do filtro `via` (regressão de polling mitigada por teste de integração); branch de prompt no processor; `proxy.ts` + acesso via CTA (tab bar mobile segue SP-NM sem tab nova).
 
 ---
 
-## Decisão 7 — Parser pt-BR pela LLM (backend só valida)
+## Decisão 7 — Fluxo guiado: botões como conveniência sobre mensagens estruturadas
 
 ### Contexto
-"20 kg da barra + 20 kg de cada lado" → 60. Parser estruturado vs LLM NLP?
+Cliente quer seleção de template/exercício por botões e repetição de sequência (RF-020).
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — LLM faz NLP, payload Pydantic validado** (escolhida) | Reproduzível; backend determinístico (INV-1); flexível | Edge cases LLM; seed de cache para PR |
-| B — Regex/parser próprio | Totalmente deterministic | Frágil pt-BR; refresh de sinônimos interminável |
-| C — Tool/function calling múltiplas | Fine-grained | Latência alta; complexidade |
+| **A — Botões mapeiam para o mesmo protocolo de chat (intents/mensagens)** (escolhida) | Estado no DB; EVT; LLM não precisa lembrar; sequência é só re-listar | Precisar de intents de navegação (`workout_next_exercise`) |
+| B — Botões chamam endpoints HTTP dedicados | Mais "nativo" | Duplica lógica de sessão; divergência entre caminhos |
+| C — Botões só estilizam, LLM decide tudo | Zero backend novo | LLM requer memorizar estado → quebra EVT/INV-1 |
 
 ### Decisão tomada
-**Opção A** — LLM collated via `tool_use` JSON payload; backend `weight_kg > 0` `reps > 0`. Se ambíguo → `clarify`.
-
-### Consequências
-- Positivas: regras vocab free; backend mantém INV-1.
-- Negativas: dependência LLM para aceitar "20 kg só a barra"; LLM deixa vazio/ambíguo → backend rejeita.
+**Opção A** — botões disparam mensagens/intents estruturados. `WorkoutService.next_exercise_prompt` re-lista exercícios do template de forma determinística.
 
 ---
 
-## Decisão 8 — Antecipar `CALC_METHOD_LABEL_PT['workout_session']` no frontend
+## Decisão 8 — Cronômetro (RF-021): UI-only, tempo determinístico no backend
 
 ### Contexto
-Bloco 6 (`daily-detail-view`) já adicionou label `'sessão de treino'` para `calc_method='workout_session'` em `types.ts`, mesmo sem implementação. Decisão: deixar vazio placeholder ou já incluir？
+Cliente quer cronômetro ao iniciar treino, parado ao encerrar, com tempo registrado.
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — Antecipada em Bloco 6** (escolhida) | Sem regressão visual quando implementado; UI já mostra "sessão de treino" | Códigoче for feature não-existente |
-| B — Adicionar só quando Bloco 3 implementado | Sem código morto | Risco de mostrar "workout_session" cru ao user |
+| **A — Cronômetro frontend; `duration=ended_at-started_at` como fonte** (escolhida) | Registro determinístico; idempotente; puff concorrente irrelevante | Cronômetro pode "pular" se sessão encerra por outro device (aceito — single-user) |
+| B — Persistir ticks do cronômetro | "Tempo real" excluindo pausas | Complexo; inconsistente com SP-126 |
 
 ### Decisão tomada
-**Opção A** — `types.ts:137` já tem `'sessão de treino'` (commit Bloco 6); backend não emite `calc_method='workout_session'` hoje, então não aparece anyway. Zero UX impact; prontidão.
-
-### Consequências
-- Positivas: zero regressão quando Bloco 3 implementar.
-- Negativas: cruft slight (uma entrada em dict, aceitável).
+**Opção A**. UI exibe tempo decorrido derivado; backend grava `ended_at - started_at`.
 
 ---
 
-## Decisão 9 — 5 intents fora de `_STRUCTURED_INTENTS`
+## Decisão 9 — Imagem de treino (RF-022) reutiliza pipeline de mídia
 
 ### Contexto
-Meal/water/beverage/activity compartilham pipeline genérico em `_STRUCTURED_INTENTS`. Avaliava-se reaproveitar vs handlers dedicated.
+Cliente pediu enviar imagem com atividade. Como processar?
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — Handlers dedicated (5 `_handle_workout_*`)** (escolhida) | Cada handler tem fluxo próprio (estado/recuperação histórico); isolado | Boilerplate; dispatcher deve explicitar |
-| B — Reuso de pipeline genérico | Menos boilerplate | Pipeline não comporta lookup histórico + 2-step consolidar |
-| C — Um handler só switch | Conciso | Switch case legibility |
+| **A — Reusar `POST /media` + `media_ids` + LLM Sonnet** (escolhida) | Zero infra nova; mesmo fluxo do chat de alimentação; extrai título/atividade/intensidade/kcal | Imagem sem kcal → MET; LLM pode inventar título (mitigado por `confidence` + `is_estimate`) |
+| B — OCR próprio | Determinístico | Não captura intensidade/kcal; over-engineering |
+| C — Upload separado | Isolamento | Duplica pipeline de mídia |
 
 ### Decisão tomada
-**Opção A** — 5 handlers dedicated; rotear fora de `_STRUCTURED_INTENTS`. T-B305.
-
-### Consequências
-- Positivas: lógica isolada; testável sem acoplar meal flow.
-- Negativas: 5 funções similares; commentário no `_STRUCTURED_INTENTS` sobre eles (documentação inline).
+**Opção A** — `WorkoutImageIn` extraído pela LLM; apenas campos explicitados são persistidos (INV-1).
 
 ---
 
-## Decisão 10 — T-B308 frontend opcional
+## Decisão 10 — Edição de peso/séries/kcal (RF-023) com reconsolidação (INV-20)
 
 ### Contexto
-Backend em markdown das sessões já é renderizável pelo `AssistantContent`. Avaliava-se fazer UI customizada já no MVP-de-treino.
+Cliente quer editar pelo chat e pelo `/day`. Como manter `/day` consistente depois da consolidação?
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — Backend primeiro, T-B308 opcional/melhoria** (escolhida) | Ship mais rápido; markdown é legível; User foca em core | Sem destaque visual; sem `WorkoutHistoryCard` |
-| B — UI customizada no PR Bloco 3 | UX melhor desde dia 1 | Mais código; 2 entregas acopladas |
-| C — Componente reusable para fitness apps | Zero escopo | Over-engineering |
+| **A — Editar set/sessão e re-consolidar `activity_record` se sessão encerrada** (escolhida) | `/day` fiel ao que o usuário corrigiu; INV-20 | Edição re-dispara consolidação (custo baixo — 1 sessão) |
+| B — Editar sem reconsolidar (INV-17 puro) | Simples | `/day` diverge do histórico de treino — cliente quis edição visível no dia → inconsistência |
+| C — Bloquear edição de sessão encerrada | Consitência | Cliente pediu edição também no `/day` — bloquear seria UX ruim |
 
 ### Decisão tomada
-**Opção A** — T-B308 marcado opcional; `message_formatter.compose_workout_*` em markdown resolveleit عبر `AssistantContent` existente. Melhorias visuais aguardam demanda real.
+**Opção A**. PATCH `/records/workout-sets/{id}` (peso/reps) e PATCH `/records/workout-sessions/{id}` (kcal reportada); dia fechado → 409.
 
 ### Consequências
-- Positivas: escopo menor; ship incremental.
-- Negativas: sem "PR ambar"/"série atual verde" até futuro; markdown identifica por textual.
+- Positivas: edição visível e consistente; auditoria total.
+- Negativas/dívida: reconsolidação precisa garantir que `activity_record` não duplica (upsert por `workout_session_id`).
 
 ---
 
 ## Decisão 11 — Sessões órfãs aceitas
 
 ### Contexto
-Usuário pode iniciar sessão e nunca encerrar, nem fechar dia (dia continua aberto por dias/semanas).
+Usuário pode iniciar sessão e nunca encerrar, nem fechar dia.
 
 ### Opções consideradas
 | Opção | Prós | Contras |
 |---|---|---|
-| **A — Aceitar; SP-125 cobre caso mais comum (close day)** (escolhida) | Sem cron/monitor; MVP simples | Sessões `status='active'` continuamILITIES |
-| B — Cron fecha sessões >24h | Realística | Infra nova (cron); contratempo UX (user volta e treino fechado) |
+| **A — Aceitar; SP-125 cobre caso mais comum (close day)** (escolhida) | Sem cron/monitor; MVP simples | Sessões `active` antigas continuam |
+| B — Cron fecha sessões >24h | Realística | Infra nova (cron); UX grátis se user volta e treino fechado |
 | C — LLM avisa continuamente | UX | Ruído |
 
 ### Decisão tomada
-**Opção A** — spec aceita; index parcial permite manutenção futura; SP-125 cobre padrão single-user. Documentado em ADR-011.
+**Opção A**. Documentado em ADR-011.
 
-### Consequências
-- Positivas: zero overhead.
-- Negativas / dívida técnica: lookup `status='active'` pode retornar sessão velha; necessária comparação `started_at` adicional quando Bloco 3 implementado.
+---
+
+## Decisão 12 — Antecipar `CALC_METHOD_LABEL_PT['workout_session']` no frontend
+
+### Contexto
+Bloco 6 (`daily-detail-view`) já adicionou label `'sessão de treino'` (`types.ts:142`) mesmo sem implementação.
+
+### Opções consideradas
+| Opção | Prós | Contras |
+|---|---|---|
+| **A — Antecipada em Bloco 6** (escolhida) | Sem regressão visual quando implementado | Código para feature não-existente |
+| B — Adicionar só quando módulo implementado | Sem código morto | Risco de mostrar label cru |
+
+### Decisão tomada
+**Opção A** — `types.ts:142` já tem `'sessão de treino'`.
+
+---
+
+## Decisão 13 — Intents de treino fora de `_STRUCTURED_INTENTS`
+
+### Contexto
+Meal/water/beverage/activity compartilham pipeline genérico. Treino tem fluxos próprios.
+
+### Opções consideradas
+| Opção | Prós | Contras |
+|---|---|---|
+| **A — Handlers dedicados** (escolhida) | Cada handler tem fluxo próprio (histórico, guiado, template, imagem); isolado | Boilerplate; dispatcher deve explicitar |
+| B — Reuso de pipeline genérico | Menos boilerplate | Não comporta lookup histórico + template + N sets |
+| C — Um handler só switch | Conciso | Switch case legibilidade |
+
+### Decisão tomada
+**Opção A**. Roteados fora de `_STRUCTURED_INTENTS`.
 
 ---
 
@@ -238,28 +247,30 @@ Usuário pode iniciar sessão e nunca encerrar, nem fechar dia (dia continua abe
 
 | Item | Impacto | Prioridade |
 |---|---|---|
-| Bloco 3 inteiro não implementado | Feature não disponível | Alta — spec aceita (v1.2/v1.6); aguarda priorização pós-Fase 10 |
-| `reset-password`/`create-admin` inline (sem CLI direct) | Não relacionado a Bloco 3; gap operacional (feature `admin-bootstrap-cli`) | Média |
-| MET fixo sub-estimado para musculação intensa | kcal_burned baixista | Baixa (refinamento futuro) |
-| Sessões órfãs aceitas sem recharge | Acumulação de sessões `active` sem dono de contexto | Baixa |
-| `clarify` no parser LLM sem fluxo guidance de fallback | Pode ficar repetitivo | Baixa |
-| `WorkoutHistoryCard`/destaque visual (T-B308) postergado | UX "ok" mas sem blink PR | Baixa |
-| Sem cron de housekeeping sobre `workout_*` | Tabelas podem crescer | Baixa (single-user MVP) |
-| Auditoria gap se(sessão acaba sem mutar `activity_record`)? | Audit cobre só mutações; consulta SP-127 não audita | Baixa |
-| `apps/api/tests/test_workout.py` inexistente — cobertura 0% | Bloco não implementado | Alta — criar junto com implementação |
+| Bloco 3 + módulo inteiros não implementados | Feature não disponível | Alta — spec aceita; aguarda spec:/plan:/tasks:/feat: |
+| Dupla origem de kcal (reportada vs MET) | Semântica `calc_method` precisa ser clara | Média |
+| `messages.via` (pool único com filtro) | Toda query de listagem de chat precisa filtrar `via` | Média |
+| Template deletado → `template_id=NULL` em sessões (dangling) | Histórico preserva sessão sem template (aceito) | Baixa |
+| MET fixo sub-estimado p/ musculação intensa | `kcal_burned` baixista (quando não reportado) | Baixa |
+| Sessões órfãs sem recharge | Acumulação de sessões `active` | Baixa |
+| Semantic retry LLM pode repetir `clarify` sem guidance | Repetitivo | Baixa |
+| `WorkoutHistoryCard`/destaque visual (T-B308) postergado | UX "ok" sem blink PR | Baixa |
+| Reconsolidação pode duplicar `activity_record` se upsert mal feito | Snapshot incorreto | Alta (mitigar por `workout_session_id` único) |
+| Sem cron de housekeeping sobre `workout_*` | Tabelas podem crescer | Baixa |
+| `apps/api/tests/test_workout.py` inexistente — cobertura 0% | Módulo não implementado | Alta — criar com a implementação |
 
 ## Riscos identificados
 
 | Risco | Probabilidade | Impacto | Mitigação |
 |---|---|---|---|
-| Bloco 3 nunca implementado | Média | Médio | Spec aceita; backlog priorizado; revisitar em planning |
-| Race condition 2 `start` simultâneos | Baixa (deploy serial access HTTP) | Médio | Index parcial `(user_id WHERE status='active')` + unique; service detecta |
-| LLM parser errado: "só a barra" interpretado como vazio | Média | Baixo | Backend validar `weight_kg>0`; LLM `clarify` se None |
-| MET fixo vira "production-true" e nunca melanja | Alta | Médio | Documentado como Aproximação (ADR-011); feature pós-MVP |
-| INV-13 unlink irrita user: "apaguei treino, kcal não recalculou" | Média | Médio | UX explica (recompute manual fora MVP); feature future |
-| Snapshot de dia anterior não mostra treino | Baixa | Médio | SP-125 garante encerra + consolidate ANTES do close; if user nunca faz close, aceito |
-| LLM emite `intent=workout_start` para "corri 40 min" (overlap cardio) | Média | Médio | Prompt rule 19 explicita; LLM modo ambíguo → clarify |
-| Histórico fuzzy match retorna falso-positive ("supino reto" casa "supino reto máquina" incorreto) | Média | Baixo | Review das rules de `normalized_name`; refinamento incremental |
-| migration destrutivo (cria tabelas) em prod sem rollback path | Baixa | Alto | Alembic downgrade -1 testado em staging antes de prod |
-| `weight_kg` mudou no perfil between sessões → PR histórico afeta? | Baixa | Baixo | Histórico é "peso que MEEDI no exercício" (de workout_sets); perfil é apenas para cálculo de kcal consolidado |
-| Auditoria reproduz sessão toda em delete | Média | Baixo | INV-10 registrou create; recompute não restore |
+| Módulo nunca implementado | Média | Médio | Spec aceita + proposta do cliente; planejar spec:/plan:/tasks: |
+| Race 2 start simultâneos | Baixa | Médio | Index parcial + unique; service auto-encerra |
+| LLM parser errado ("só a barra") | Média | Baixo | Backend `weight_kg>0`; `clarify` |
+| Imagem sem kcal → MET ou NULL | Média | Baixo | Warning `weight_kg_required_for_kcal`; INV-21 |
+| INV-20 reconsolidação duplica `activity_record` | Média | Médio | Upsert por `workout_session_id`; teste TC-I-012 |
+| Histórico fuzzy retorna falso-positive ("supino reto" casa "supino reto máquina") | Média | Baixo | Review de `normalized_name`; refinamento incremental |
+| Migration destrutiva em prod sem rollback | Baixa | Alto | Alembic downgrade testado em staging |
+| `weight_kg` mudou no perfil entre sessões | Baixa | Baixo | Histórico usa peso de `workout_sets` (medido); perfil só pra MET consolidado |
+| Mensagens de treino misturadas com alimentação | Média | Médio | `via`/scope separado + prompt dedicado |
+
+> Nota: SP-170..179 são **propostas** — fora da spec canônica `001`. Antes de qualquer implementação, abrir PRs `spec:` (atualizar `specs/001-mvp-registro-diario/spec.md`), `plan:` e `tasks:` (T-B3xx novos) conforme fluxo SDD do AGENTS.md.
