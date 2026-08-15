@@ -958,7 +958,7 @@ def _compose_beverage_summary(beverage: BeverageResult, recompute: RecomputeResu
 def _compose_activity_summary(activity: ActivityResult, recompute: RecomputeResult) -> str:
     record = activity.record
     duration = int(record.duration_minutes)
-    kcal = int(record.kcal_burned)
+    kcal = int(record.kcal_burned or 0)
     intensity_label = {
         "light": "leve",
         "moderate": "moderada",

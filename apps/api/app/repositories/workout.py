@@ -170,6 +170,42 @@ class WorkoutRepository:
         rows = list((await self.session.execute(stmt)).all())
         return [(s, e, st) for s, e, st in rows]
 
+    async def exercises_with_sets(
+        self,
+        session_id: uuid.UUID,
+    ) -> list[tuple[WorkoutExercise, list[WorkoutSet]]]:
+        """Todos os exercícios da sessão com suas séries (para SP-126).
+
+        Ordenado por `sequence_index` do exercício e da série — o service
+        monta o `notes` JSON com os IDs (INV-17: só referência, sem FK de
+        atividade → exercício).
+        """
+        stmt = (
+            select(WorkoutExercise, WorkoutSet)
+            .join(
+                WorkoutSet,
+                WorkoutSet.workout_exercise_id == WorkoutExercise.id,
+                isouter=True,
+            )
+            .where(WorkoutExercise.workout_session_id == session_id)
+            .order_by(
+                WorkoutExercise.sequence_index.asc(),
+                WorkoutSet.sequence_index.asc(),
+            )
+        )
+        rows = list((await self.session.execute(stmt)).all())
+        grouped: dict[uuid.UUID, WorkoutExercise] = {}
+        sets_by_exercise: dict[uuid.UUID, list[WorkoutSet]] = {}
+        order: list[uuid.UUID] = []
+        for exercise, workout_set in rows:
+            if exercise.id not in grouped:
+                grouped[exercise.id] = exercise
+                sets_by_exercise[exercise.id] = []
+                order.append(exercise.id)
+            if workout_set is not None:
+                sets_by_exercise[exercise.id].append(workout_set)
+        return [(grouped[eid], sets_by_exercise[eid]) for eid in order]
+
     async def list_sessions_ended(
         self,
         user_id: uuid.UUID,
