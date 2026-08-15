@@ -8,6 +8,7 @@ carregam payload; para `clarify`/`unknown`/`query_day`/etc, os campos ficam
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime
 from typing import Literal
 
@@ -238,11 +239,14 @@ WorkoutType = Literal[
 
 class WorkoutStartIn(_LenientBase):
     """SP-120. `workout_type` no enum canônico; `detected_name` livre
-    (copy do usuário). Sem `template_id` no núcleo (reservado ao módulo
-    de fluxo guiado, SP-178)."""
+    (copy do usuário). `template_id` (SP-178/INV-20): UUID do template
+    do fluxo guiado — o frontend o injeta quando o usuário escolhe um
+    template no picker (o LLM não conhece UUIDs; nunca deve inventá-lo).
+    Sem `template_id` → sessão livre (SP-120)."""
 
     workout_type: WorkoutType
     detected_name: str | None = None
+    template_id: uuid.UUID | None = None
 
 
 class WorkoutExerciseIn(_LenientBase):

@@ -102,13 +102,32 @@ class WorkoutService:
         detected_name: str | None = None,
         message_id: uuid.UUID | None = None,
         started_at: datetime | None = None,
+        template_id: uuid.UUID | None = None,
     ) -> tuple[WorkoutSession, WorkoutSession | None]:
         """SP-120. Cria sessão ativa; auto-encerra a anterior (INV-15) e a
         consolida em `activity_record` (fluxo SP-120 → SP-126).
 
+        SP-178/INV-20: `template_id` opcional referencia o template do
+        fluxo guiado — válido apenas se `active=true` (INV-19) e
+        pertencente ao usuário (INV-18); senão `ValidationAppError`
+        (template invisível no seletor). Sessão livre (SP-120) sem
+        template.
+
         Retorna `(nova_sessão, sessão_encerrada_por_auto)`.
         """
         started = started_at or datetime.now(UTC)
+        if template_id is not None:
+            template = await self.repo.get_template(user_id, template_id)
+            if template is None:
+                raise ValidationAppError(
+                    "workout template not found",
+                    code="workout_template_not_found",
+                )
+            if not template.active:
+                raise ValidationAppError(
+                    "workout template is inactive",
+                    code="workout_template_inactive",
+                )
         existing = await self.repo.get_active_session(user_id)
         closed_previous: WorkoutSession | None = None
         if existing is not None:
@@ -142,6 +161,7 @@ class WorkoutService:
             workout_type=workout_type,
             detected_name=detected_name or f"Treino de {workout_type}",
             started_at=started,
+            template_id=template_id,
         )
         await self.audit.record(
             user_id=user_id,
@@ -155,6 +175,7 @@ class WorkoutService:
                 "detected_name": session.detected_name,
                 "started_at": session.started_at.isoformat(),
                 "status": "active",
+                "template_id": str(template_id) if template_id else None,
             },
         )
         return session, closed_previous

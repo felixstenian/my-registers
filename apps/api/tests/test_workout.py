@@ -775,3 +775,103 @@ async def test_t317_active_session_isolated_per_user(client, admin_user, db_sess
     resp = await client.get("/workouts/session/active")
     assert resp.status_code == 200
     assert resp.json() is None
+
+
+async def test_t318_start_session_with_template(db_session: AsyncSession, admin_user):
+    """T-B318 (SP-178/INV-20): `start_session(template_id=...)` liga a
+    sessão ao template ativo escolhido no fluxo guiado."""
+    from app.schemas.llm import WorkoutTemplateIn
+    from app.services.workout import WorkoutService
+
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Peito e tríceps",
+            workout_type="push",
+            exercises=[
+                {"exercise_name": "Supino reto", "target_sets": 3, "target_reps": 10},
+            ],
+        ),
+    )
+    dl = await _day_log(db_session, admin_user)
+
+    session, _ = await svc.start_session(
+        user_id=admin_user.id,
+        day_log_id=dl.id,
+        workout_type=template.workout_type,
+        detected_name=template.name,
+        template_id=template.id,
+    )
+    assert session.template_id == template.id
+    assert session.status == "active"
+
+
+async def test_t318_start_session_rejects_inactive_template(db_session: AsyncSession, admin_user):
+    """T-B318 (INV-19): template `active=false` não pode iniciar fluxo
+    guiado — o seletor só mostra ativos."""
+    from app.schemas.llm import WorkoutTemplateIn
+    from app.services.workout import WorkoutService
+
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Antigo",
+            workout_type="pull",
+            exercises=[{"exercise_name": "Remada", "target_sets": 4, "target_reps": 8}],
+        ),
+    )
+    template.active = False
+    await db_session.flush()
+    dl = await _day_log(db_session, admin_user)
+
+    with pytest.raises(ValidationAppError) as exc:
+        await svc.start_session(
+            user_id=admin_user.id,
+            day_log_id=dl.id,
+            workout_type=template.workout_type,
+            template_id=template.id,
+        )
+    assert exc.value.code == "workout_template_inactive"
+
+
+async def test_t318_start_session_template_is_user_scoped(db_session: AsyncSession, admin_user):
+    """T-B318 (INV-18): template de outro usuário não inicia sessão."""
+    from app.schemas.llm import WorkoutTemplateIn
+    from app.services.workout import WorkoutService
+
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Meu treino",
+            workout_type="push",
+            exercises=[{"exercise_name": "Supino", "target_sets": 3, "target_reps": 10}],
+        ),
+    )
+
+    other = await _new_user(db_session, "other2@example.com")
+    dl = await _day_log(db_session, other)
+
+    with pytest.raises(ValidationAppError) as exc:
+        await svc.start_session(
+            user_id=other.id,
+            day_log_id=dl.id,
+            workout_type=template.workout_type,
+            template_id=template.id,
+        )
+    assert exc.value.code == "workout_template_not_found"
+
+
+async def _new_user(session: AsyncSession, email: str):
+    from app.core.security import hash_password
+    from app.repositories.user import UserRepository
+
+    user = await UserRepository(session).create(
+        email=email,
+        password_hash=hash_password("password"),
+        display_name="Other",
+    )
+    await session.flush()
+    return user

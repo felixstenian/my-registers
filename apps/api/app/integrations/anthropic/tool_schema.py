@@ -230,6 +230,7 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
                     ],
                 },
                 "detected_name": {"type": ["string", "null"]},
+                "template_id": {"type": ["string", "null"]},
             },
         },
         "workout_add_exercise": {

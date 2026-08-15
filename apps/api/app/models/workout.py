@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,7 +26,9 @@ class WorkoutSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """SP-120..125. Sessão de treino de força: raiz da estrutura
     sessão → exercícios → séries. `status='active'` no máximo uma por
     usuário (INV-15, enforced por índice único parcial). Consolidada em
-    1 `activity_record` no encerramento (SP-126).
+    1 `activity_record` no encerramento (SP-126). `template_id` opcional
+    (SP-178/INV-20): referencia o template do fluxo guiado; sessão livre
+    não tem.
     """
 
     __tablename__ = "workout_sessions"
@@ -40,6 +42,7 @@ class WorkoutSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "end_reason IS NULL OR end_reason IN ('user','auto_new_session','auto_close_day')",
             name="ck_workout_sessions_end_reason",
         ),
+        Index("ix_workout_sessions_user_template", "user_id", "template_id"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -58,6 +61,11 @@ class WorkoutSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
     end_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workout_templates.id"),
+        nullable=True,
+    )
 
 
 class WorkoutExercise(UUIDPrimaryKeyMixin, TimestampMixin, Base):

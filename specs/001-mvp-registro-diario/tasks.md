@@ -294,7 +294,7 @@ Meta: expansão do núcleo como módulo de produto (spec §3.16) — templates r
 
 **E4 — Fluxo guiado + cronômetro:**
 
-- [ ] **T-B318** — `WorkoutService.start_session` com `template_id` (SP-178): lista templates `active=true`; escolhido, cria sessão + lista exercícios; escolhido exercício, lookup da **última realização** (SP-121) e exibe cargas/reps. (L) — SP-178, INV-19/20.
+- [x] **T-B318** — `WorkoutService.start_session` com `template_id` (SP-178): migração 0015 (`workout_sessions.template_id` FK nullable, INV-20), start_session valida template ativo do usuário (INV-18/19 → `workout_template_not_found`/`workout_template_inactive`), `_handle_workout_start` repassa `template_id` e converte `ValidationAppError` em clarify (`_CLARIFY_TEMPLATES.workout_template_inactive`). (L) — SP-178, INV-19/20.
 - [ ] **T-B319** — `_handle_workout_log_set` no fluxo guiado: **a partir da 1ª série**, confirma registro + recapitula o último treino + botão "Ir para o próximo exercício" (`workout_next_exercise`) → re-lista exercícios. (M) — SP-178.
 - [ ] **T-B320** — `Stopwatch` (frontend): inicia com `start_session`, para com "Finalizar treino"/`workout_end`. Tempo registrado = `ended_at - started_at` (fonte determinística do backend). (S) — SP-179.
 

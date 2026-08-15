@@ -696,13 +696,22 @@ class MessageProcessor:
             )
 
         svc = WorkoutService(self.session)
-        session, closed_previous = await svc.start_session(
-            user_id=user.id,
-            day_log_id=day_log_id,
-            workout_type=envelope.workout_start.workout_type,
-            detected_name=envelope.workout_start.detected_name,
-            message_id=user_message.id,
-        )
+        try:
+            session, closed_previous = await svc.start_session(
+                user_id=user.id,
+                day_log_id=day_log_id,
+                workout_type=envelope.workout_start.workout_type,
+                detected_name=envelope.workout_start.detected_name,
+                message_id=user_message.id,
+                template_id=envelope.workout_start.template_id,
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
 
         raw = _pack_raw(result)
         raw["dispatch"] = {
@@ -710,6 +719,7 @@ class MessageProcessor:
             "workout_session_id": str(session.id),
             "workout_type": session.workout_type,
             "closed_previous": closed_previous is not None,
+            "template_id": str(session.template_id) if session.template_id else None,
         }
         content = message_formatter.compose_workout_start(session, closed_previous)
         return await self.messages.create(
@@ -1533,6 +1543,10 @@ _CLARIFY_TEMPLATES = {
     "workout_template_plan_missing": (
         "Para cadastrar o treino, me diga o plano de cada exercício — "
         'ex.: "supino reto 3 séries de 8-12 rep".'
+    ),
+    "workout_template_inactive": (
+        "Esse treino está arquivado (inativo). Ele não aparece mais na lista "
+        "de treinos disponíveis — reative na aba *Ativos* para usá-lo."
     ),
 }
 

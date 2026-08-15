@@ -55,6 +55,7 @@ class WorkoutRepository:
         workout_type: str,
         detected_name: str,
         started_at: datetime,
+        template_id: uuid.UUID | None = None,
     ) -> WorkoutSession:
         session = WorkoutSession(
             user_id=user_id,
@@ -63,6 +64,7 @@ class WorkoutRepository:
             detected_name=detected_name,
             started_at=started_at,
             status="active",
+            template_id=template_id,
         )
         self.session.add(session)
         await self.session.flush()
