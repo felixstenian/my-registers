@@ -29,6 +29,19 @@ _FALLBACK_CLARIFY = (
 # extension point caso apareça algo novo no futuro.
 _STRUCTURED_INTENTS: set[str] = set()
 
+# SP-120..SP-127 (Bloco 3): intents de treino são roteados DIRETAMENTE pelo
+# `MessageProcessor` (handlers `_handle_workout_*`), sem passar por
+# `_STRUCTURED_INTENTS` nem cair no fallback `unknown` aqui.
+WORKOUT_INTENTS: frozenset[str] = frozenset(
+    {
+        "workout_start",
+        "workout_add_exercise",
+        "workout_log_set",
+        "workout_end",
+        "workout_history",
+    }
+)
+
 
 class IntentNotImplemented(Exception):
     def __init__(self, intent: str) -> None:
@@ -45,6 +58,10 @@ class DispatchResult:
 
 class IntentDispatcher:
     """Fase 3: entrega apenas `clarify`/`unknown`. Demais → NotImplemented."""
+
+    def is_workout_intent(self, intent: str) -> bool:
+        """SP-120..SP-127: intents de treino roteados pelo MessageProcessor."""
+        return intent in WORKOUT_INTENTS
 
     def dispatch(self, envelope: LLMEnvelope) -> DispatchResult:
         if envelope.intent == "clarify":
