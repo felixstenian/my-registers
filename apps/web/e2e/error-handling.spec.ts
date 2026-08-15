@@ -20,6 +20,7 @@
  */
 
 import { expect, test } from './support/test';
+import { loginViaForm } from './support/login';
 import { seedLunchMeal } from './support/seed';
 
 // ---------------------------------------------------------------------------
@@ -51,11 +52,10 @@ test.describe('FE-03 — validação do parâmetro next no login', () => {
   }) => {
     await page.goto('/login?next=https://evil.com');
 
-    await page.getByLabel('E-mail').fill('admin@example.com');
-    await page.getByLabel('Senha').fill('adminadmin');
-    await page.getByRole('button', { name: /entrar/i }).click();
+    await loginViaForm(page);
 
-    await expect(page).toHaveURL(/\/chat$/);
+    // Client-side navigation (router.replace) lento no Next dev sob carga.
+    await expect(page).toHaveURL(/\/chat$/, { timeout: 15000 });
   });
 
   test('?next=//evil.com (protocol-relative) também cai em /chat', async ({
@@ -63,11 +63,10 @@ test.describe('FE-03 — validação do parâmetro next no login', () => {
   }) => {
     await page.goto('/login?next=//evil.com');
 
-    await page.getByLabel('E-mail').fill('admin@example.com');
-    await page.getByLabel('Senha').fill('adminadmin');
-    await page.getByRole('button', { name: /entrar/i }).click();
+    await loginViaForm(page);
 
-    await expect(page).toHaveURL(/\/chat$/);
+    // Client-side navigation (router.replace) lento no Next dev sob carga.
+    await expect(page).toHaveURL(/\/chat$/, { timeout: 15000 });
   });
 
   test('?next=/day (path interno válido) respeita o destino', async ({
@@ -75,11 +74,10 @@ test.describe('FE-03 — validação do parâmetro next no login', () => {
   }) => {
     await page.goto('/login?next=/day');
 
-    await page.getByLabel('E-mail').fill('admin@example.com');
-    await page.getByLabel('Senha').fill('adminadmin');
-    await page.getByRole('button', { name: /entrar/i }).click();
+    await loginViaForm(page);
 
-    await expect(page).toHaveURL(/\/day$/);
+    // Client-side navigation (router.replace) lento no Next dev sob carga.
+    await expect(page).toHaveURL(/\/day$/, { timeout: 15000 });
   });
 
   test('?next=javascript:alert(1) cai em /chat (XSS vector)', async ({
@@ -88,9 +86,7 @@ test.describe('FE-03 — validação do parâmetro next no login', () => {
     // javascript: doesn't start with / → safeNext falls back to /chat.
     await page.goto('/login?next=javascript:alert(1)');
 
-    await page.getByLabel('E-mail').fill('admin@example.com');
-    await page.getByLabel('Senha').fill('adminadmin');
-    await page.getByRole('button', { name: /entrar/i }).click();
+    await loginViaForm(page);
 
     await expect(page).toHaveURL(/\/chat$/, { timeout: 15000 });
   });
@@ -98,9 +94,7 @@ test.describe('FE-03 — validação do parâmetro next no login', () => {
   test('?next=/\\evil.com (backslash) cai em /chat', async ({ page }) => {
     await page.goto('/login?next=/\\evil.com');
 
-    await page.getByLabel('E-mail').fill('admin@example.com');
-    await page.getByLabel('Senha').fill('adminadmin');
-    await page.getByRole('button', { name: /entrar/i }).click();
+    await loginViaForm(page);
 
     await expect(page).toHaveURL(/\/chat$/, { timeout: 15000 });
   });
@@ -110,9 +104,7 @@ test.describe('FE-03 — validação do parâmetro next no login', () => {
   }) => {
     await page.goto('/login?next=/login?next=https://evil.com');
 
-    await page.getByLabel('E-mail').fill('admin@example.com');
-    await page.getByLabel('Senha').fill('adminadmin');
-    await page.getByRole('button', { name: /entrar/i }).click();
+    await loginViaForm(page);
 
     // safeNext valida o valor raw — "/login?next=https://evil.com" starts
     // with "/" and not "//", so it's accepted as internal. This is safe
@@ -219,12 +211,12 @@ test.describe('FE-04 — 401 client-side redireciona para login', () => {
     // /login to render (breaking the redirect loop).
     await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
 
-    // Give a small grace period for any straggling requests to settle.
-    await page.waitForTimeout(500);
-
-    // The guard should have fired exactly 1 logout call. We allow
-    // up to 2 for margin (StrictMode double-firing in dev mode).
-    expect(logoutCount).toBeLessThanOrEqual(2);
+    // Espera bounded (até 2s) as chamadas de logout estabilizarem, amostrando
+    // o contador a cada 100ms. Se o guard loopar (3+ chamadas), o valor
+    // nunca satisfaz a condição e o poll falha no timeout — detecta o bug.
+    await expect
+      .poll(() => logoutCount, { timeout: 2000, intervals: [100] })
+      .toBeLessThanOrEqual(2);
   });
 });
 
@@ -250,9 +242,7 @@ test.describe('FE-04 — 401 em /auth/login NÃO redireciona (LoginForm)', () =>
     });
 
     await page.goto('/login');
-    await page.getByLabel('E-mail').fill('admin@example.com');
-    await page.getByLabel('Senha').fill('adminadmin');
-    await page.getByRole('button', { name: /entrar/i }).click();
+    await loginViaForm(page);
 
     await expect(page).toHaveURL(/\/login/);
     await expect(page.getByText(/e-mail ou senha inv[áa]lidos/i)).toBeVisible({
@@ -327,22 +317,56 @@ test.describe('FE-01 — falha de rede mostra erro acionável (sem loading etern
     // revalidation by changing revalidateKey via the chat page's poll.
     // Simpler approach: intercept the next /days/today call to fail, then
     // trigger a re-fetch by clicking a button that changes revalidateKey.
-    let callCount = 0;
+    // Qualquer chamada a /days/today a partir daqui é revalidação (a 1ª
+    // carga já aconteceu no goto, antes do route). Aborta para exercitar
+    // o caminho de "dados velhos preservados".
+    let revalidationAborted = 0;
     await page.route('**/api/days/today', async (route) => {
-      callCount++;
-      if (callCount > 1) return route.abort('failed');
-      return route.continue();
+      revalidationAborted += 1;
+      await route.abort('failed');
     });
 
-    // Trigger re-fetch: the chat page polls messages which can cause
-    // DayTotalsBar revalidation. Send a message to trigger the cycle.
-    const textInput = page.locator('textarea, input[type="text"]').first();
-    await textInput.fill('teste revalidação');
-    await textInput.press('Enter');
+    // Trigger REAL de revalidação: DayTotalsBar só refaz o GET quando o
+    // poll detecta uma nova assistant message (bump de revalidateKey em
+    // page.tsx:188). Usa envelope log_food (worker demora > round-trip do
+    // POST+loadInitial, então a assistant chega após o anchor do poll) —
+    // record_intent_error seria comitado cedo demais e o bump não dispara.
+    await queueLlm({
+      kind: 'record_intent',
+      envelope: {
+        intent: 'log_food',
+        confidence: 0.92,
+        user_text_summary: 'Mais feijão.',
+        needs_clarification: false,
+        meal_slot: 'lunch',
+        food_items: [
+          {
+            detected_name: 'feijão carioca cozido',
+            normalized_name: 'feijao_carioca_cozido',
+            quantity: 100,
+            unit: 'g',
+            grams_estimate: 100,
+            confidence: 0.93,
+            is_estimate: false,
+          },
+        ],
+      },
+    });
+    const composer = page.getByPlaceholder(/150 g de arroz/i);
+    await composer.fill('comi mais 100g de feijão');
+    await composer.press('Enter');
 
-    // Wait for the revalidation to happen (2nd call to /days/today).
-    // If the bar still shows cal. in, the old data was preserved.
-    await page.waitForTimeout(3000);
+    // Garante que a mensagem foi enviada e que o poll detectou a nova
+    // assistant (última ocorrência de /registrei/i — a do seed é a anterior).
+    await expect(page.getByText(/teste revalidação|comi mais 100g de feijão/i)).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(page.getByText(/registrei/i).last()).toBeVisible({ timeout: 15000 });
+
+    // Espera a revalidação acontecer (requisição que abortamos).
+    await expect
+      .poll(() => revalidationAborted, { timeout: 10000 })
+      .toBeGreaterThanOrEqual(1);
 
     // Com dados velhos disponíveis, DayTotalsBar mantém o snapshot
     // anterior em vez de mostrar erro (comportamento dayRef.current).

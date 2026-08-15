@@ -17,7 +17,15 @@
  * entra em redirect loop com `/login` (ver support/test.ts).
  */
 
+import { devices } from '@playwright/test';
 import { expect, test } from './support/test';
+
+// deviceScaffold deriva um device real, SEM `defaultBrowserType` (chave que
+// o Playwright não aceita dentro de `test.use` em um describe). Mantém
+// hasTouch, isMobile, deviceScaleFactor, userAgent etc. — emulação mobile
+// fiel (não só viewport) para os asserts de navegação.
+const { defaultBrowserType: _pixel, ...pixelOptions } = devices['Pixel 7'];
+const { defaultBrowserType: _desktop, ...desktopOptions } = devices['Desktop Chrome'];
 
 test.beforeEach(async ({ resetDb, loginAdmin }) => {
   await resetDb();
@@ -25,7 +33,10 @@ test.beforeEach(async ({ resetDb, loginAdmin }) => {
 });
 
 test.describe('navegação mobile', () => {
-  test.use({ viewport: { width: 390, height: 844 } });
+  test.use({
+    ...pixelOptions,
+    viewport: { width: 390, height: 844 },
+  });
 
   test('SP-NM-03/04: barra visível com aba Chat ativa e não cobre composer/disclaimer', async ({
     page,
@@ -90,7 +101,10 @@ test.describe('navegação mobile', () => {
 });
 
 test.describe('desktop inalterado', () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
+  test.use({
+    ...desktopOptions,
+    viewport: { width: 1280, height: 800 },
+  });
 
   test('SP-NM-05: sem bottom bar e com nav inline no header', async ({ page }) => {
     await page.goto('/chat');

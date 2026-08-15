@@ -12,6 +12,7 @@
  */
 
 import { ADMIN_EMAIL, ADMIN_PASSWORD, API_BASE } from './support/constants';
+import { loginViaForm } from './support/login';
 import { expect, test } from './support/test';
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -25,9 +26,7 @@ test.beforeEach(async ({ resetDb }) => {
 test('senha errada mostra mensagem inline', async ({ page }) => {
   await page.goto('/login');
 
-  await page.getByLabel('E-mail').fill(ADMIN_EMAIL);
-  await page.getByLabel('Senha').fill('senha-errada-123');
-  await page.getByRole('button', { name: /entrar/i }).click();
+  await loginViaForm(page, ADMIN_EMAIL, 'senha-errada-123');
 
   // Next injeta um role="alert" vazio pro announcer de rota; casamos por
   // texto pra pegar so o `<p role="alert">` do LoginForm.
@@ -39,11 +38,11 @@ test('senha errada mostra mensagem inline', async ({ page }) => {
 test('login OK redireciona para /chat', async ({ page }) => {
   await page.goto('/login');
 
-  await page.getByLabel('E-mail').fill(ADMIN_EMAIL);
-  await page.getByLabel('Senha').fill(ADMIN_PASSWORD);
-  await page.getByRole('button', { name: /entrar/i }).click();
+  await loginViaForm(page);
 
-  await expect(page).toHaveURL(/\/chat$/);
+  // Client-side navigation (router.replace) roda lentamente no Next dev
+  // sob carga — timeout maior que o default (ver auth.spec ?next=/weekly).
+  await expect(page).toHaveURL(/\/chat$/, { timeout: 15000 });
 });
 
 test('login OK seta cookies HttpOnly access_token + refresh_token (AC-001/TC-I-001)', async ({
@@ -51,11 +50,10 @@ test('login OK seta cookies HttpOnly access_token + refresh_token (AC-001/TC-I-0
 }) => {
   await page.goto('/login');
 
-  await page.getByLabel('E-mail').fill(ADMIN_EMAIL);
-  await page.getByLabel('Senha').fill(ADMIN_PASSWORD);
-  await page.getByRole('button', { name: /entrar/i }).click();
+  await loginViaForm(page);
 
-  await expect(page).toHaveURL(/\/chat$/);
+  // Client-side navigation (router.replace) lento no Next dev sob carga.
+  await expect(page).toHaveURL(/\/chat$/, { timeout: 15000 });
 
   const cookies = await page.context().cookies();
   const access = cookies.find((c) => c.name === 'access_token');
@@ -92,9 +90,7 @@ test('email case-insensitive loga com sucesso (AC-002/TC-I-002)', async ({ page 
 test('email inexistente mostra erro inline genérico (AC-003/TC-I-004)', async ({ page }) => {
   await page.goto('/login');
 
-  await page.getByLabel('E-mail').fill('naoexiste@example.com');
-  await page.getByLabel('Senha').fill(ADMIN_PASSWORD);
-  await page.getByRole('button', { name: /entrar/i }).click();
+  await loginViaForm(page, 'naoexiste@example.com', ADMIN_PASSWORD);
 
   // Mesma mensagem do "senha errada" — indistinguível (SP-02).
   const alert = page.getByText(/e-mail ou senha inv[áa]lidos/i);
@@ -125,9 +121,7 @@ test('login OK com ?next=/weekly preserva destino após autenticar (AC-013/US-00
   await page.goto('/weekly');
   await expect(page).toHaveURL(/\/login\?next=(?:%2F|\/)weekly$/);
 
-  await page.getByLabel('E-mail').fill(ADMIN_EMAIL);
-  await page.getByLabel('Senha').fill(ADMIN_PASSWORD);
-  await page.getByRole('button', { name: /entrar/i }).click();
+  await loginViaForm(page);
 
   // LoginForm respeita searchParams.next -> router.replace('/weekly').
   // Next.js client-side navigation can race with RSC — use longer timeout.
