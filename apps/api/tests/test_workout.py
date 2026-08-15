@@ -448,3 +448,65 @@ def test_t311_system_prompt_selected_by_via():
     assert "nutrição" in food_prompt or "macros" in food_prompt or "log_food" in food_prompt
     assert "workout_log_set" in workout_prompt
     assert "log_food" not in workout_prompt
+
+
+async def test_t312_workout_templates_schema(db_session: AsyncSession):
+    """T-B312 (SP-170/171/INV-18): migration 0014 cria as tabelas de
+    templates reutilizáveis com índices de isolamento por usuário."""
+    tables = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT tablename FROM pg_tables "
+                    "WHERE schemaname='public' AND tablename IN "
+                    "('workout_templates','workout_template_exercises')"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert set(tables) == {"workout_templates", "workout_template_exercises"}
+
+    cols = (
+        await db_session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='workout_templates'"
+            )
+        )
+    ).scalars()
+    colset = set(cols)
+    assert {"id", "user_id", "name", "workout_type", "muscle_groups", "active"} <= colset
+
+    ex_cols = (
+        await db_session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='workout_template_exercises'"
+            )
+        )
+    ).scalars()
+    ex_colset = set(ex_cols)
+    assert {
+        "template_id",
+        "exercise_name",
+        "normalized_name",
+        "target_sets",
+        "target_reps",
+    } <= ex_colset
+
+    idx = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes WHERE tablename "
+                    "IN ('workout_templates','workout_template_exercises')"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert "ix_workout_templates_user_active" in idx
+    assert "ix_workout_template_exercises_template" in idx
