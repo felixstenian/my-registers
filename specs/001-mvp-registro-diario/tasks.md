@@ -288,9 +288,9 @@ Meta: expansão do núcleo como módulo de produto (spec §3.16) — templates r
 
 **E3 — Chat de treino dedicado:**
 
-- [ ] **T-B315** — `/workouts/chat` page espelhando `(app)/chat/page.tsx` (composer + upload + polling `via='workout'` + `AssistantContent`). `proxy.ts`: `/workouts`, `/workouts/chat` em `PROTECTED_PREFIXES`. (L) — SP-173.
-- [ ] **T-B316** — `WorkoutTotalsHeader` (variante do `DayTotalsBar`): atividades do dia + kcal gastas (via snapshot `/days/today`). (M) — SP-173.
-- [ ] **T-B317** — Botões do header do chat de treino: "Cadastrar treino" (→ SP-171), "Iniciar treino" (→ fluxo guiado); com sessão ativa, botão da direita vira "Finalizar treino". Aviso legal Art. VII §26 quando houver dados de dia. (M) — SP-173, SP-179.
+- [x] **T-B315** — `/workouts/chat` page espelhando `(app)/chat/page.tsx` (composer + upload + polling `via='workout'` + `AssistantContent`). `proxy.ts`: `/workouts`, `/workouts/chat` em `PROTECTED_PREFIXES`. (L) — SP-173.
+- [x] **T-B316** — `WorkoutTotalsHeader` (variante do `DayTotalsBar`): atividades do dia + kcal gastas (via snapshot `/days/today`). (M) — SP-173.
+- [x] **T-B317** — Botões do header do chat de treino: "Cadastrar treino" (→ SP-171), "Iniciar treino" (→ fluxo guiado); com sessão ativa, botão da direita vira "Finalizar treino". Aviso legal Art. VII §26 quando houver dados de dia. (M) — SP-173, SP-179.
 
 **E4 — Fluxo guiado + cronômetro:**
 
