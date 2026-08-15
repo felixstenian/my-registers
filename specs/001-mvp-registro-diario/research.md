@@ -236,7 +236,7 @@ Alternativas descartadas: com motivo objetivo.
 
 - Snapshot diário e relatório semanal continuam agnósticos — enxergam `activity_record` como fonte única de `kcal_out`.
 - Detalhamento (peso × reps por exercício) fica nas novas tabelas, consultável para histórico (SP-121, SP-127) mas não impacta os totais nutricionais.
-- Correção/deleção do `activity_record` gerado **não** propaga para as tabelas de treino — INV-13. Se um dia isso incomodar (usuário apaga séries e espera kcal recalcular), abrir feature nova; fora do MVP-de-treino.
+- Correção/deleção do `activity_record` gerado **não** propaga para as tabelas de treino — INV-17 (renumerado de INV-13 na v1.13; ver spec §3.13). Se um dia isso incomodar (usuário apaga séries e espera kcal recalcular), abrir feature nova; fora do MVP-de-treino.
 
 **Alternativas descartadas:**
 - **Substituir `log_activity` por sessão para tudo.** Complexidade desnecessária para cardio simples ("corri 40 min" não precisa de sessão + exercício + série).

@@ -4,7 +4,7 @@
 
 # Índice de Features — my-registers
 
-Este índice consolida as features do produto **my-registers** cruzando a especificação spec-kit (`specs/001-mvp-registro-diario/spec.md`, SP-01..SP-155 + INV-1..INV-13), o CHANGELOG (`CHANGELOG.md` até v1.3.0) e o código real em `apps/api/app/` + `apps/web/src/`.
+Este índice consolida as features do produto **my-registers** cruzando a especificação spec-kit (`specs/001-mvp-registro-diario/spec.md`, SP-01..SP-155 + INV-1..INV-11 + invariantes de treino INV-15..17), o CHANGELOG (`CHANGELOG.md` até v1.3.0) e o código real em `apps/api/app/` + `apps/web/src/`.
 
 Cada feature tem sua pasta em `specs/features/<slug>/` com os 7 artefatos padrão (`requirements.md`, `specifications.md`, `user-stories.md`, `acceptance-criteria.md`, `test-cases.md`, `architecture.md`, `trade-offs.md`).
 
@@ -58,7 +58,7 @@ Convenções e diferença para `specs/001-mvp-registro-diario/`:
 | Feature | SPs | Status | Pasta |
 |---|---|---|---|
 | [Registro de atividade cardio](./activity-cardio-logging/requirements.md) | SP-60..SP-64 | stable | `activity-cardio-logging/` |
-| [Treino estruturado — sessão/exercícios/séries (Bloco 3)](./workout-session-tracking/requirements.md) | SP-120..SP-127 | documented-only | `workout-session-tracking/` |
+| [Módulo de Treino — templates, chat dedicado, /workouts, /day](./workout-session-tracking/requirements.md) | SP-120..SP-127 + SP-170..179 (proposta) | documented-only | `workout-session-tracking/` |
 
 ### ✏️ Ciclo de Vida de Registros
 
@@ -141,7 +141,7 @@ Convenções e diferença para `specs/001-mvp-registro-diario/`:
 
 ### 📄 Documented Only (2)
 
-- [Treino estruturado (sessão → exercícios → séries)](./workout-session-tracking/requirements.md) — SP-120..127 (Bloco 3) especificados desde v1.2 mas sem implementação; aguarda decisão de priorização pós Fase 10 e ADR-004.
+- [Módulo de Treino (templates, chat dedicado, fluxo guiado, /workouts, /day)](./workout-session-tracking/requirements.md) — SP-120..127 (Bloco 3) especificados desde v1.2 sem implementação; expansão solicitada pelo cliente em 2026-08-14 (RF-014..024 → SP-170..179 **propostos**, requerem spec:/plan:/tasks: PRs). Aguarda decisão de priorização pós Fase 10 e ADR-011.
 - [Edição inline de registros no /day](./inline-record-editing/requirements.md) — SP-160..SP-169, INV-14 (Bloco 7) especificados em `specs/features/inline-record-editing/` (+ SDD rascunho em `specs/002-edicao-inline-day/`); estende §3.15 da spec 001 (página `/day`). Backend já tem PATCH food-items + PATCH nutrient-facts; faltam PATCH water/beverage/activity, propagação do nutrient-fact, e UI inline.
 
 ### ❌ Deprecated (0)
@@ -175,6 +175,7 @@ Ordem numérica dos SPs para busca rápida a partir da spec canônica:
 | SP-140..SP-142 | [manual-catalog-recovery](./manual-catalog-recovery/) |
 | SP-150..SP-155 | [daily-detail-view](./daily-detail-view/) |
 | SP-160..SP-169 | [inline-record-editing](./inline-record-editing/) |
+| SP-170..179 (proposta) | [Módulo de Treino — RF-014..024](./workout-session-tracking/) |
 
 ## Invariantes globais → feature primária
 
@@ -191,7 +192,8 @@ Ordem numérica dos SPs para busca rápida a partir da spec canônica:
 | INV-9 (LLM só via tool_use) | [anthropic-integration](./anthropic-integration/) | — |
 | INV-10 (audit total) | [audit-trail](./audit-trail/) | record-correction, record-deletion, food-logging, water-tracking, caloric-beverages, activity-cardio-logging |
 | INV-11 (SW não cacheia /api/*) | [pwa-installability-offline](./pwa-installability-offline/) | — |
-| INV-12/13 (workout invariantes) | [workout-session-tracking](./workout-session-tracking/) | — |
+| INV-15..17 (workout núcleo — renumeração v1.13) | [workout-session-tracking](./workout-session-tracking/) | — |
+| INV-18..21 (workout templates/kcal — proposta) | [workout-session-tracking](./workout-session-tracking/) | — |
 | INV-14 (edição de fact propaga a registros vivos) | [inline-record-editing](./inline-record-editing/) | record-correction, daily-snapshot |
 
 ---
@@ -200,7 +202,7 @@ Ordem numérica dos SPs para busca rápida a partir da spec canônica:
 
 1. Escolher a feature a documentar em cada rodada; começar por **stable** de maior valor (sugestões: `chat-messaging` como âncora do fluxo, `food-logging` por ser o coração do produto, `authentication-session` por ser o portal de entrada).
 2. Ao gerar cada pasta, referenciar os arquivos-fonte de `apps/api/app/` e `apps/web/src/` para rastreabilidade.
-3. Ao encerrar Bloco 3 (workout) ou nova feature, adicionar linha nova aqui e mover status.
+3. Ao encerrar o módulo de treino (workout) ou nova feature, adicionar linha nova aqui e mover status.
 
 ## Referências cruzadas
 
