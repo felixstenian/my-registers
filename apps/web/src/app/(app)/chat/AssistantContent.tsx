@@ -128,119 +128,157 @@ function isPendingRowLabel(text: string): boolean {
   return text.endsWith('*');
 }
 
-export function AssistantContent({ content }: { content: string }) {
+export function AssistantContent({ content, intent }: { content: string; intent?: string | null }) {
   const blocks = parseBlocks(content);
   const [openForm, setOpenForm] = useState<RecoveryItem | null>(null);
   const [openPhoto, setOpenPhoto] = useState<RecoveryItem | null>(null);
   const [discardedIds, setDiscardedIds] = useState<Set<string>>(new Set());
 
+  // T-B308: mensagens de treino ganham identidade visual própria.
+  const isWorkout = intent?.startsWith('workout_') ?? false;
+  const children: JSX.Element[] = [];
+
+  blocks.forEach((block, idx) => {
+    // SP-121/127: título "**PR pessoal**" seguido da tabela → destaque amber
+    // no valor (carga do PR).
+    const prev = blocks[idx - 1];
+    const prevIsPrTitle =
+      idx > 0 && prev.type === 'paragraph' && prev.text.trim() === '**PR pessoal**';
+
+    if (block.type === 'paragraph') {
+      // SP-122: confirmação de série registrada → cartão verde.
+      const isSetConfirmation = isWorkout && /^Série \*\*\d+\*\* de \*\*.+?\*\* registrada/.test(block.text);
+      if (isSetConfirmation) {
+        children.push(
+          <p
+            key={idx}
+            className="overflow-hidden rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 leading-relaxed whitespace-pre-wrap dark:border-emerald-800 dark:bg-emerald-950/40"
+          >
+            {renderInline(block.text)}
+          </p>
+        );
+        return;
+      }
+      children.push(
+        <p key={idx} className="whitespace-pre-wrap leading-relaxed">
+          {renderInline(block.text)}
+        </p>
+      );
+      return;
+    }
+    if (block.type === 'recovery') {
+      const visibleItems = block.items.filter((it) => !discardedIds.has(it.id));
+      if (visibleItems.length === 0) return;
+      children.push(
+        <div
+          key={idx}
+          className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20"
+        >
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+            Sem catálogo:
+          </p>
+          <ul className="space-y-3">
+            {visibleItems.map((item) => (
+              <li key={item.id} className="space-y-1.5">
+                <span className="block font-medium">{item.name || 'item sem nome'}</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setOpenForm(item)}
+                    className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                  >
+                    ✏️ Cadastrar manual
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOpenPhoto(item)}
+                    className="rounded border border-slate-400 bg-white px-2 py-1 text-xs font-medium text-slate-800 transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  >
+                    📸 Foto do rótulo
+                  </button>
+                  <DiscardItemButton
+                    itemId={item.id}
+                    itemName={item.name}
+                    onDiscarded={() =>
+                      setDiscardedIds((prev) => {
+                        const next = new Set(prev);
+                        next.add(item.id);
+                        return next;
+                      })
+                    }
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+      return;
+    }
+    const [header, ...body] = block.rows;
+    const prTable = prevIsPrTitle;
+    children.push(
+      <div
+        key={idx}
+        className={
+          'overflow-hidden rounded-lg border bg-white dark:bg-slate-900 ' +
+          (prTable
+            ? 'border-amber-300 dark:border-amber-800'
+            : 'border-slate-200 dark:border-slate-700')
+        }
+      >
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-100 dark:bg-slate-800">
+            <tr>
+              {header.map((cell, i) => (
+                <th key={i} className="px-3 py-1.5 font-semibold">
+                  {renderInline(cell)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {body.map((row, ri) => (
+              <tr key={ri} className="border-t border-slate-100 dark:border-slate-800">
+                {row.map((cell, ci) => {
+                  const isLabel = ci === 0;
+                  const pending = isLabel && isPendingRowLabel(cell);
+                  const approx = !isLabel && isApproxCell(cell);
+                  const isPrValue = prTable && !isLabel;
+                  return (
+                    <td
+                      key={ci}
+                      className={
+                        'px-3 py-1.5 ' +
+                        (pending ? 'text-amber-700 dark:text-amber-400 ' : '') +
+                        (approx ? 'italic ' : '') +
+                        (isPrValue
+                          ? 'font-semibold text-amber-700 dark:text-amber-400'
+                          : isLabel
+                            ? 'text-slate-600 dark:text-slate-300'
+                            : 'font-medium')
+                      }
+                    >
+                      {renderInline(cell)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  });
+
   return (
     <div className="space-y-3 text-sm">
-      {blocks.map((block, idx) => {
-        if (block.type === 'paragraph') {
-          return (
-            <p key={idx} className="whitespace-pre-wrap leading-relaxed">
-              {renderInline(block.text)}
-            </p>
-          );
-        }
-        if (block.type === 'recovery') {
-          const visibleItems = block.items.filter((it) => !discardedIds.has(it.id));
-          if (visibleItems.length === 0) return null;
-          return (
-            <div
-              key={idx}
-              className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20"
-            >
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
-                Sem catálogo:
-              </p>
-              <ul className="space-y-3">
-                {visibleItems.map((item) => (
-                  <li key={item.id} className="space-y-1.5">
-                    <span className="block font-medium">{item.name || 'item sem nome'}</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setOpenForm(item)}
-                        className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                      >
-                        ✏️ Cadastrar manual
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setOpenPhoto(item)}
-                        className="rounded border border-slate-400 bg-white px-2 py-1 text-xs font-medium text-slate-800 transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                      >
-                        📸 Foto do rótulo
-                      </button>
-                      <DiscardItemButton
-                        itemId={item.id}
-                        itemName={item.name}
-                        onDiscarded={() =>
-                          setDiscardedIds((prev) => {
-                            const next = new Set(prev);
-                            next.add(item.id);
-                            return next;
-                          })
-                        }
-                      />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        }
-        const [header, ...body] = block.rows;
-        return (
-          <div
-            key={idx}
-            className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
-          >
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-100 dark:bg-slate-800">
-                <tr>
-                  {header.map((cell, i) => (
-                    <th key={i} className="px-3 py-1.5 font-semibold">
-                      {renderInline(cell)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {body.map((row, ri) => (
-                  <tr
-                    key={ri}
-                    className="border-t border-slate-100 dark:border-slate-800"
-                  >
-                    {row.map((cell, ci) => {
-                      const isLabel = ci === 0;
-                      const pending = isLabel && isPendingRowLabel(cell);
-                      const approx = !isLabel && isApproxCell(cell);
-                      return (
-                        <td
-                          key={ci}
-                          className={
-                            'px-3 py-1.5 ' +
-                            (pending
-                              ? 'text-amber-700 dark:text-amber-400 '
-                              : '') +
-                            (approx ? 'italic ' : '') +
-                            (isLabel ? 'text-slate-600 dark:text-slate-300' : 'font-medium')
-                          }
-                        >
-                          {renderInline(cell)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-      })}
+      {isWorkout && (
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+          🏋️ Treino
+        </p>
+      )}
+      {children}
       {openForm && (
         <ManualCatalogForm
           promoteFoodItemId={openForm.id}

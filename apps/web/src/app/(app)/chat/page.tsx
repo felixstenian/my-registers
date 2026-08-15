@@ -13,6 +13,7 @@ import { api } from '@/lib/api-client';
 import { AssistantContent } from './AssistantContent';
 import { CloseDayModal } from './CloseDayModal';
 import { DayTotalsBar } from './DayTotalsBar';
+import { WorkoutHistoryCard } from './WorkoutHistoryCard';
 
 type MediaRef = {
   id: string;
@@ -428,8 +429,10 @@ export default function ChatPage() {
               {m.content && (
                 isUser ? (
                   <p className="whitespace-pre-wrap">{m.content}</p>
+                ) : m.llm_intent === 'workout_history' ? (
+                  <WorkoutHistoryCard content={m.content} />
                 ) : (
-                  <AssistantContent content={m.content} />
+                  <AssistantContent content={m.content} intent={m.llm_intent} />
                 )
               )}
               {m.media.length > 0 && (
