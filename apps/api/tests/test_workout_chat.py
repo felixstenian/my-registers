@@ -427,6 +427,225 @@ async def test_close_day_ends_active_session_before_recompute(
     assert records[0].workout_session_id == session.id
 
 
+async def test_workout_log_set_guided_recaps_last_workout_and_shows_button(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """T-B319 (SP-178): sessão guiada (template_id) — a partir da 1ª série,
+    a confirmação recapitula a última sessão do exercício e emite o
+    marcador do botão "Ir para o próximo exercício"."""
+    from app.repositories.day_log import DayLogRepository
+    from app.schemas.llm import WorkoutTemplateIn
+    from app.services.workout import WorkoutService
+
+    dl = await DayLogRepository(db_session).get_or_create(
+        user_id=admin_user.id, log_date=datetime.now(UTC).date()
+    )
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Push guiado",
+            workout_type="push",
+            exercises=[{"exercise_name": "supino reto", "target_sets": 3, "target_reps": 10}],
+        ),
+    )
+
+    # Sessão anterior encerrada com histórico do mesmo exercício.
+    old_session, _ = await svc.start_session(
+        user_id=admin_user.id, day_log_id=dl.id, workout_type="push"
+    )
+    await svc.add_exercise(
+        user_id=admin_user.id, session_id=old_session.id, exercise_name="supino reto"
+    )
+    await svc.log_set(user_id=admin_user.id, session_id=old_session.id, weight_kg=55, reps=8)
+    await svc.end_session(user_id=admin_user.id, session_id=old_session.id)
+
+    session, _ = await svc.start_session(
+        user_id=admin_user.id,
+        day_log_id=dl.id,
+        workout_type="push",
+        template_id=template.id,
+    )
+    await svc.add_exercise(
+        user_id=admin_user.id, session_id=session.id, exercise_name="supino reto"
+    )
+    await db_session.commit()
+
+    await _login(client)
+    await _send(
+        client,
+        fake_anthropic,
+        make_envelope,
+        make_llm_result,
+        text="60 kg x 8",
+        intent="workout_log_set",
+        workout_log_set={"weight_kg": 60.0, "reps": 8},
+    )
+
+    assistant = await _get_assistant(db_session)
+    assert assistant.llm_intent == "workout_log_set"
+    assert "Série **1**" in assistant.content
+    assert "Da última vez você fez 55 kg × 8." in assistant.content
+    assert "Ir para o próximo exercício" in assistant.content
+    assert "<!-- workout-next-exercise -->" in assistant.content
+
+
+async def test_workout_log_set_free_session_has_no_guided_button(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """T-B319: sessão livre (sem template_id) não emite o marcador guiado."""
+    from app.repositories.day_log import DayLogRepository
+    from app.services.workout import WorkoutService
+
+    dl = await DayLogRepository(db_session).get_or_create(
+        user_id=admin_user.id, log_date=datetime.now(UTC).date()
+    )
+    svc = WorkoutService(db_session)
+    session, _ = await svc.start_session(
+        user_id=admin_user.id, day_log_id=dl.id, workout_type="push"
+    )
+    await svc.add_exercise(
+        user_id=admin_user.id, session_id=session.id, exercise_name="supino reto"
+    )
+    await db_session.commit()
+
+    await _login(client)
+    await _send(
+        client,
+        fake_anthropic,
+        make_envelope,
+        make_llm_result,
+        text="60 kg x 8",
+        intent="workout_log_set",
+        workout_log_set={"weight_kg": 60.0, "reps": 8},
+    )
+
+    assistant = await _get_assistant(db_session)
+    assert "workout-next-exercise" not in assistant.content
+
+
+async def test_workout_next_exercise_relists_template_plan(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """T-B319 (SP-178): botão "Ir para o próximo exercício" → intent
+    `workout_next_exercise` re-lista o plano do template (determinístico)."""
+    from app.repositories.day_log import DayLogRepository
+    from app.schemas.llm import WorkoutTemplateIn
+    from app.services.workout import WorkoutService
+
+    dl = await DayLogRepository(db_session).get_or_create(
+        user_id=admin_user.id, log_date=datetime.now(UTC).date()
+    )
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Push guiado",
+            workout_type="push",
+            exercises=[
+                {"exercise_name": "Supino reto", "target_sets": 3, "target_reps": 10},
+                {"exercise_name": "Desenvolvimento", "target_sets": 3, "target_reps": 12},
+            ],
+        ),
+    )
+    session, _ = await svc.start_session(
+        user_id=admin_user.id,
+        day_log_id=dl.id,
+        workout_type="push",
+        template_id=template.id,
+    )
+    await db_session.commit()
+
+    await _login(client)
+    await _send(
+        client,
+        fake_anthropic,
+        make_envelope,
+        make_llm_result,
+        text="ir para o próximo exercício",
+        intent="workout_next_exercise",
+        workout_next_exercise={},
+    )
+
+    assistant = await _get_assistant(db_session)
+    assert assistant.llm_intent == "workout_next_exercise"
+    assert "Supino reto" in assistant.content
+    assert "Desenvolvimento" in assistant.content
+
+
+async def test_workout_next_exercise_without_session_clarifies(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """T-B319: sem sessão ativa, o botão pede pra iniciar o treino."""
+    await _login(client)
+    await _send(
+        client,
+        fake_anthropic,
+        make_envelope,
+        make_llm_result,
+        text="ir para o próximo exercício",
+        intent="workout_next_exercise",
+        workout_next_exercise={},
+    )
+    assistant = await _get_assistant(db_session)
+    assert assistant.llm_intent == "clarify"
+    assert "Nenhum treino em andamento" in assistant.content
+
+
+async def test_workout_next_exercise_free_session_clarifies(
+    client: AsyncClient,
+    admin_user,
+    fake_anthropic,
+    make_envelope,
+    make_llm_result,
+    db_session: AsyncSession,
+):
+    """T-B319 (INV-20): sessão livre (sem template) não tem sequência guiada
+    — `workout_next_exercise` responde com `clarify`."""
+    from app.repositories.day_log import DayLogRepository
+    from app.services.workout import WorkoutService
+
+    dl = await DayLogRepository(db_session).get_or_create(
+        user_id=admin_user.id, log_date=datetime.now(UTC).date()
+    )
+    svc = WorkoutService(db_session)
+    await svc.start_session(user_id=admin_user.id, day_log_id=dl.id, workout_type="legs")
+    await db_session.commit()
+
+    await _login(client)
+    await _send(
+        client,
+        fake_anthropic,
+        make_envelope,
+        make_llm_result,
+        text="ir para o próximo exercício",
+        intent="workout_next_exercise",
+        workout_next_exercise={},
+    )
+    assistant = await _get_assistant(db_session)
+    assert assistant.llm_intent == "clarify"
+
+
 async def test_workout_register_template_routes_and_creates(
     client: AsyncClient,
     admin_user,

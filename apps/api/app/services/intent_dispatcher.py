@@ -42,6 +42,8 @@ WORKOUT_INTENTS: frozenset[str] = frozenset(
         "workout_history",
         # SP-171 (Bloco 3.b): cadastro de treino reutilizável por texto.
         "workout_register_template",
+        # SP-178 (T-B319): botão "Ir para o próximo exercício" (fluxo guiado).
+        "workout_next_exercise",
     }
 )
 

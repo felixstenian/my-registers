@@ -344,3 +344,63 @@ async def test_inv15_auto_close_consolidates_previous(db_session: AsyncSession, 
         )
     ).scalar_one()
     assert rec is not None and rec.calc_method == "workout_session"
+
+
+async def test_tb319_next_exercise_prompt_lists_template_exercises(
+    db_session: AsyncSession, admin_user
+):
+    """T-B319 (SP-178, TC-U-021): sessão guiada com 3 exercícios no template
+    re-lista todo o plano (determinístico — Decisão 7), independente de
+    quantos exercícios já foram registrados na sessão."""
+    from app.schemas.llm import WorkoutTemplateIn
+
+    svc = WorkoutService(db_session)
+    template = await svc.register_template(
+        user_id=admin_user.id,
+        template=WorkoutTemplateIn(
+            name="Push completo",
+            workout_type="push",
+            exercises=[
+                {"exercise_name": "Supino reto", "target_sets": 3, "target_reps": 10},
+                {"exercise_name": "Desenvolvimento", "target_sets": 3, "target_reps": 12},
+                {"exercise_name": "Tríceps corda", "target_sets": 3, "target_reps": 15},
+            ],
+        ),
+    )
+    dl = await _day_log(db_session, admin_user)
+    session, _ = await svc.start_session(
+        user_id=admin_user.id,
+        day_log_id=dl.id,
+        workout_type="push",
+        template_id=template.id,
+    )
+    # 2 exercícios já executados na sessão — next_exercise_prompt ainda
+    # re-lista todo o plano do template (reinício da sequência).
+    await svc.add_exercise(
+        user_id=admin_user.id, session_id=session.id, exercise_name="Supino reto"
+    )
+    await svc.log_set(user_id=admin_user.id, session_id=session.id, weight_kg=60, reps=10)
+    await svc.add_exercise(
+        user_id=admin_user.id, session_id=session.id, exercise_name="Desenvolvimento"
+    )
+    await svc.log_set(user_id=admin_user.id, session_id=session.id, weight_kg=20, reps=12)
+
+    exercises = await svc.next_exercise_prompt(user_id=admin_user.id, session_id=session.id)
+    assert [e.exercise_name for e in exercises] == [
+        "Supino reto",
+        "Desenvolvimento",
+        "Tríceps corda",
+    ]
+
+
+async def test_tb319_next_exercise_prompt_rejects_free_session(
+    db_session: AsyncSession, admin_user
+):
+    """T-B319: sessão livre (SP-120, sem template_id) não tem sequência
+    guiada — `next_exercise_prompt` rejeita com `ValidationAppError`."""
+    svc = WorkoutService(db_session)
+    session, _ = await _start(db_session, admin_user, workout_type="legs")
+
+    with pytest.raises(ValidationAppError) as exc:
+        await svc.next_exercise_prompt(user_id=admin_user.id, session_id=session.id)
+    assert exc.value.code == "workout_next_exercise_free_session"

@@ -397,6 +397,12 @@ export default function WorkoutChatPage() {
     void performSend('finalizar treino');
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // T-B319 (SP-178): botão "Ir para o próximo exercício" — re-lista o plano
+  // do template ativo (`workout_next_exercise`, Decisão 7).
+  const goToNextExercise = useCallback(() => {
+    void performSend('ir para o próximo exercício');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const unknownSession = activeSession === undefined;
   const hasActiveSession = activeSession !== null && activeSession !== undefined;
 
@@ -460,7 +466,11 @@ export default function WorkoutChatPage() {
                 ) : m.llm_intent === 'workout_history' ? (
                   <WorkoutHistoryCard content={m.content} />
                 ) : (
-                  <AssistantContent content={m.content} intent={m.llm_intent} />
+                  <AssistantContent
+                    content={m.content}
+                    intent={m.llm_intent}
+                    onWorkoutNextExercise={goToNextExercise}
+                  />
                 ))}
               {m.media.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2">

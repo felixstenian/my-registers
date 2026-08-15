@@ -670,6 +670,7 @@ class MessageProcessor:
             "workout_end": self._handle_workout_end,
             "workout_history": self._handle_workout_history,
             "workout_register_template": self._handle_workout_register_template,
+            "workout_next_exercise": self._handle_workout_next_exercise,
         }
         handler = handlers.get(envelope.intent)
         if handler is None:  # pragma: no cover — guardado pelo is_workout_intent
@@ -713,6 +714,12 @@ class MessageProcessor:
                 code=exc.code,
             )
 
+        # SP-178 (T-B318/T-B319): fluxo guiado lista os exercícios do
+        # template como plano (TC-U-003) — botões no frontend.
+        exercises = None
+        if session.template_id is not None:
+            exercises = await svc.repo.list_template_exercises(session.template_id)
+
         raw = _pack_raw(result)
         raw["dispatch"] = {
             "action": "workout_start",
@@ -721,7 +728,7 @@ class MessageProcessor:
             "closed_previous": closed_previous is not None,
             "template_id": str(session.template_id) if session.template_id else None,
         }
-        content = message_formatter.compose_workout_start(session, closed_previous)
+        content = message_formatter.compose_workout_start(session, closed_previous, exercises)
         return await self.messages.create(
             user_id=user_message.user_id,
             day_log_id=user_message.day_log_id,
@@ -866,7 +873,18 @@ class MessageProcessor:
             "reps": workout_set.reps,
             "sequence_index": workout_set.sequence_index,
         }
-        content = message_formatter.compose_workout_log_set(session, exercise, workout_set)
+        # SP-178 (T-B319): no fluxo guiado, a partir da 1ª série, recapitula a
+        # última sessão do exercício + marcador do botão "Ir para o próximo
+        # exercício".
+        guided = session.template_id is not None
+        last_sets: list[Any] | None = None
+        if guided:
+            history = await svc.history(user_id=user.id, exercise_name=exercise.name, limit=1)
+            if history.sessions and history.sessions[0].sets:
+                last_sets = history.sessions[0].sets
+        content = message_formatter.compose_workout_log_set(
+            session, exercise, workout_set, last_sets=last_sets, guided=guided
+        )
         return await self.messages.create(
             user_id=user_message.user_id,
             day_log_id=user_message.day_log_id,
@@ -988,6 +1006,66 @@ class MessageProcessor:
             llm_model=result.model,
             llm_prompt_version=result.prompt_version,
             llm_confidence=envelope.confidence,
+            raw_llm_response=raw,
+            tokens_input=result.tokens_input,
+            tokens_output=result.tokens_output,
+        )
+
+    async def _handle_workout_next_exercise(
+        self,
+        user_message: Message,
+        result: LLMCallResult,
+        user: User,
+        day_log_id: uuid.UUID,
+    ) -> Message:
+        """SP-178 (T-B319): re-lista os exercícios do template da sessão ativa.
+
+        Disparado pelo botão "Ir para o próximo exercício" do fluxo guiado.
+        Determinístico: `WorkoutService.next_exercise_prompt` consulta o
+        template da sessão (`template_id`, INV-20) — o LLM não lembra a
+        sequência (Decisão 7).
+        """
+        svc = WorkoutService(self.session)
+        session = await svc.repo.get_active_session(user.id)
+        if session is None:
+            return await self._record_clarify(
+                user_message,
+                result,
+                "Nenhum treino em andamento. Comece dizendo, por exemplo, "
+                '"iniciar treino de push".',
+                code="workout_no_active_session",
+            )
+
+        try:
+            exercises = await svc.next_exercise_prompt(
+                user_id=user.id,
+                session_id=session.id,
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message,
+                result,
+                _clarify_from_validation(exc),
+                code=exc.code,
+            )
+
+        raw = _pack_raw(result)
+        raw["dispatch"] = {
+            "action": "workout_next_exercise",
+            "workout_session_id": str(session.id),
+            "template_id": str(session.template_id) if session.template_id else None,
+            "exercise_count": len(exercises),
+        }
+        content = message_formatter.compose_workout_next_exercise(session, exercises)
+        return await self.messages.create(
+            user_id=user_message.user_id,
+            day_log_id=user_message.day_log_id,
+            role="assistant",
+            content=content,
+            llm_intent="workout_next_exercise",
+            llm_model=result.model,
+            llm_prompt_version=result.prompt_version,
+            llm_confidence=result.envelope.confidence if result.envelope else None,
             raw_llm_response=raw,
             tokens_input=result.tokens_input,
             tokens_output=result.tokens_output,

@@ -498,6 +498,33 @@ class WorkoutService:
         )
         return record
 
+    async def next_exercise_prompt(
+        self,
+        *,
+        user_id: uuid.UUID,
+        session_id: uuid.UUID,
+    ) -> list[Any]:
+        """SP-178 (T-B319): re-lista os exercícios do template da sessão guiada.
+
+        Determinístico (Decisão 7) — o LLM não lembra a sequência nem calcula
+        nada: o botão "Ir para o próximo exercício" dispara este re-listing
+        para o frontend repetir o ciclo. Retorna
+        `WorkoutTemplateExercise[]` do template referenciado pela
+        sessão (`template_id`, INV-20).
+
+        Sem `template_id` (sessão livre SP-120) → `ValidationAppError`
+        `workout_next_exercise_free_session` (guidance não existe sem template).
+        """
+        session = await self.repo.get_session(user_id, session_id)
+        if session is None:
+            raise NotFoundError("workout session not found", code="workout_session_not_found")
+        if session.template_id is None:
+            raise ValidationAppError(
+                "guided flow requires a template session",
+                code="workout_next_exercise_free_session",
+            )
+        return await self.repo.list_template_exercises(session.template_id)
+
     async def history(
         self,
         *,

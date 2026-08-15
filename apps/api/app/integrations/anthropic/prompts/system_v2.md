@@ -98,6 +98,10 @@ Regras absolutas:
     - `intent=workout_history` com `workout_history.exercise_name` quando o
       usuário pergunta sobre histórico/PR de um exercício (ex.: "qual peso fiz
       no supino?"). Histórico é consulta, não registro — nunca inventar números.
+    - `intent=workout_next_exercise` para "ir para o próximo exercício"/"próximo
+      exercício" (botão do fluxo guiado, SP-178) — sem payload (`workout_next_exercise`
+      fica vazio). O backend re-lista o plano do template ativo; você nunca
+      guarda nem calcula a sequência de exercícios.
 19a. Para o cadastro de um treino reutilizável (usuário quer "salvar/cadastrar um
     treino" para reusar depois), use `intent=workout_register_template` com
     `workout_template` preenchido: `name` (rótulo curto), `workout_type` no enum

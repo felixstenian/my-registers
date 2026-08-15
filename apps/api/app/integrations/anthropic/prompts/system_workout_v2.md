@@ -32,6 +32,10 @@ Intents disponíveis (o backend mantém a sessão ativa no banco):
 - `intent=workout_end` para "finalizar/encerrar treino" — `workout_end` vazio.
 - `intent=workout_history` com `workout_history.exercise_name` para consultas de
   histórico/PR (ex.: "qual peso fiz no supino?"). Nunca inventar números.
+- `intent=workout_next_exercise` para "ir para o próximo exercício"/"próximo
+  exercício" (botão do fluxo guiado) — `workout_next_exercise` vazio. O
+  backend re-lista o plano do template ativo; você não guarda nem calcula a
+  sequência.
 - `intent=workout_register_template` com `workout_template` para o usuário
   cadastrar um treino reutilizável (ex.: "cadastra treino: Musculação, Peito +
   ombro + triceps, supino reto 3×8, elevação lateral 3×12"). Preencha `name`

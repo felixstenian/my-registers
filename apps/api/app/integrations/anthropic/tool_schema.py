@@ -35,6 +35,7 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
                 "workout_history",
                 "workout_register_template",
                 "workout_correct",
+                "workout_next_exercise",
                 "clarify",
                 "unknown",
             ],
@@ -252,6 +253,11 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
             },
         },
         "workout_end": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "properties": {},
+        },
+        "workout_next_exercise": {
             "type": ["object", "null"],
             "additionalProperties": False,
             "properties": {},

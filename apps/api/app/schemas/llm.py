@@ -33,6 +33,7 @@ Intent = Literal[
     "workout_history",
     "workout_register_template",
     "workout_correct",
+    "workout_next_exercise",
     "clarify",
     "unknown",
 ]
@@ -269,6 +270,15 @@ class WorkoutEndIn(_LenientBase):
     """SP-124. Encerramento explícito da sessão — sem payload extra."""
 
 
+class WorkoutNextExerciseIn(_LenientBase):
+    """SP-178 (T-B319). Botão "Ir para o próximo exercício" no fluxo guiado.
+
+    Intent de navegação sem payload: o backend re-lista os exercícios do
+    template da sessão ativa de forma determinística (`next_exercise_prompt`)
+    — o LLM não precisa lembrar a sequência (Decisão 7).
+    """
+
+
 class WorkoutHistoryQueryIn(_LenientBase):
     """SP-127. Consulta de histórico por exercício. `exercise_name`
     obrigatório; se ausente o backend emite `clarify`."""
@@ -336,3 +346,4 @@ class LLMEnvelope(_StrictBase):
     workout_history: WorkoutHistoryQueryIn | None = None
     workout_template: WorkoutTemplateIn | None = None
     workout_correct: WorkoutCorrectSetIn | None = None
+    workout_next_exercise: WorkoutNextExerciseIn | None = None
