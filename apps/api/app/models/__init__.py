@@ -13,6 +13,7 @@ from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.models.water_record import WaterRecord
 from app.models.weekly_report import WeeklyReport
+from app.models.workout import WorkoutExercise, WorkoutSession, WorkoutSet
 
 __all__ = [
     "ActivityRecord",
@@ -30,4 +31,7 @@ __all__ = [
     "User",
     "WaterRecord",
     "WeeklyReport",
+    "WorkoutExercise",
+    "WorkoutSession",
+    "WorkoutSet",
 ]
