@@ -269,6 +269,50 @@ Meta: rastrear treinos de força de forma granular (sessão → exercícios → 
 - [ ] **T-B308** — Frontend: renderização especial de assistant messages `workout_*` com destaque visual (peso PR em amber, série atual em verde). Novo `WorkoutHistoryCard` no chat. (M) — opcional, backend em markdown já é usável.
 
 **Gate Bloco 3:** treino registrado por chat com histórico contextual; encerramento gera activity_record que aparece no snapshot; INV-15/16/17 verificadas.
+
+### Bloco 3.b — Módulo de treino (SP-170..SP-179) — pendente
+
+Meta: expansão do núcleo como módulo de produto (spec §3.16) — templates reutilizáveis, chat de treino dedicado no **mesmo pool de `messages` via `messages.via='workout'`**, tela `/workouts` (Ativos/Inativos/Histórico), fluxo guiado com cronômetro, registro por imagem, edição de peso/séries/kcal e seção de treinos no `/day`. Ordem E1..E6 conforme `plan.md` §8.
+
+**E1 — Fundação do módulo (`messages.via`):**
+
+- [ ] **T-B309** — Migration: `ALTER TABLE messages ADD COLUMN via TEXT NOT NULL DEFAULT 'food'` + índice `idx_messages_user_via ON messages(user_id, via, created_at)`. Sem backfill (default cobre). (S) — SP-173.
+- [ ] **T-B310** — `MessageRepository.list_messages` e `GET /chat/messages` ganham filtro `via` (`'food'` default; `'workout'` para o chat de treino); `POST /chat/messages` aceita `via` no payload. Envelope de chat de treino reusa o mesmo pool. (M) — SP-173.
+- [ ] **T-B311** — `MessageProcessor` seleciona prompt `system_v2.md` conforme `via`; `IntentDispatcher` roteia intents de treino diretamente (fora de `_STRUCTURED_INTENTS`). Handlers `_handle_workout_*` compartilhados entre núcleo e módulo. (M) — SP-173.
+
+**E2 — Templates reutilizáveis:**
+
+- [ ] **T-B312** — Models + migration `0011_workout_templates.py`: `workout_templates` (user_id, name, workout_type, muscle_groups JSONB, active bool default true, created_at) + `workout_template_exercises` (template_id FK, exercise_name, normalized_name, target_sets, target_reps). (M) — SP-170, SP-171, INV-18.
+- [ ] **T-B313** — `WorkoutService.register_template`: valida payload `WorkoutTemplateIn` (tipo + agrupamento + séries/reps por exercício) e cria template + exercícios; `clarify` em ambiguidade. (M) — SP-171.
+- [ ] **T-B314** — Routes `/workouts/templates` (GET listagem com `?active=`, PATCH toggle `active`) 100% `user_id`-scoped. Aba *Ativos*/*Inativos* no frontend. (M) — SP-170, SP-172, INV-18/19.
+
+**E3 — Chat de treino dedicado:**
+
+- [ ] **T-B315** — `/workouts/chat` page espelhando `(app)/chat/page.tsx` (composer + upload + polling `via='workout'` + `AssistantContent`). `proxy.ts`: `/workouts`, `/workouts/chat` em `PROTECTED_PREFIXES`. (L) — SP-173.
+- [ ] **T-B316** — `WorkoutTotalsHeader` (variante do `DayTotalsBar`): atividades do dia + kcal gastas (via snapshot `/days/today`). (M) — SP-173.
+- [ ] **T-B317** — Botões do header do chat de treino: "Cadastrar treino" (→ SP-171), "Iniciar treino" (→ fluxo guiado); com sessão ativa, botão da direita vira "Finalizar treino". Aviso legal Art. VII §26 quando houver dados de dia. (M) — SP-173, SP-179.
+
+**E4 — Fluxo guiado + cronômetro:**
+
+- [ ] **T-B318** — `WorkoutService.start_session` com `template_id` (SP-178): lista templates `active=true`; escolhido, cria sessão + lista exercícios; escolhido exercício, lookup da **última realização** (SP-121) e exibe cargas/reps. (L) — SP-178, INV-19/20.
+- [ ] **T-B319** — `_handle_workout_log_set` no fluxo guiado: **a partir da 1ª série**, confirma registro + recapitula o último treino + botão "Ir para o próximo exercício" (`workout_next_exercise`) → re-lista exercícios. (M) — SP-178.
+- [ ] **T-B320** — `Stopwatch` (frontend): inicia com `start_session`, para com "Finalizar treino"/`workout_end`. Tempo registrado = `ended_at - started_at` (fonte determinística do backend). (S) — SP-179.
+
+**E5 — Imagem + edição:**
+
+- [ ] **T-B321** — `WorkoutImageIn` (título, atividade, intensidade, kcal_burned_reported) via LLM com imagem; `_handle_workout_register` reusa `POST /media`/`media_ids`. (M) — SP-174, INV-21.
+- [ ] **T-B322** — `workout_correct` + PATCH `/records/workout-sets/{id}` (weight_kg/reps/notes) e `/records/workout-sessions/{id}` (kcal_burned_reported, duration_minutes). 409 em dia fechado (INV-5). Audit INV-10. (M) — SP-175.
+- [ ] **T-B323** — **Reconsolidação (INV-20)**: editar set/kcal de sessão encerrada re-roda `consolidate_to_activity` (recompute do `activity_record` da própria sessão — upsert; nunca duplica). (M) — SP-175.
+
+**E6 — `/day` + histórico:**
+
+- [ ] **T-B324** — `WorkoutSection` no `/day` (estende `AuxiliarySections`): treinos do dia — nome, duração, kcal gastas; força com exercícios/cargas/séries/reps. **kcal de treino entra no resumo** (SP-176). (M) — SP-176.
+- [ ] **T-B325** — Formulários inline de edição no `/day` (peso/séries/kcal) espelhando `EditActivityForm`/inline editing (SP-160..169). (M) — SP-175.
+- [ ] **T-B326** — `GET /workouts/history?page=&page_size=` paginado determinístico (`session.started_at DESC, id DESC`); aba *Histórico* renderiza nome/data/hora/kcal (e cargas/séries/reps p/ musculação). (M) — SP-177.
+- [ ] **T-B327** — Testes módulo: `tests/test_workout_module.py` cobrindo SP-170..SP-179 + INV-18/19/20/21 (via filter, register template, toggle active, guided flow, image, correct/reconsolidate, history pagination); INV-21 via mock Anthropic que devolve lixo (SP-XX must → unit + integração). (L)
+- [ ] **T-B328** — E2E Playwright `apps/web/e2e/workout.spec.ts`: cadastrar template → iniciar → guiado → finalizar (kcal no `/day`). (L)
+
+**Gate Bloco 3.b:** módulo de treino usável — templates cadastráveis/inativáveis; chat de treino dedicado (`via='workout'`) com header de atividades/kcal e botões; fluxo guiado com cronômetro e tempo registrado; kcal de treino no resumo do `/day`; INV-18/19/20/21 verificadas (testes verdes).
 ## Bloco 4 — PWA básico (SP-128..SP-135) ✅ (parcial)
 
 Meta: app instalável em iOS/Android/Desktop com shell offline. **Não** cobre offline de dados de negócio (contradiria INV-11), fila de mensagens (B-08) nem push (B-05). Zero mudança no backend.
