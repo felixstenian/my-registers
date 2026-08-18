@@ -95,7 +95,7 @@ Status: **done** (branch `feat/fase-4-food-registry`). 79 testes verdes (28 novo
 - [x] **T-406** — `DailyRecomputeService.recompute(day_log_id)`: SUM sobre `food_items` vivos + JOIN em `food_records` vivos. Upsert em `daily_snapshots` por UNIQUE(day_log_id) com `version = c.version + 1` em conflito. `execution_options(populate_existing=True)` no RETURNING para forçar refresh do identity map (senão a 2ª recompute do mesmo dia devolve o snapshot cacheado da 1ª). Warnings agregam itens sem catálogo + `needs_confirmation`.
 - [x] **T-407** — `MessageProcessor._handle_log_food` chama `MealService` → `DailyRecompute` → cria assistant message com resumo factual dos itens + totais + aviso legal (Const. Art. VII §26 antecipado). `IntentDispatcher` deixa de listar `log_food` como estruturado. Fluxo end-to-end coberto em `test_log_food_flow.py`.
 - [x] **T-408** — `GET /days/today`, `GET /days/{date}` implementados em `app/api/routes/days.py:33` (today) e `:52` (by date). Ambos retornam `DaySnapshotOut` com `records` populados. SP-90/91/92 cobertos.
-- [x] **T-409** — Frontend renderiza **totals** via `DayTotalsBar` (SP-116 do Bloco 2) — a barra do chat consome `GET /days/today` com revalidação por assinatura de nova assistant message e após confirmação de items pendentes. Renderização detalhada de `records` item-a-item numa página `/days/[date]` dedicada **não foi entregue e é opcional para o MVP** — o valor incremental é baixo dado que (a) `DayTotalsBar` já entrega os totais, (b) `/weekly` cobre a visão histórica agregada e (c) o chat mostra os registros no fluxo natural das confirmações. Se um dia virar necessidade real (revisar/auditar um dia passado item-a-item), abrir tarefa nova `T-409b`.
+- [x] **T-409** — Frontend renderiza **totals** via `DayTotalsBar` (SP-116 do Bloco 2) — a barra do chat consome `GET /days/today` com revalidação por assinatura de nova assistant message e após confirmação de items pendentes. Renderização detalhada de `records` item-a-item numa página dedicada **não foi entregue no MVP** mas foi **revivida pelo Bloco 6** (log fechado): `/day` + `/day/[date]` entregam a visão item-a-item do dia (ver seção Bloco 6, SP-150..SP-155). O remark "opcional para o MVP" deixou de valer — a necessidade virou real após o bug do catálogo zerado em prod (#37), e a tarefa `T-409b` sugerida nesta avaliação foi materializada como Bloco 6.
 - [x] **T-410** — Testes SP-90/91/92 cobertos em `tests/test_day_close_report.py::test_get_today_returns_empty_snapshot_when_no_records`, `::test_get_today_reflects_registered_food`, `::test_get_by_date_not_found_returns_404`, `::test_get_by_date_open_day_returns_status_open`, `::test_get_today_uses_user_timezone_not_utc`. SP-20..SP-26 cobertos em `tests/test_log_food_flow.py` + `tests/test_meal_service.py`. INV-1 (LLM não soma) coberto em `tests/test_nutrition_calculator.py` + integração do log_food que testa retornos determinísticos mesmo com LLM mentindo. Gate cumprido.
 - [x] **T-411** — SP-24 chat-side (SP-24a): intent `confirm_items` + `ConfirmationService`. Feedback do teste manual do café-da-manhã mostrou loop de "confirmo esses itens" caindo em clarify ou re-registrando. Envelope aceita `scope='all'|'specific'` + `target_hints`; audit `action='confirm'` (migration 0006 acrescenta ao CHECK); não recomputa snapshot. Testes em `tests/test_confirm_items.py`. (M) — SP-24.
 
@@ -259,16 +259,60 @@ Meta: rastrear treinos de força de forma granular (sessão → exercícios → 
 
 **Todas `may` — implementação após Fase 9 concluída.** Não bloqueia MVP.
 
-- [ ] **T-B301** — Migration nova: `workout_sessions` (id, user_id, day_log_id FK, workout_type enum, detected_name, started_at, ended_at nullable, status enum `active|ended`, end_reason enum), `workout_exercises` (id, session_id FK, name, normalized_name, sequence_index, started_at), `workout_sets` (id, exercise_id FK, sequence_index, weight_kg NUMERIC, reps INT, notes nullable). Índices: `(user_id, status)` parcial em session; `(normalized_name, user_id, ended_at DESC)` em exercise pra lookup histórico rápido. FK opcional `activity_records.workout_session_id`. (M) — SP-120, INV-11.
+- [ ] **T-B301** — Migration nova: `workout_sessions` (id, user_id, day_log_id FK, workout_type enum, detected_name, started_at, ended_at nullable, status enum `active|ended`, end_reason enum), `workout_exercises` (id, session_id FK, name, normalized_name, sequence_index, started_at), `workout_sets` (id, exercise_id FK, sequence_index, weight_kg NUMERIC, reps INT, notes nullable). Índices: `(user_id, status)` parcial em session; `(normalized_name, user_id, ended_at DESC)` em exercise pra lookup histórico rápido. FK opcional `activity_records.workout_session_id`. (M) — SP-120, INV-15.
 - [ ] **T-B302** — `Intent` enum ganha `workout_start`, `workout_add_exercise`, `workout_log_set`, `workout_end`, `workout_history`. Novos payloads `WorkoutStartIn`, `WorkoutExerciseIn`, `WorkoutSetIn`, `WorkoutEndIn`, `WorkoutHistoryQueryIn` em `app/schemas/llm.py`, tudo `_LenientBase`. Tool schema `record_intent` estendido. Prompt `system_v2.md` ganha regra 19 explicando os intents. (M) — SP-120..SP-127.
 - [ ] **T-B303** — `app/services/workout.py::WorkoutService`: `start_session`, `add_exercise` (com lookup histórico + PR), `log_set`, `end_session`, `history`. Métodos autônomos, sem dependência do MessageProcessor — testáveis isoladamente. (L) — SP-120..SP-124, SP-127.
-- [ ] **T-B304** — `WorkoutService.consolidate_to_activity`: cria `activity_record` com `activity_type='strength'`, `calc_method='workout_session'`, kcal via MET fixo × weight_kg × horas. Chamado por `end_session` (SP-124) e por `_handle_close_day` quando há sessão ativa (SP-125). (M) — SP-126, INV-13.
+- [ ] **T-B304** — `WorkoutService.consolidate_to_activity`: cria `activity_record` com `activity_type='strength'`, `calc_method='workout_session'`, kcal via MET fixo × weight_kg × horas. Chamado por `end_session` (SP-124) e por `_handle_close_day` quando há sessão ativa (SP-125). (M) — SP-126, INV-17.
 - [ ] **T-B305** — `MessageProcessor` ganha 5 handlers: `_handle_workout_start`, `_handle_workout_add_exercise`, `_handle_workout_log_set`, `_handle_workout_end`, `_handle_workout_history`. `IntentDispatcher` roteia os 5 diretamente (não passam pelo `_STRUCTURED_INTENTS`). Cada handler compõe assistant message via novo `message_formatter.compose_workout_*` — tabelas markdown pra consistência com SP-118. (M)
 - [ ] **T-B306** — `_handle_close_day` chama `WorkoutService.end_session` **antes** do recompute quando há sessão ativa (SP-125). Ordem crítica: `activity_record` precisa estar persistido pra entrar no snapshot. (S)
-- [ ] **T-B307** — Testes: `tests/test_workout.py` cobrindo SP-120 (start + auto-encerra anterior), SP-121 (lookup histórico + PR), SP-122 (parser de peso pt-BR + múltiplas séries em 1 msg), SP-123 (encerramento implícito de exercício), SP-124 (end explícito → consolidate), SP-125 (close_day auto-encerra), SP-126 (activity_record correto), SP-127 (history query), INV-11 (única sessão ativa), INV-12 (set no último exercício), INV-13 (delete de activity_record não apaga sessão). (L)
+- [ ] **T-B307** — Testes: `tests/test_workout.py` cobrindo SP-120 (start + auto-encerra anterior), SP-121 (lookup histórico + PR), SP-122 (parser de peso pt-BR + múltiplas séries em 1 msg), SP-123 (encerramento implícito de exercício), SP-124 (end explícito → consolidate), SP-125 (close_day auto-encerra), SP-126 (activity_record correto), SP-127 (history query), INV-15 (única sessão ativa), INV-16 (set no último exercício), INV-17 (delete de activity_record não apaga sessão). (L)
 - [ ] **T-B308** — Frontend: renderização especial de assistant messages `workout_*` com destaque visual (peso PR em amber, série atual em verde). Novo `WorkoutHistoryCard` no chat. (M) — opcional, backend em markdown já é usável.
 
-**Gate Bloco 3:** treino registrado por chat com histórico contextual; encerramento gera activity_record que aparece no snapshot; INV-11/12/13 verificadas.
+**Gate Bloco 3:** treino registrado por chat com histórico contextual; encerramento gera activity_record que aparece no snapshot; INV-15/16/17 verificadas.
+
+### Bloco 3.b — Módulo de treino (SP-170..SP-179) — pendente
+
+Meta: expansão do núcleo como módulo de produto (spec §3.16) — templates reutilizáveis, chat de treino dedicado no **mesmo pool de `messages` via `messages.via='workout'`**, tela `/workouts` (Ativos/Inativos/Histórico), fluxo guiado com cronômetro, registro por imagem, edição de peso/séries/kcal e seção de treinos no `/day`. Ordem E1..E6 conforme `plan.md` §8.
+
+**E1 — Fundação do módulo (`messages.via`):**
+
+- [ ] **T-B309** — Migration: `ALTER TABLE messages ADD COLUMN via TEXT NOT NULL DEFAULT 'food'` + índice `idx_messages_user_via ON messages(user_id, via, created_at)`. Sem backfill (default cobre). (S) — SP-173.
+- [ ] **T-B310** — `MessageRepository.list_messages` e `GET /chat/messages` ganham filtro `via` (`'food'` default; `'workout'` para o chat de treino); `POST /chat/messages` aceita `via` no payload. Envelope de chat de treino reusa o mesmo pool. (M) — SP-173.
+- [ ] **T-B311** — `MessageProcessor` seleciona prompt `system_v2.md` conforme `via`; `IntentDispatcher` roteia intents de treino diretamente (fora de `_STRUCTURED_INTENTS`). Handlers `_handle_workout_*` compartilhados entre núcleo e módulo. (M) — SP-173.
+
+**E2 — Templates reutilizáveis:**
+
+- [ ] **T-B312** — Models + migration `0011_workout_templates.py`: `workout_templates` (user_id, name, workout_type, muscle_groups JSONB, active bool default true, created_at) + `workout_template_exercises` (template_id FK, exercise_name, normalized_name, target_sets, target_reps). (M) — SP-170, SP-171, INV-18.
+- [ ] **T-B313** — `WorkoutService.register_template`: valida payload `WorkoutTemplateIn` (tipo + agrupamento + séries/reps por exercício) e cria template + exercícios; `clarify` em ambiguidade. (M) — SP-171.
+- [ ] **T-B314** — Routes `/workouts/templates` (GET listagem com `?active=`, PATCH toggle `active`) 100% `user_id`-scoped. Aba *Ativos*/*Inativos* no frontend. (M) — SP-170, SP-172, INV-18/19.
+
+**E3 — Chat de treino dedicado:**
+
+- [ ] **T-B315** — `/workouts/chat` page espelhando `(app)/chat/page.tsx` (composer + upload + polling `via='workout'` + `AssistantContent`). `proxy.ts`: `/workouts`, `/workouts/chat` em `PROTECTED_PREFIXES`. (L) — SP-173.
+- [ ] **T-B316** — `WorkoutTotalsHeader` (variante do `DayTotalsBar`): atividades do dia + kcal gastas (via snapshot `/days/today`). (M) — SP-173.
+- [ ] **T-B317** — Botões do header do chat de treino: "Cadastrar treino" (→ SP-171), "Iniciar treino" (→ fluxo guiado); com sessão ativa, botão da direita vira "Finalizar treino". Aviso legal Art. VII §26 quando houver dados de dia. (M) — SP-173, SP-179.
+
+**E4 — Fluxo guiado + cronômetro:**
+
+- [ ] **T-B318** — `WorkoutService.start_session` com `template_id` (SP-178): lista templates `active=true`; escolhido, cria sessão + lista exercícios; escolhido exercício, lookup da **última realização** (SP-121) e exibe cargas/reps. (L) — SP-178, INV-19/20.
+- [ ] **T-B319** — `_handle_workout_log_set` no fluxo guiado: **a partir da 1ª série**, confirma registro + recapitula o último treino + botão "Ir para o próximo exercício" (`workout_next_exercise`) → re-lista exercícios. (M) — SP-178.
+- [ ] **T-B320** — `Stopwatch` (frontend): inicia com `start_session`, para com "Finalizar treino"/`workout_end`. Tempo registrado = `ended_at - started_at` (fonte determinística do backend). (S) — SP-179.
+
+**E5 — Imagem + edição:**
+
+- [ ] **T-B321** — `WorkoutImageIn` (título, atividade, intensidade, kcal_burned_reported) via LLM com imagem; `_handle_workout_register` reusa `POST /media`/`media_ids`. (M) — SP-174, INV-21.
+- [ ] **T-B322** — `workout_correct` + PATCH `/records/workout-sets/{id}` (weight_kg/reps/notes) e `/records/workout-sessions/{id}` (kcal_burned_reported, duration_minutes). 409 em dia fechado (INV-5). Audit INV-10. (M) — SP-175.
+- [ ] **T-B323** — **Reconsolidação (INV-20)**: editar set/kcal de sessão encerrada re-roda `consolidate_to_activity` (recompute do `activity_record` da própria sessão — upsert; nunca duplica). (M) — SP-175.
+
+**E6 — `/day` + histórico:**
+
+- [ ] **T-B324** — `WorkoutSection` no `/day` (estende `AuxiliarySections`): treinos do dia — nome, duração, kcal gastas; força com exercícios/cargas/séries/reps. **kcal de treino entra no resumo** (SP-176). (M) — SP-176.
+- [ ] **T-B325** — Formulários inline de edição no `/day` (peso/séries/kcal) espelhando `EditActivityForm`/inline editing (SP-160..169). (M) — SP-175.
+- [ ] **T-B326** — `GET /workouts/history?page=&page_size=` paginado determinístico (`session.started_at DESC, id DESC`); aba *Histórico* renderiza nome/data/hora/kcal (e cargas/séries/reps p/ musculação). (M) — SP-177.
+- [ ] **T-B327** — Testes módulo: `tests/test_workout_module.py` cobrindo SP-170..SP-179 + INV-18/19/20/21 (via filter, register template, toggle active, guided flow, image, correct/reconsolidate, history pagination); INV-21 via mock Anthropic que devolve lixo (SP-XX must → unit + integração). (L)
+- [ ] **T-B328** — E2E Playwright `apps/web/e2e/workout.spec.ts`: cadastrar template → iniciar → guiado → finalizar (kcal no `/day`). (L)
+
+**Gate Bloco 3.b:** módulo de treino usável — templates cadastráveis/inativáveis; chat de treino dedicado (`via='workout'`) com header de atividades/kcal e botões; fluxo guiado com cronômetro e tempo registrado; kcal de treino no resumo do `/day`; INV-18/19/20/21 verificadas (testes verdes).
 ## Bloco 4 — PWA básico (SP-128..SP-135) ✅ (parcial)
 
 Meta: app instalável em iOS/Android/Desktop com shell offline. **Não** cobre offline de dados de negócio (contradiria INV-11), fila de mensagens (B-08) nem push (B-05). Zero mudança no backend.
@@ -296,9 +340,11 @@ Pré-requisitos: Fase 9 concluída (app em prod com HTTPS válido — PWA exige 
 
 ---
 
-## Bloco 5 — Recuperação de itens sem catálogo (SP-140..SP-143) — revisado 2026-07-28
+## Bloco 5 — Recuperação de itens sem catálogo (SP-140..SP-143) ✅
 
 Meta: fechar o loop pra o usuário quando `catalog.lookup` devolve `None`, entregando **três botões clicáveis por item** direto no assistant message (Cadastrar manual, Foto do rótulo, Descartar). Remove o fluxo de "confirmação de item" que era redundante.
+
+Status: **done** (spec #38 + feat #45, release v1.4.0). A remoção do fluxo de confirmação e a foto-do-rótulo com promoção (SP-143) foram entregues na mesma release — ver CHANGELOG v1.4.0.
 
 Pré-requisitos:
 - Fase 4.b (SP-30..35) concluída (LabelCatalogService disponível).
@@ -314,31 +360,31 @@ Pré-requisitos:
 
 ### Backend — remoção do fluxo de confirmação
 
-- [ ] **T-B510** — Backend não seta mais `needs_confirmation=True`. Remover a lógica em `MealService._create_item` (`if confidence < LOW_CONFIDENCE_THRESHOLD or hit is None`) e no `BeverageService` equivalente. Campo continua no schema (nunca setado), retorno de API continua expondo (frontend ignora). Ajustar testes que hoje esperam `needs_confirmation=True` — passar a esperar `False`. (M)
-- [ ] **T-B511** — Deletar endpoint `POST /records/food-items/{id}/confirm` (hotfix #37) + `ConfirmationOut` schema. Testes em `test_corrections_deletions.py` (`test_confirm_food_item_*`, 4 casos) deletados. (S)
-- [ ] **T-B512** — Deletar `apps/api/app/services/confirmation.py` (`ConfirmationService`), remover import + branch `confirm_items` do `IntentDispatcher` + `MessageProcessor._handle_confirm_items`, remover intent do enum `Intent`, remover campos `confirmation`/`ConfirmationIn` do `LLMEnvelope` + `system_v2.md` prompt + `tool_schema.py`. `tests/test_confirm_items.py` deletado. Fluxo de correção via chat ("corrija X 100g") continua funcionando via intent `correct_record` (não tocado). (L)
-- [ ] **T-B513** — `message_formatter._warnings_block` (bloco "Confirma estes itens?") deletado. `_has_approx_food_items` continua usando warnings pra decidir `≈`. Teste `test_compose_meal_warnings_listed_after_disclaimer` deletado ou reformado. (S)
+- [x] **T-B510** — Backend não seta mais `needs_confirmation=True`. Remover a lógica em `MealService._create_item` (`if confidence < LOW_CONFIDENCE_THRESHOLD or hit is None`) e no `BeverageService` equivalente. Campo continua no schema (nunca setado), retorno de API continua expondo (frontend ignora). Ajustar testes que hoje esperam `needs_confirmation=True` — passar a esperar `False`. (M)
+- [x] **T-B511** — Deletar endpoint `POST /records/food-items/{id}/confirm` (hotfix #37) + `ConfirmationOut` schema. Testes em `test_corrections_deletions.py` (`test_confirm_food_item_*`, 4 casos) deletados. (S)
+- [x] **T-B512** — Deletar `apps/api/app/services/confirmation.py` (`ConfirmationService`), remover import + branch `confirm_items` do `IntentDispatcher` + `MessageProcessor._handle_confirm_items`, remover intent do enum `Intent`, remover campos `confirmation`/`ConfirmationIn` do `LLMEnvelope` + `system_v2.md` prompt + `tool_schema.py`. `tests/test_confirm_items.py` deletado. Fluxo de correção via chat ("corrija X 100g") continua funcionando via intent `correct_record` (não tocado). (L)
+- [x] **T-B513** — `message_formatter._warnings_block` (bloco "Confirma estes itens?") deletado. `_has_approx_food_items` continua usando warnings pra decidir `≈`. Teste `test_compose_meal_warnings_listed_after_disclaimer` deletado ou reformado. (S)
 
 ### Backend — foto do rótulo com promoção acoplada (SP-143)
 
-- [ ] **T-B520** — `POST /chat/messages` aceita novo campo opcional `promote_food_item_id: uuid`. Adiciona ao schema Pydantic + rota. Validação server-side de ownership no `ChatService.post_user_message` (silenciosamente descarta se falha — não bloqueia envio). Coluna nova em `messages` (nullable) ou armazenar em `raw_llm_response`? Decisão de plan: **armazenar em `raw_llm_response.metadata.promote_food_item_id`** pra evitar migration destrutiva. (M) — SP-143.
-- [ ] **T-B521** — `MessageProcessor._handle_log_nutrition_label` (fluxo Fase 4.b), depois de `LabelCatalogService.upsert_from_label` retornar sucesso: se `promote_food_item_id` está na mensagem E o item passa validação (ownership + não deletado + dia aberto), chama helper compartilhado com `_try_promote_item` do endpoint manual (extrair pra `app/services/promotion.py` ou similar). Falha silenciosa grava audit `action='promotion_failed'`. (M) — SP-143.
-- [ ] **T-B522** — Testes de integração em `tests/test_label_promotion.py` (6 casos): foto de rótulo válido + item válido → promoção completa; foto de rótulo válido + item de outro user → fact criado sem promoção; foto de rótulo válido + item deletado → idem; foto de rótulo válido + dia fechado → idem; foto que **não** é rótulo (LLM retorna clarify) → `promote_food_item_id` ignorado silenciosamente; foto de rótulo mas sem `promote_food_item_id` → comportamento original inalterado. (M)
+- [x] **T-B520** — `POST /chat/messages` aceita novo campo opcional `promote_food_item_id: uuid`. Adiciona ao schema Pydantic + rota. Validação server-side de ownership no `ChatService.post_user_message` (silenciosamente descarta se falha — não bloqueia envio). Coluna nova em `messages` (nullable) ou armazenar em `raw_llm_response`? Decisão de plan: **armazenar em `raw_llm_response.metadata.promote_food_item_id`** pra evitar migration destrutiva. (M) — SP-143.
+- [x] **T-B521** — `MessageProcessor._handle_log_nutrition_label` (fluxo Fase 4.b), depois de `LabelCatalogService.upsert_from_label` retornar sucesso: se `promote_food_item_id` está na mensagem E o item passa validação (ownership + não deletado + dia aberto), chama helper compartilhado com `_try_promote_item` do endpoint manual (extrair pra `app/services/promotion.py` ou similar). Falha silenciosa grava audit `action='promotion_failed'`. (M) — SP-143.
+- [x] **T-B522** — Testes de integração em `tests/test_label_promotion.py` (6 casos): foto de rótulo válido + item válido → promoção completa; foto de rótulo válido + item de outro user → fact criado sem promoção; foto de rótulo válido + item deletado → idem; foto de rótulo válido + dia fechado → idem; foto que **não** é rótulo (LLM retorna clarify) → `promote_food_item_id` ignorado silenciosamente; foto de rótulo mas sem `promote_food_item_id` → comportamento original inalterado. (M)
 
 ### Frontend — remoção da UX de confirmação
 
-- [ ] **T-B530** — Deletar `apps/web/src/app/(app)/chat/PendingItemsModal.tsx`. Remover import + state + render do modal em `chat/page.tsx`. `DayTotalsBar.tsx` remove badge "N item precisa de confirmação" + prop `onPendingClick`. Interface `FoodItemRef.needs_confirmation` fica no tipo (backend ainda expõe), mas nenhum consumidor no frontend. (S)
-- [ ] **T-B531** — Deletar `apps/web/src/app/(app)/day/ConfirmItemButton.tsx`. Em `FoodItemRow.tsx`, remover badge "confirmar" (mantém apenas "sem catálogo" quando `has_catalog=false`). Cor amarela do badge some. (S)
+- [x] **T-B530** — Deletar `apps/web/src/app/(app)/chat/PendingItemsModal.tsx`. Remover import + state + render do modal em `chat/page.tsx`. `DayTotalsBar.tsx` remove badge "N item precisa de confirmação" + prop `onPendingClick`. Interface `FoodItemRef.needs_confirmation` fica no tipo (backend ainda expõe), mas nenhum consumidor no frontend. (S)
+- [x] **T-B531** — Deletar `apps/web/src/app/(app)/day/ConfirmItemButton.tsx`. Em `FoodItemRow.tsx`, remover badge "confirmar" (mantém apenas "sem catálogo" quando `has_catalog=false`). Cor amarela do badge some. (S)
 
 ### Frontend — 3 botões clicáveis no card recovery
 
-- [ ] **T-B540** — `AssistantContent.tsx` estende o parser + render do bloco `recovery` pra ter 3 botões por item (não só "Cadastrar"): **Cadastrar** (abre `ManualCatalogForm`, já feito), **Foto** (novo, ver T-B541), **Descartar** (novo, ver T-B542). Layout compacto — botões inline, ícones + label curto em mobile. (M) — SP-140.
-- [ ] **T-B541** — Novo componente `LabelPhotoUploader.tsx` (client). Botão dispara `<input type="file" accept="image/*" capture="environment">` (aproveita SP-16 pra câmera mobile). Ao selecionar: (1) POST `/media` pra subir; (2) POST `/chat/messages` com `text` mínimo ("foto do rótulo de {nome}"), `media_ids=[uploadedId]`, `promote_food_item_id={item.id}`. Sucesso → toast + `window.location.reload()` pra pegar novo assistant message. Erros de upload (SP-18) reusam mecânica existente (mensagens em pt-BR pra `file_too_large`, `invalid_image`). (M) — SP-143.
-- [ ] **T-B542** — Novo componente `DiscardItemButton.tsx` (client). Botão dispara `DELETE /records/food-items/{item.id}` diretamente (sem confirmação extra — item que ainda não gerou macros úteis pode ser deletado com 1 clique). Success → `window.location.reload()`. Erro exibe toast. (S)
+- [x] **T-B540** — `AssistantContent.tsx` estende o parser + render do bloco `recovery` pra ter 3 botões por item (não só "Cadastrar"): **Cadastrar** (abre `ManualCatalogForm`, já feito), **Foto** (novo, ver T-B541), **Descartar** (novo, ver T-B542). Layout compacto — botões inline, ícones + label curto em mobile. (M) — SP-140.
+- [x] **T-B541** — Novo componente `LabelPhotoUploader.tsx` (client). Botão dispara `<input type="file" accept="image/*" capture="environment">` (aproveita SP-16 pra câmera mobile). Ao selecionar: (1) POST `/media` pra subir; (2) POST `/chat/messages` com `text` mínimo ("foto do rótulo de {nome}"), `media_ids=[uploadedId]`, `promote_food_item_id={item.id}`. Sucesso → toast + `window.location.reload()` pra pegar novo assistant message. Erros de upload (SP-18) reusam mecânica existente (mensagens em pt-BR pra `file_too_large`, `invalid_image`). (M) — SP-143.
+- [x] **T-B542** — Novo componente `DiscardItemButton.tsx` (client). Botão dispara `DELETE /records/food-items/{item.id}` diretamente (sem confirmação extra — item que ainda não gerou macros úteis pode ser deletado com 1 clique). Success → `window.location.reload()`. Erro exibe toast. (S)
 
 ### Docs
 
-- [ ] **T-B508** — Docs. **Adiado** (mesmo motivo do PR original — UX autodescoberta). (XS)
+- [x] **T-B508** — Docs: spec §3.14 entregue em #38; UX autodescoberta documentada no CHANGELOG v1.4.0. (XS)
 
 **Gate Bloco 5 revisado — objetivo:** usuário registra alimento fora do seed → assistant message mostra card com 3 botões por item. Clica Cadastrar → form curto + submit + item promovido + snapshot recalculado. Clica Foto → escolhe imagem → LLM lê rótulo + backend promove item automaticamente. Clica Descartar → item removido + snapshot recalculado. Nenhum fluxo de "confirmar" existe mais (endpoint, UI, intent LLM).
 
@@ -350,13 +396,15 @@ Pré-requisitos:
 
 ---
 
-## Bloco 6 — Visão detalhada do dia (SP-150..SP-154) — pendente
+## Bloco 6 — Visão detalhada do dia (SP-150..SP-155) ✅
 
 Meta: página `/day` que lista item-por-item do dia com macros + micros, permitindo o usuário validar cada registro. Fecha o loop de confiança que ficou aberto após o bug do catálogo vazio em prod (usuário via total zerado sem saber qual item estava sem catálogo).
 
 Read-only na v1 — todas as mutações continuam via chat (mantém interface única de escrita). V2 pode ganhar ações inline.
 
 Pré-requisitos: nenhum backend novo. `GET /days/today` e `GET /days/{date}` já entregam records completos (T-408 concluído). Reaproveita `CloseDayModal` (T-704) para o botão "Encerrar dia" no header.
+
+Status: **done** (spec #40 + feat #43 + navegação temporal #44, release v1.4.0). Bloco 7 (edição inline) entregue separadamente — ver bloco seguinte.
 
 - [x] **T-B601** — `apps/web/src/app/(app)/day/page.tsx` (server component) faz fetch de `GET /days/today` via `INTERNAL_API_URL` + delega renderização pra `DayView.tsx` (compartilhado com `/day/[date]`). `dynamic = 'force-dynamic'` porque records mudam a cada mensagem no chat. Header com data pt-BR + badge open/closed + `<CloseDayButton>` (novo client component que abre `CloseDayModal` reusado do chat; chama `useRouter().refresh()` pós-fechamento). SP-150. (M)
 - [x] **T-B602** — `MealSection.tsx` (server) recebe records agrupados por meal_slot via `groupBySlot` em `DayView`. Ordem fixa `breakfast → lunch → snack → dinner → unspecified`; slots vazios retornam null. Grid 12-col: Item/Quantidade/Calorias/P/C/G/Fib. Kcal parcial da refeição no cabeçalho + horário do primeiro registro. SP-151. (M)
@@ -368,7 +416,7 @@ Pré-requisitos: nenhum backend novo. `GET /days/today` e `GET /days/{date}` já
 - [x] **T-B605** — Link "Hoje" no header do `(app)/layout` entre "Chat" e "Semana" apontando pra `/day`. `proxy.ts` atualizado: `/day` e `/day/:path*` adicionados a `PROTECTED_PREFIXES` e `matcher`. SP-150. (XS)
 - [x] **T-B606** — `apps/web/src/app/(app)/day/[date]/page.tsx` valida param contra `/^\d{4}-\d{2}-\d{2}$/` (rejeita path traversal + strings arbitrárias antes de bater na API); fetch de `GET /days/{date}`; 404 amigável ("Nenhum registro encontrado nesta data") + link "Voltar para hoje". Read-only: `allowClose={false}` passado pro `DayView` — botão Encerrar não aparece pra dias passados. SP-154. (S)
 - [ ] **T-B607** — Testes: **adiado**. Web não tem framework de teste (vitest/jest) instalado — adicionar só pra 1 sanity de server component é overkill. Backend cobre o novo shape de `_load_food` via os 18 testes existentes de `test_day_close_report.py` (verificam `records.food[].items[]`). E2e manual: `pnpm dev`, cadastrar 3 itens no chat, abrir `/day`. Documentação separada fica pra próxima PR se necessário.
-- [ ] **T-B608** — Navegação temporal (SP-155): componente `DayNavigator.tsx` no header do `DayView` com botões **← Dia anterior**, **Próximo dia →** (escondido no dia atual), **Hoje** (escondido no dia atual) e input `<input type="date" max="{today}">` que submit navega pra `/day/[date]`. Aritmética de datas em `format.ts` (`addDays`, `todayLocalISO`). Página `/day/[date]` bloqueia data futura com componente `FutureDateNotice` antes de bater no backend. `WeeklyReportView.tsx` transforma coluna "Dia" da tabela `per_day` em `<Link href={`/day/${row.date}`}>`. (M) — SP-155.
+- [x] **T-B608** — Navegação temporal (SP-155): componente `DayNavigator.tsx` no header do `DayView` com botões **← Dia anterior**, **Próximo dia →** (escondido no dia atual), **Hoje** (escondido no dia atual) e input `<input type="date" max="{today}">` que submit navega pra `/day/[date]`. Aritmética de datas em `format.ts` (`addDays`, `todayLocalISO`). Página `/day/[date]` bloqueia data futura com componente `FutureDateNotice` antes de bater no backend. `WeeklyReportView.tsx` transforma coluna "Dia" da tabela `per_day` em `<Link href={`/day/${row.date}`}>`. (M) — SP-155. **Entregue em #44.**
 
 **Gate Bloco 6 — cumprido:** `/day` mostra dia atual completo com refeições agrupadas, macros por item, expansão de micros e seções auxiliares. `/day/[date]` renderiza dias passados read-only, alcançável via setas prev/next, input date ou link da tabela do `/weekly` (T-B608). Botão "Encerrar dia" reaproveita `CloseDayModal` sem duplicação. Backend estendido sem quebrar testes existentes.
 
@@ -377,6 +425,32 @@ Pré-requisitos: nenhum backend novo. `GET /days/today` e `GET /days/{date}` já
 - Filtros/ordenação (só a ordem natural: meal_slot → occurred_at).
 - Exportação CSV/PDF (feature B-06 do backlog).
 - Gráficos ou comparação com dias anteriores (v2+).
+
+---
+
+## Bloco 7 — Edição inline de registros no `/day` (SP-160..SP-169) ✅
+
+Meta: corrigir registros direto na página do dia, sem voltar ao chat. Restrito a dias abertos (Art. VIII); auditoria `action='correct'` `actor='user'`; snapshot recomputa do zero pós-mutação (Art. III §10).
+
+Feature spec própria em `../002-edicao-inline-day/` (spec #54 + feat #55, release v1.4.0). Task IDs `T-B200`.. do spec-kit 002; todas entregues. Diferenças da implementação real vs. planejado:
+
+Status: **done**.
+
+- [x] **T-B200** — Refactor: `correction_ops.py` extraído a partir de `services/correction.py` (funções puras `apply_water_change`/`apply_beverage_change`/`apply_activity_change`), reusado pelos novos PATCH sem duplicar lógica do chat. Testes do chat permaneceram verdes. (S)
+- [x] **T-B210** — `PATCH /records/water/{id}` — body `{volume_ml}`; ownership (Art. V §21), 404 se deletado/inexistente, 409 `conflict_closed_day` (INV-5), recompute + audit. (S) — SP-164.
+- [x] **T-B211** — `PATCH /records/beverage/{id}` — body `{volume_ml}`; recompute macros via `NutritionCalculator` a partir do fact referenciado; beverage sem `catalog_ref_id` mantém macros (warning `no_catalog_hit`). (M) — SP-165.
+- [x] **T-B212** — `PATCH /records/activity/{id}` — body `{duration_minutes?, intensity?, kcal_burned?}`; kcal explícito → `calc_method='user_manual'`; sem peso → warning `weight_kg_required_for_kcal`; `detected_name` não editável (400). (M) — SP-166.
+- [x] **T-B220** — `services/nutrient_fact_propagation.py` (INV-14): PATCH em `nutrient_facts` propaga macros sobrescritos para todos os `food_items`/`beverage_records` de dias **abertos** referenciando o fact, recomputando cada snapshot; itens em dias fechados → `skipped` (INV-5). Response do PATCH expõe `propagated`/`propagation_skipped`. (M) — SP-163.
+- [x] **T-B230** — Edição client-side: em vez das Server Actions planejadas, os forms reusam o hook `useEditForm` de `edit-forms.tsx` com `api()` do `api-client.ts` (padrão FE-04) + `router.refresh()` pós-sucesso (revalidar server components). (S) — SP-169.
+- [x] **T-B231** — `EditFoodItemForm` dentro de `FoodItemRow` (`<details>`): inputs `grams`/`ml`/`quantity` e, quando `has_catalog && source ∈ {label_ocr, manual}`, inputs per-100g; fact TBCA/USDA mostra "não editável". Dia fechado desabilita inputs. (M) — SP-160, SP-161, SP-162, SP-167.
+- [x] **T-B240** — `EditWaterForm`/`EditBeverageForm`/`EditActivityForm` em `AuxiliarySections.tsx` com mesmos padrões de dia fechado + loading/erro/a11y. (M) — SP-168.
+- [x] **T-B250** — Testes: `tests/test_patches_*.py` (happy/404/409/isolation/audit/snapshot), `test_nutrient_fact_propagation.py` (INV-14, INV-5); E2E Playwright em `apps/web/e2e/inline-edit.spec.ts`. (S) — INV-1/4/5/10/14.
+
+**Gate Bloco 7 — cumprido:** os quatro tipos de registro editáveis no `/day` com recompute + auditoria; propagação de `nutrient_fact` (INV-14) fecha o loop "contrário" (correção de rótulo reflete em dias abertos); E2E cobre o fluxo. Const. Art. III §10 e Art. VIII §28 verificadas.
+
+**Não inclui (por design):**
+- Mudança de `meal_slot`/horário por UI (v2).
+- Reabertura de dia encerrado (B-04 do backlog).
 
 ---
 

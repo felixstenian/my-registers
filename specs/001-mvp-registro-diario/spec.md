@@ -358,6 +358,8 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 
 **Não faz parte do MVP.** Toda esta seção está marcada `may` — implementação após Fase 9 concluída. Rastreia treinos de força de forma granular (sessão → exercícios → séries), coexistindo com o `log_activity` genérico.
 
+> **Expansão de módulo (v1.13):** a seção **3.16** adiciona o módulo de treino como produto (templates, chat dedicado, `/workouts`, fluxo guiado, imagem, seção no `/day` — SP-170..SP-179) sobre este núcleo, que permanece inalterado. Invariantes de treino renumeradas: INV-11→INV-15, INV-12→INV-16, INV-13→INV-17.
+
 **Modelo mental:** o usuário abre uma sessão de treino ("iniciando treino de push"), lista o exercício que vai fazer ("supino reto com barra") e reporta cada série ("20 kg da barra + 20 kg de cada lado × 10 reps"). Ao mandar outro nome de exercício, o anterior é implicitamente encerrado. Ao mandar "finalizar treino" ou encerrar o dia, a sessão inteira é consolidada em um `activity_record` com kcal totais estimados.
 
 **Design de coexistência com `log_activity` (SP-60..SP-64):**
@@ -370,7 +372,7 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 - **Given** usuário sem `workout_sessions.status='active'`.
 - **When** LLM detecta `intent=workout_start` (ex.: "iniciando treino de push", "vou treinar leg", "começando treino").
 - **Then** cria `workout_sessions` com `started_at=now()`, `status='active'`, `workout_type` classificado pela LLM em enum canônico (`push`, `pull`, `legs`, `upper`, `lower`, `full_body`, `cardio`, `other`) e `detected_name` livre para o usuário.
-- Se já existe sessão ativa, **encerra a anterior automaticamente** (INV-11) com `ended_at=now()`, `end_reason='auto_new_session'` — assistente avisa e mostra resumo curto.
+- Se já existe sessão ativa, **encerra a anterior automaticamente** (INV-15) com `ended_at=now()`, `end_reason='auto_new_session'` — assistente avisa e mostra resumo curto.
 - Backend responde com cabeçalho + "Nenhum exercício ainda — mande o nome do primeiro".
 
 **SP-121** (`may`) — Adicionar exercício + histórico contextual.
@@ -386,7 +388,7 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 **SP-122** (`may`) — Registro de séries.
 - **Given** sessão ativa com pelo menos um exercício.
 - **When** LLM detecta `intent=workout_log_set` com payload contendo `weight_kg`, `reps` e opcionalmente `notes`.
-- **Then** cria `workout_sets` ligado ao último exercício da sessão ativa (INV-12), com `sequence_index` auto-incrementado.
+- **Then** cria `workout_sets` ligado ao último exercício da sessão ativa (INV-16), com `sequence_index` auto-incrementado.
 - Parser de peso em pt-BR (feito pela LLM, backend só valida `weight_kg > 0`):
   - "20 kg" → 20
   - "20 kg da barra + 20 kg de cada lado" → 20 + 2×20 = 60
@@ -429,9 +431,9 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 - Se `exercise_name` ausente, LLM emite `clarify` pedindo qual exercício.
 
 **Invariantes adicionais:**
-- **INV-11** — No máximo uma `workout_sessions` por usuário com `status='active'`. Adicionar nova sessão auto-encerra a anterior.
-- **INV-12** — Todo `workout_sets` pertence ao **último** `workout_exercises` da sessão ativa (por `sequence_index`). Não existe "adicionar série ao exercício X que já não é o último".
-- **INV-13** — `activity_record` gerado por SP-126 tem `calc_method='workout_session'` — nunca é criado manualmente por outro fluxo. Correção/deleção desse `activity_record` NÃO afeta os `workout_sessions/exercises/sets` associados (idem: apagar séries não apaga o `activity_record` já gerado; consistência é responsabilidade de recompute manual, fora do MVP).
+- **INV-15** — No máximo uma `workout_sessions` por usuário com `status='active'`. Adicionar nova sessão auto-encerra a anterior.
+- **INV-16** — Todo `workout_sets` pertence ao **último** `workout_exercises` da sessão ativa (por `sequence_index`). Não existe "adicionar série ao exercício X que já não é o último".
+- **INV-17** — `activity_record` gerado por SP-126 tem `calc_method='workout_session'` — nunca é criado manualmente por outro fluxo. Correção/deleção desse `activity_record` NÃO afeta os `workout_sessions/exercises/sets` associados (idem: apagar séries não apaga o `activity_record` já gerado; consistência é responsabilidade de recompute manual, fora do MVP).
 
 **Dependências de dados:**
 - Novas tabelas: `workout_sessions`, `workout_exercises`, `workout_sets`. Alembic migration nova.
@@ -616,6 +618,72 @@ Revive parcialmente a intenção do T-409 original ("DayTable renderiza totals +
 
 ---
 
+### 3.16 Módulo de treino — expansão do cliente (SP-170..SP-179)
+
+**Estende §3.13** (núcleo de sessão estruturada, SP-120..SP-127, aceito e inalterado). O cliente refez o escopo de treino como **módulo de produto**: treinos reutilizáveis (`workout_templates`), chat de treino dedicado no **mesmo pool de `messages`** com filtro por `messages.via='workout'`, tela `/workouts` com abas Ativos/Inativos/Histórico, fluxo guiado de execução com cronômetro, registro por imagem e seção de treinos no `/day`. Tudo `pós-MVP` — implementação após Fase 9. As invariantes de treino foram renumeradas na v1.13 (INV-11→15, INV-12→16, INV-13→17) para liberar a faixa INV-18..21 abaixo.
+
+**SP-170** (`must`) — Módulo `/workouts`.
+- **Then** existe a rota `/workouts` protegida (em `PROTECTED_PREFIXES`/matcher do `proxy.ts`) com 3 abas: *Ativos*, *Inativos*, *Histórico*.
+- Aba *Ativos* lista `workout_templates` com `active=true`; *Inativos* lista `active=false`; *Histórico* é o log de sessões finalizadas (SP-177).
+- Navegação mobile (SP-NM) **não** ganha tab nova — acesso via link/CTA (decisão fixada nos trade-offs da feature).
+
+**SP-171** (`must`) — Cadastro de treino reutilizável por texto.
+- **Given** usuário no chat de treino.
+- **When** clica em "Cadastrar treino".
+- **Then** assistant envia mensagem amigável com **template de exemplo**: tipo (ex. `Musculação`/`Força`/`LPO`), agrupamento muscular para musculação (ex. `Peito + ombro + triceps`) e séries/repetições por exercício.
+- **When** usuário envia o texto do treino.
+- **Then** LLM lê (intent novo `workout_register_template`, payload `WorkoutTemplateIn`) e **cadastra** um novo `workout_templates` com `created_at` = data de cadastro, `active=true`, exercícios-alvo em `workout_template_exercises`.
+- Ambiguidade (agrupamento/frequência) → `clarify`; nenhum template é criado até confirmar.
+
+**SP-172** (`must`) — Status ativo/inativo de treino.
+- **Given** `workout_templates` existente.
+- **When** usuário inativa/reativa na listagem `/workouts` (PATCH `active`).
+- **Then** `active` inverte; aba *Ativos*/*Inativos* refletem; sessões **já finalizadas** permanecem no histórico (INV-19). Audit gravado (INV-10).
+
+**SP-173** (`must`) — Chat de treino dedicado.
+- **Given** rota `/workouts/chat` protegida.
+- **Then** reusa **exatamente** o padrão do chat de alimentação (composer + upload de mídia + polling `GET /chat/messages?after=` + `AssistantContent` + respostas pt-BR) no **mesmo pool de `messages`**: coluna nova `messages.via` (`'food'` default, `'workout'` para treino), `GET /chat/messages` e `MessageProcessor` filtram por `via`, prompt `system_v2.md` selecionado pela `via`. Migration `ALTER TABLE messages ADD COLUMN via TEXT NOT NULL DEFAULT 'food'` + índice `idx_messages_user_via ON messages(user_id, via, created_at)`.
+- **Header** do chat de treino exibe as **atividades realizadas no dia + calorias gastas** (variante do `DayTotalsBar` com foco em atividades).
+- **Then** no lugar do botão "Encerrar dia", dois botões: **"Cadastrar treino"** (→ SP-171) e **"Iniciar treino"** (→ SP-178). Com sessão ativa, o botão da direita vira **"Finalizar treino"** (mesma posição; conclui a sessão ativa). "Encerrar dia" continua disponível no chat de alimentação/modal.
+
+**SP-174** (`must`) — Registro de treino por imagem.
+- **Given** usuário envia imagem de atividade realizada no chat de treino.
+- **Then** LLM extrai da imagem **título**, **atividade**, **intensidade** (se houver) e **calorias gastas durante a atividade** (se houver); sem imagem/título, extrai do texto. Cria sessão/registro estruturado com `kcal_burned_reported` quando o valor veio na imagem/texto (INV-21); senão kcal estimada via MET no encerramento (SP-126). Imagem trafega por `POST /media` e segue as regras de CSP/media de `docs/deploy.md`.
+
+**SP-175** (`must`) — Edição de peso, séries e calorias gastas.
+- **Given** sessão de treino (ativa ou encerrada) e seus `workout_sets`/`activity_record` consolidado.
+- **When** usuário corrige via chat (intent `workout_correct`) **ou** via formulários inline na seção de treinos do `/day` (padrão `EditActivityForm`/inline editing SP-160..169).
+- **Then** PATCH em `workout_sets` (`weight_kg`, `reps`, `notes`) e/ou em `workout_sessions` (`kcal_burned_reported`, `duration_minutes`). Se a sessão está encerrada, **reconsolida** o `activity_record` da própria sessão (INV-20) para o `/day` refletir a correção. Dia fechado → 409 (INV-5). Audit gravado (INV-10).
+
+**SP-176** (`should`) — Seção de treinos no `/day`.
+- **Given** dia com treinos (sessões consolidadas em `activity_record`).
+- **Then** novo bloco **"Treinos"** lista os treinos do dia (nome, duração, kcal gastas; para força, exercícios com cargas/séries/reps). **Calorias gastas** entram no resumo do dia sempre que houver (reportadas ou consolidadas). Reusa `ActivitySection`/`AuxiliarySections` do `/day` (SP-150..154).
+
+**SP-177** (`must`) — Histórico de treinos paginado.
+- **Then** aba *Histórico* do `/workouts` lista sessões finalizadas: nome da atividade, data, hora inicial (se houver), calorias gastas; para musculação/variantes com carga inclui cargas, séries e reps por exercício. Paginação determinística (`page`/`page_size` ou cursor); sem duplicação/omissão entre páginas (RNF).
+
+**SP-178** (`must`) — Fluxo guiado "Iniciar treino".
+- **Given** botão "Iniciar treino" (SP-173).
+- **Then** backend busca `workout_templates` com `active=true` (INV-19) e lista como **botões**; escolhido, chat lista **todos os exercícios** do template (também botões); escolhido um exercício, busca no histórico a **última realização** daquele exercício e lista **carga por série e repetições** (SP-121). A sessão é criada com `workout_sessions.template_id` (INV-20).
+- **Then** o usuário conclui séries enviando texto com carga/reps (SP-122/`workout_log_set`). **A partir da primeira série**, o chat confirma o registro e **recapitula o último treino realizado** + exibe botão **"Ir para o próximo exercício"**, que re-lista os exercícios e repete a sequência.
+
+**SP-179** (`must`) — Cronômetro de treino.
+- **Given** treino iniciado no fluxo guiado (SP-178) ou sessão livre (SP-120).
+- **Then** cronômetro visível na tela do chat de treino; parado ao encerrar (via botão "Finalizar treino" ou `workout_end`). **Tempo do treino registrado** como `duration_minutes` da sessão (SP-126).
+
+**Invariantes adicionais (módulo):**
+- **INV-18** — `workout_templates` sempre filtrados por `user_id`; nunca existe query de template sem isolamento (Art. V §21).
+- **INV-19** — Template `active=false` não aparece na aba *Ativos* nem no seletor do fluxo guiado (SP-172/SP-178); sessões já finalizadas permanecem no histórico independente do status do template.
+- **INV-20** — Sessão guiada referencia o template escolhido (`workout_sessions.template_id`); inativar/alterar template **não** afeta sessões finalizadas (snapshot congelado). Edição de weight/reps/kcal em sessão encerrada reconsolida o `activity_record` da própria sessão.
+- **INV-21** — kcal de treino: quando o usuário informa kcal (texto/imagem/edição), `kcal_burned_reported` é a fonte (consolidada em `activity_record`, `met_value=NULL`, `calc_method` reflete origem); senão, estimativa MET fixa por `workout_type` pelo backend. LLM nunca calcula (Art. II).
+
+**Dependências de dados:**
+- Coluna `messages.via` (+ índice `idx_messages_user_via`) e tabelas `workout_templates`, `workout_template_exercises`. Alembic migration nova. `workout_sessions` ganha `template_id` FK opcional e `kcal_burned_reported`.
+- `Intent` enum ganha `workout_register_template` e `workout_correct` (além dos 5 do núcleo). Payloads novos `WorkoutTemplateIn`, `WorkoutCorrectSetIn`. Prompt `system_v2.md`: seleção por `via` e regras novas.
+- Endpoints novos: `GET/PATCH /workouts/templates[/{id}]`, `GET /workouts/templates/{id}/exercises`, `GET /workouts/history`, `PATCH /records/workout-sets/{id}`, `PATCH /records/workout-sessions/{id}`. Chat de treino reusa `POST/GET /chat/messages` com `via:'workout'`.
+
+---
+
 ## 4. Requisitos não-funcionais
 
 ### 4.1 Segurança
@@ -734,3 +802,4 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-28** — v1.11. SP-154 esclarecido: `/day/[date]` NÃO é read-only universal — quando o dia passado ainda está `status='open'`, o botão "Encerrar dia" aparece pra permitir encerramento retroativo (usuário esqueceu de encerrar). Só edição de records fica exclusiva do chat. Motivador: comportamento anterior `allowClose={false}` bloqueava indevidamente esse fluxo.
 - **2026-07-28** — v1.12. **§3.14 (Bloco 5) reformulado.** SP-140 agora produz card com 3 botões clicáveis por item (Cadastrar manual, Foto do rótulo com promoção acoplada, Descartar). Nova SP-143 (`should`): `POST /chat/messages` aceita `promote_food_item_id` para acoplar upload de rótulo → promoção do item legado numa única viagem. Removidos: `PendingItemsModal`, endpoint `POST /records/food-items/{id}/confirm`, `ConfirmItemButton` do `/day`, intent LLM `confirm_items`, `ConfirmationService`, e SP-24a deprecated. Campo `needs_confirmation` fica no schema mas nunca mais é setado — frontend usa `has_catalog` como único sinal. Motivador: sobreposição semântica confusa entre "confirmar" e "resolver item sem catálogo".
 - **2026-07-27** — v1.8. Nova seção 3.14 "Recuperação de itens sem catálogo" (SP-140..SP-142, todos `should`, pós-MVP): prompt de recuperação na assistant message quando há `no_catalog_hit`, endpoint `POST /nutrient-facts/manual` para cadastro sem foto, promoção opcional de `food_item` legado no mesmo cadastro. Também: limpeza de duplicação em §3.13 (bloco PWA aparecia duas vezes idênticas por artefato de merge).
+- **2026-08-14** — v1.13. **Renumeração de invariantes de treino + módulo de treino (SP-170..SP-179).** (1) Colisão de numeração: v1.6 (workout) e v1.7 (PWA/SW) definiram ambos INV-11. Como o SW INV-11 já está em produção (CI `verify:sw`, `T-1002`, teste em `verify-sw.mjs`), a faixa de treino foi renumerada: **INV-11→INV-15**, **INV-12→INV-16**, **INV-13→INV-17**. §6 mantém INV-11 = SW. Corrigidos em conjunto: `tasks.md` (Bloco 3), `research.md` (ADR-011), `specs/features/INDEX.md` e docs da feature `workout-session-tracking`. (2) Nova **§3.16** formaliza a expansão do cliente: módulo de treino com `workout_templates` (SP-171 cadastro por texto, SP-172 ativo/inativo), chat dedicado no mesmo pool de `messages` via `messages.via='workout'` (SP-173) — decisão "pool único com filtro" fixada, tela `/workouts` com abas Ativos/Inativos/Histórico (SP-170/SP-177), fluxo guiado com botões e "Ir para o próximo exercício" (SP-178) + cronômetro (SP-179), registro por imagem (SP-174), edição de peso/séries/kcal via chat e `/day` (SP-175), seção de treinos no `/day` (SP-176). Novos invariantes **INV-18..INV-21**. Núcleo §3.13 (SP-120..127, `may`) permanece inalterado.

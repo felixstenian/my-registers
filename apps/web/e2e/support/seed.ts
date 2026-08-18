@@ -8,19 +8,13 @@
  */
 
 import type { Page } from '@playwright/test';
-import { API_BASE } from './constants';
-
-type QueueLlmFn = (payload: {
-  kind: 'record_intent' | 'record_intent_error' | 'narrative' | 'weekly_narrative';
-  envelope?: Record<string, unknown>;
-  error?: string;
-  text?: string | null;
-}) => Promise<void>;
+import type { QueueLlmFn } from './types';
+import { postChat, waitForAssistant } from './chat';
 
 /**
  * Registra almoco arroz + frango (492 kcal esperados). Enfileira o envelope
  * `log_food`, POSTa em /chat/messages (worker background processa via
- * TestAnthropicClient) e faz busy-wait em /days/today ate kcal_in > 0.
+ * TestAnthropicClient) e aguarda a assistant message commitada.
  */
 export async function seedLunchMeal({
   page,
@@ -60,13 +54,7 @@ export async function seedLunchMeal({
     },
   });
 
-  const post = await page.request.post(`${API_BASE}/chat/messages`, {
-    data: { text: 'almoço: 150g de arroz e 180g de frango', media_ids: [] },
-  });
-  if (!post.ok()) {
-    throw new Error(`seedLunchMeal POST /chat/messages: ${post.status()} ${await post.text()}`);
-  }
-  const userMessageId = ((await post.json()) as { message_id: string }).message_id;
+  const userMessageId = await postChat(page, 'almoço: 150g de arroz e 180g de frango');
 
   // Poll /chat/messages?after=<user_id> ate assistant aparecer. Aguardar
   // kcal_in>0 nao seria seguro: /days/today faz recompute automatico se
@@ -74,15 +62,5 @@ export async function seedLunchMeal({
   // pode escrever snapshot com food_items vazios e sobrescrever o valor
   // real que o worker persistiu. Aguardar assistant garante que o worker
   // ja commitou tudo (food_items + snapshot + assistant).
-  for (let i = 0; i < 40; i++) {
-    const res = await page.request.get(
-      `${API_BASE}/chat/messages?after=${userMessageId}`,
-    );
-    if (res.ok()) {
-      const body = (await res.json()) as { messages: { role: string }[] };
-      if (body.messages.some((m) => m.role === 'assistant')) return;
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error('seedLunchMeal: assistant message nao apareceu em 10s');
+  await waitForAssistant(page, userMessageId, 'seedLunchMeal');
 }

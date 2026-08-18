@@ -76,10 +76,17 @@ test('TC-E-001: registra refeição por chat com Enter e DayTotalsBar atualiza',
     timeout: 5000,
   });
 
-  // Typing indicator visível enquanto aguarda assistant.
-  await expect(page.getByLabel(/assistente digitando/i)).toBeVisible({
-    timeout: 5000,
-  });
+  // Typing indicator visível enquanto aguarda assistant — MAS se o worker
+  // responder rápido (primeiro poll ~1,5s), o indicador some do DOM antes
+  // do assert rodar. Race conhecido (flake do TC-E-001). Em vez de esperar
+  // o indicador cegamente, aguarda o PRIMEIRO sinal determinístico:
+  // indicador visível ou resposta já renderizada.
+  await Promise.race([
+    expect(page.getByLabel(/assistente digitando/i)).toBeVisible({
+      timeout: 5000,
+    }),
+    expect(page.getByText(/registrei/i)).toBeVisible({ timeout: 5000 }),
+  ]);
 
   // Assistant message aparece via poll (frontend a cada 1500ms).
   // O formatter emite "Registrei" no cabeçalho da refeição.

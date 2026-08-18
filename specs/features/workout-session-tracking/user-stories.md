@@ -1,31 +1,50 @@
-# Histórias de Usuário — Treino estruturado (Bloco 3)
+# Histórias de Usuário — Módulo de Treino (Workout Module)
 
-> **Rastreabilidade**: SP-120..SP-127, INV-11/12/13 · ADR-011 · Status: **`documented-only`** — feature planejada, ainda não implementada.
+> **Rastreabilidade**: SP-120..SP-127, INV-15/16/17 (núcleo) · SP-170..179 propostos (módulo) · ADR-011 · Status: **`documented-only`** — feature planejada + expansão do cliente (2026-08-14), ainda não implementada.
 
 ## Personas
 
-- **Felix (levantador de peso)**: quer detalhar séries por exercício e acompanhar PR ao longo do tempo.
-- **Felix (cardio + força)**: quer manter o fluxo simples do "corri 40 min" sem ser obrigado a abrir sessão.
-- **Felix (depois de esquecido)**: esqueceu de encerrar o treino no app; quer que o sistema resolva ao fechar o dia.
+- **Felix (levantador de peso)**: quer detalhar séries por exercício, acompanhar PR e executar treinos guiados.
+- **Felix (cardio + força)**: quer manter o fluxo simples do "corri 40 min" sem obrigação de abrir sessão.
+- **Felix (frequente)**: quer cadastrar treinos reutilizáveis (musculação com agrupamento muscular) e iniciá-los com um toque, cronometrando o tempo.
+- **Felix (visual)**: quer enviar fotos da atividade realizada e que o app extraia título, atividade, intensidade e kcal.
+- **Felix (depois de esquecido)**: esqueceu de encerrar o treino; quer que o sistema resolva ao fechar o dia.
 
 ---
 
-### US-001 — Iniciar treino de força
+### US-001 — Iniciar treino de força guiado
 **Como** Felix (levantador de peso),
-**Quero** dizer "iniciando treino de push" no chat e criar a sessão,
-**Para que** eu registre exercícios/séries subsequentes como parte dela.
+**Quero** tocar "Iniciar treino", escolher um treino cadastrado e começar pelos exercícios,
+**Para que** eu execute o treino seguindo meus templates sem lembrar cada passo.
 
 **Critérios de Aceitação resumidos:**
-- [ ] Cria `workout_sessions` com `workout_type` classificado pela LLM.
-- [ ] Se já havia sessão ativa, encerra a anterior automaticamente.
-- [ ] Assistant avisa e mostra resumo curto.
+- [ ] Botão "Iniciar treino" lista `workout_templates` com `active=true` como botões.
+- [ ] Ao escolher, chat lista **todos os exercícios** do template como botões.
+- [ ] Ao escolher um exercício, chat busca a última realização e lista cargas/reps.
+- [ ] Cada série concluída é registrada; a partir da 1ª o chat confirma + recapitula último treino + botão "Ir para o próximo exercício".
 
 **Notas:**
-- Fonte: SP-120, INV-11. [Implementação não localizada]
+- Fonte: RF-020 → SP-178 (proposto). [Implementação não localizada]
 
 ---
 
-### US-002 — Adicionar exercício com histórico contextual
+### US-002 — Cadastrar treino reutilizável
+**Como** Felix (frequente),
+**Quero** tocar "Cadastrar treino", ver um template de exemplo e enviar meu treino por texto,
+**Para que** o app crie um treino reutilizável com data de cadastro.
+
+**Critérios de Aceitação resumidos:**
+- [ ] Botão "Cadastrar treino" envia mensagem amigável com exemplo (tipo, agrupamento muscular p/ musculação, séries/reps).
+- [ ] LLM lê o texto e cria `workout_templates` + exercícios-alvo.
+- [ ] `created_at` = data de cadastro informado na confirmação.
+- [ ] Novo treino nasce `active=true`.
+
+**Notas:**
+- Fonte: RF-015 → SP-171 (proposto). [Implementação não localizada]
+
+---
+
+### US-003 — Adicionar exercício com histórico contextual (núcleo SP-121)
 **Como** Felix (levantador de peso),
 **Quero** adicionar "supino reto com barra" e ver minha última sessão + PR,
 **Para que** eu saiba quanto tirei antes e tente superar.
@@ -40,7 +59,7 @@
 
 ---
 
-### US-003 — Registrar séries em pt-BR
+### US-004 — Registrar séries em pt-BR (núcleo SP-122)
 **Como** Felix (levantador de peso),
 **Quero** dizer "3×8 60 kg" e criar 3 séries iguais,
 **Para que** eu não precise repetir número de vezes.
@@ -56,119 +75,129 @@
 
 ---
 
-### US-004 — Múltiplos exercícios numa sessão
+### US-005 — Encerrar treino com cronômetro e tempo registrado
 **Como** Felix (levantador de peso),
-**Quero** adicionar "leg press" depois de ter "agachamento" sem encerrar explicitamente,
-**Para que** eu flua pela sessão sem overhead.
+**Quero** finalizar o treino pelo botão "Finalizar treino" (ou texto) e que o cronômetro pare,
+**Para que** o tempo do treino e o gasto calórico entrem no registro.
 
 **Critérios de Aceitação resumidos:**
-- [ ] Adicionar B encerra implicitamente A.
-- [ ] Séries seguintes passam a pertencer a B.
-- [ ] Sem `ended_at` no exercício (só `sequence_index`).
+- [ ] Cronômetro exibido ao iniciar treino; **parado** ao encerrar.
+- [ ] "Finalizar treino" aparece no mesmo lugar do "Iniciar treino" quando há treino ativo.
+- [ ] `duration_minutes = ended_at - started_at` persistido.
+- [ ] `consolidate_to_activity` cria `activity_record` (kcal reportada ou MET).
 
 **Notas:**
-- Fonte: SP-123, INV-12. [Implementação não localizada]
+- Fonte: RF-021 → SP-179; RF-019 → SP-173; SP-124. [Implementação não localizada]
 
 ---
 
-### US-005 — Encerrar treino explicitamente
-**Como** Felix (levantador de peso),
-**Quero** dizer "finalizar treino" e receber resumo,
-**Para que** eu finalize a sessão e saiba gasto calórico estimado.
-
-**Critérios de Aceitação resumidos:**
-- [ ] `status='ended'`, `end_reason='user'`.
-- [ ] Dispara SP-126 (consolida em `activity_record`).
-- [ ] Assistant devolve "Treino de push encerrado (58 min). 4 ex · 14 séries · ~380 kcal".
-
-**Notas:**
-- Fonte: SP-124. [Implementação não localizada]
-
----
-
-### US-006 — Esquecer de encerrar e ainda assim fechar o dia
+### US-006 — Esquecer de encerrar e ainda assim fechar o dia (núcleo SP-125)
 **Como** Felix (depois de esquecido),
 **Quero** que fechar o dia encerre minha sessão ativa automaticamente,
-**Para que** eu não fique com sessão órfã e o gasto calórico entre no snapshot.
+**Para que** eu não fique com sessão órfã e o gasto entre no snapshot.
 
 **Critérios de Aceitação resumidos:**
-- [ ] `_handle_close_day` encerra sessão ativa com `end_reason='auto_close_day'`.
-- [ ] Ordem crítica: encerra **antes** do recompute.
-- [ ] `activity_record` aparece no snapshot do dia.
+- [ ] `_handle_close_day` encerra sessão ativa com `end_reason='auto_close_day'` **antes** do recompute.
+- [ ] `activity_record` aparece no snapshot.
 
 **Notas:**
 - Fonte: SP-125. [Implementação não localizada]
 
 ---
 
-### US-007 — Snapshot e semanal continuam agnósticos
+### US-007 — Snapshot e semanal continuam agnósticos (núcleo SP-126, ADR-011)
 **Como** Felix (cardio + força),
-**Quero** que minha corrida e meu treino ambos apareçam como atividades do dia,
-**Para que** eu tenha uma visão consolidada sem precisar pensar nas tabelas.
+**Quero** que corrida e treino apareçam como atividades no dia,
+**Para que** eu tenha visão consolidada sem pensar nas tabelas.
 
 **Critérios de Aceitação resumidos:**
 - [ ] Sessão encerrada cria 1 `activity_record` com `activity_type='strength'`.
-- [ ] `daily-snapshot` lê `activity_records` como fonte única (`kcal_out`).
-- [ ] `weekly-report` idem.
+- [ ] `daily-snapshot` e `weekly-report` leem `activity_records` (fonte única `kcal_out`).
 
 **Notas:**
-- Fonte: SP-126, ADR-011 (decisão de design). [Implementação não localizada]
+- Fonte: SP-126, ADR-011.
 
 ---
 
-### US-008 — kcal estimado mesmo sem peso no perfil
+### US-008 — kcal estimado mesmo sem peso no perfil (núcleo SP-126)
 **Como** Felix (levantador de peso),
-**Quero** que o treino seja registrado mesmo se eu não preenchi `weight_kg` no perfil,
-**Para que** eu não perca os registros por causa de um campo opcional.
+**Quero** que o treino seja registrado mesmo se eu não preenchi `weight_kg`,
+**Para que** eu não perca registros por um campo opcional.
 
 **Critérios de Aceitação resumidos:**
-- [ ] `activity_record.kcal_burned=NULL` se sem `weight_kg`.
+- [ ] `activity_record.kcal_burned=NULL` se não há valor reportado nem `weight_kg`.
 - [ ] Warning `weight_kg_required_for_kcal`.
-- [ ] Treino persistido e histórico disponível.
-
-**Notas:**
-- Fonte: SP-126. [Implementação não localizada]
 
 ---
 
-### US-009 — Consultar histórico de um exercício
-**Como** Felix (levantador de peso),
-**Quero** perguntar "qual meu PR no agachamento?" e ver últimos 3 treinos + record,
-**Para que** eu acompanhe evolução sem adivinhar datas.
+### US-009 — Registrar atividade por imagem
+**Como** Felix (visual),
+**Quero** enviar uma foto da atividade realizada,
+**Para que** o app extraia título, atividade, intensidade e calorias gastas.
 
 **Critérios de Aceitação resumidos:**
-- [ ] `intent=workout_history` com `exercise_name`.
-- [ ] Backend responde últimas 3 sessões + PR (mesmo formato do SP-121, sem criar registro).
-- [ ] `exercise_name` ausente → `clarify`.
+- [ ] Imagem anexada ao chat de treino (mesmo `POST /media`).
+- [ ] LLM extrai `WorkoutImageIn`: título, atividade, intensidade (se houver), kcal (se houver).
+- [ ] kcal visível na imagem vira `kcal_burned_reported` (INV-21).
 
 **Notas:**
-- Fonte: SP-127. [Implementação não localizada]
+- Fonte: RF-022 → SP-174 (proposto). [Implementação não localizada]
 
 ---
 
-### US-010 — Corrigir/excluir treino não apaga detalhes
+### US-010 — Corrigir peso, séries e kcal via chat e /day
 **Como** Felix (levantador de peso),
-**Quero** que apagar o `activity_record` consolidado (do snapshot) não apague minhas séries,
-**Para que** eu mantenha histórico detalhado mesmo desfazendo o fechamento do dia.
+**Quero** corrigir peso, séries ou calorias gastas pelo chat e também pelo resumo do dia,
+**Para que** meus registros fiquem fiéis ao que realmente fiz.
 
 **Critérios de Aceitação resumidos:**
-- [ ] INV-13: delete de `activity_record` não afeta `workout_sessions/exercises/sets`.
-- [ ] Delete de `workout_sets` não apaga `activity_record` já gerado.
-- [ ] Consistência via recompute manual (fora do escopo do MVP-de-treino).
+- [ ] `intent=workout_correct` ajusta `workout_sets` (peso/reps) e `kcal_burned_reported` da sessão.
+- [ ] `/day` tem seção de treinos com edição inline (padrão `EditActivityForm`).
+- [ ] Dia fechado → 409; audit gravado; sessão encerrada → reconsolidação (INV-20).
 
 **Notas:**
-- Fonte: INV-13, ADR-011. [Implementação não localizada]
+- Fonte: RF-023 → SP-175 (proposto). [Implementação não localizada]
 
 ---
 
-### US-011 — Auditoria das mutações de treino
+### US-011 — Histórico de treinos paginado
+**Como** Felix (levantador de peso),
+**Quero** ver o log dos treinos realizados com paginação,
+**Para que** eu acompanhe evolução sem procurar em listas infinitas.
+
+**Critérios de Aceitação resumidos:**
+- [ ] Aba *Histórico* lista sessões finalizadas: nome, data, hora, kcal (e cargas/séries/reps p/ força).
+- [ ] Paginação determinística (sem duplicar/omitir itens entre páginas).
+- [ ] Template `active=false` não remove sessões já finalizadas (INV-19).
+
+**Notas:**
+- Fonte: RF-017 → SP-177 (proposto). [Implementação não localizada]
+
+---
+
+### US-012 — Ativar/inativar treino na listagem
+**Como** Felix (frequente),
+**Quero** desativar treinos que não vou usar e ativá-los depois,
+**Para que** a lista de início fique enxuta.
+
+**Critérios de Aceitação resumidos:**
+- [ ] Toggle `active` na listagem `/workouts`.
+- [ ] Abas *Ativos* / *Inativos* separam por status.
+- [ ] Inativo não aparece no fluxo guiado (INV-19).
+
+**Notas:**
+- Fonte: RF-016 → SP-172 (proposto). [Implementação não localizada]
+
+---
+
+### US-013 — Auditoria das mutações de treino (núcleo INV-10)
 **Como** Felix (segurança),
-**Quero** que toda mutação em `workout_*` grave `audit_events`,
+**Quero** que toda mutação em `workout_*` e `workout_templates` grave `audit_events`,
 **Para que** eu tenha trilha do que foi registrado/corrigido/excluído.
 
 **Critérios de Aceitação resumidos:**
-- [ ] INV-10: `audit_events` em CREATE/UPDATE/DELETE de sessions/exercises/sets.
+- [ ] `audit_events` em CREATE/UPDATE/DELETE de templates/sessions/exercises/sets.
 - [ ] `actor`, `before`, `after`, `message_id` presentes.
 
 **Notas:**
-- Fonte: INV-10. [Implementação não localizada]
+- Fonte: INV-10.

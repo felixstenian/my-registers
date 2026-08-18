@@ -1,16 +1,19 @@
 import { defineConfig, devices } from '@playwright/test';
+import { WEB_BASE } from './e2e/support/constants';
 
 /**
  * Config Playwright — E2E golden path (T-E04..T-E11).
  *
  * Stack alvo: docker-compose.e2e.yml (api :8001, web :3001, APP_ENV=test).
- * Sobe via `./scripts/e2e-bootstrap.sh` antes de rodar.
+ * Sobe via `./scripts/e2e-bootstrap.sh` antes de rodar — o `globalSetup`
+ * abaixo falha rápido com instrução clara caso a stack não esteja no ar.
  *
  * `workers: 1` intencional na v1: fixtures resetam DB via /test/reset,
  * então paralelismo cross-spec quebraria isolamento. Se virar gargalo,
  * migrar pra reset-por-transação no backend.
  */
 export default defineConfig({
+  globalSetup: './e2e/global-setup.ts',
   testDir: './e2e',
   testIgnore: ['**/support/**'],
   fullyParallel: false,
@@ -21,7 +24,7 @@ export default defineConfig({
     ? [['html', { open: 'never' }], ['github']]
     : [['html', { open: 'never' }], ['list']],
   use: {
-    baseURL: 'http://localhost:3001',
+    baseURL: WEB_BASE,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

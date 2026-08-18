@@ -17,6 +17,26 @@ Cada release tem tag Git `vX.Y.Z` e uma entrada correspondente em [GitHub Releas
 
 ---
 
+## [1.6.0] — 2026-08-18
+
+Melhoria da navegação mobile. Correção da configuração do setup de testes e2e. Atualização e edição da documentação sobre a feature de workouts.
+
+### Adicionado
+- **#63  - SP-NM-01..07 - header sticky + bottom tab bar mobile** - Mobile: menu primario sempre ao alcance — bottom tab bar (Chat · Hoje · Semana) com aria-current, hit-target 48px e safe-area. Header: sticky top-0 + colapso em <md (nav inline e email ocultos); root min-h-dvh. /chat: 100vh -> 100dvh + reserva de espaco p/ a barra — composer e disclaimer (Art. VII 26) nunca ficam cobertos. Desktop: inalterado (nav inline no header, sem barra). ([#63](https://github.com/felixstenian/my-registers/pull/63)).
+
+### Corrigido
+- **#64 - endurece login flake e setup Playwright (P1-P6)** - Endurece o setup E2E do apps/web e o flake de hidratação do login no Next dev (testes de auth/FE-03). Flake de hidratação: loginViaForm agora aguarda a hidratação React (__reactProps/__reactFiber) antes do click em "Entrar"; timeouts de navegação pós-login em 15000ms (router.replace lento no Next dev sob carga). Aplicado em auth.spec.ts e nos 7 testes de login de error-handling.spec.ts. P1 — chat.spec.ts: Promise.race entre "typing indicator visível" e /registrei/i já renderizado. P2 — novo e2e/global-setup.ts: checa /health + /login com AbortSignal.timeout(5000) e instruções ./scripts/e2e-bootstrap.sh. P3 — módulos compartilhados e2e/support/chat.ts (postChat/waitForAssistant) e types.ts; seed.ts/test.ts/inline-edit.spec.ts refatorados. P4 — error-handling.spec.ts: revalidação determinística do DayTotalsBar via envelope log_food + expect.poll com contador de aborts. P5 — navigation-mobile.spec.ts: profiles Pixel 7/Desktop Chrome derivados sem defaultBrowserType. P6 — constants.ts com API_BASE/WEB_BASE via env (defaults 8001/3001); baseURL derivado. ([#64](https://github.com/felixstenian/my-registers/pull/64)).
+
+
+### Documentação
+- **#62 - spec(003): SP-NM-01..07 - navegacao mobile (spec + plan + tasks)** SDD para a navegação mobile (header sticky + bottom tab bar), fechando o fluxo spec: -> plan: -> tasks: nesta branch. ([#62](https://github.com/felixstenian/my-registers/pull/62)).
+- **#65 - SP-170..SP-179 - módulo de treino (workout module) + renumeração INV** - Formaliza no spec canônico a expansão do cliente de treino como módulo de produto e resolve a colisão de numeração de invariantes descoberta entre workout (§3.13 v1.6) e PWA/SW (§3.13 v1.7). 2. Nova §3.16 — Módulo de treino (SP-170..SP-179). Estende §3.13 (núcleo SP-120..127 inalterado, may). SPs must/should, pós-MVP: -> SP-170 /workouts (abas Ativos/Inativos/Histórico) -> SP-171 cadastro de treino por texto (template de exemplo + LLM) -> SP-172 status ativo/inativo -> SP-173 chat de treino dedicado — mesmo pool de messages com via='workout' (decisão fixada: Opção A), header com atividades/kcal do dia, botões Cadastrar/Iniciar/Finalizar treino -> SP-174 registro por imagem (título/atividade/intensidade/kcal) -> SP-175 edição de peso/séries/kcal via chat e /day (reconsolida se encerrada) -> SP-176 seção de treinos no /day (should) -> SP-177 histórico paginado -> SP-178 fluxo guiado com botões + "Ir para o próximo exercício" -> SP-179 cronômetro + tempo registrado. ([#65](https://github.com/felixstenian/my-registers/pull/65)).
+- **#66 - SP-170..SP-179 - módulo de treino (E1..E6 + gates)** - Atualiza specs/001-mvp-registro-diario/plan.md (HOW) para a expansão de treino como módulo — spec v1.13 (§3.16), SP-170..SP-179. Mapa SP → arquivos (§1): -> SP-120..SP-127 — núcleo hierárquico (sessão → exercício → séries), app/services/workout.py + models/repository + MessageProcessor/IntentDispatcher. -> SP-170..SP-179 — módulo: workout_templates, rotas /workouts/*, apps/web/src/app/(app)/workouts/*, filtro messages.via (SP-173), seção/edição no /day. ([#66](https://github.com/felixstenian/my-registers/pull/66)).
+- **#67 - SP-170..SP-179 - T-B309..T-B328 módulo de treino** - Adiciona as tarefas atômicas do módulo de treino (spec §3.16, plan §8 E1..E6) ao Bloco 3 de specs/001-mvp-registro-diario/tasks.md: T-B309..T-B328 (20 tarefas). ([#67](https://github.com/felixstenian/my-registers/pull/67)).
+
+
+---
+
 ## [1.5.0] — 2026-08-14
 
 Correção de dados legados (itens com `kcal=0`) + reseed do catálogo TBCA + endurecimento de deploy e sessão. Formaliza o hotfix aplicado em prod em 2026-08-13 (schema drift), que havia sido documentado como "v1.4.1" mas nunca recebeu tag/release.

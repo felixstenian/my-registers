@@ -8,37 +8,10 @@
 
 import type { Page } from '@playwright/test';
 import { API_BASE } from './support/constants';
+import { postChat, waitForAssistant } from './support/chat';
 import { seedLunchMeal } from './support/seed';
+import type { QueueLlmFn } from './support/types';
 import { expect, test } from './support/test';
-
-type QueueLlmFn = (payload: {
-  kind: 'record_intent' | 'record_intent_error' | 'narrative' | 'weekly_narrative';
-  envelope?: Record<string, unknown>;
-  error?: string;
-  text?: string | null;
-}) => Promise<void>;
-
-async function waitForAssistant(page: Page, afterMessageId: string): Promise<void> {
-  for (let i = 0; i < 40; i++) {
-    const res = await page.request.get(`${API_BASE}/chat/messages?after=${afterMessageId}`);
-    if (res.ok()) {
-      const body = (await res.json()) as { messages: { role: string }[] };
-      if (body.messages.some((m) => m.role === 'assistant')) return;
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error('Assistant message did not appear in 10s');
-}
-
-async function postChat(page: Page, text: string): Promise<string> {
-  const post = await page.request.post(`${API_BASE}/chat/messages`, {
-    data: { text, media_ids: [] },
-  });
-  if (!post.ok()) {
-    throw new Error(`POST /chat/messages failed: ${post.status()} ${await post.text()}`);
-  }
-  return (await post.json()).message_id;
-}
 
 async function seedWater(page: Page, queueLlm: QueueLlmFn): Promise<void> {
   await queueLlm({

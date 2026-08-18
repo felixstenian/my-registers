@@ -33,7 +33,7 @@ export function DayView({
   const dayClosed = data.status === 'closed';
 
   return (
-    <main className="mx-auto max-w-4xl space-y-4 p-4">
+    <main className="mx-auto max-w-4xl space-y-4 p-4 pb-[calc(env(safe-area-inset-bottom)+3.5rem)] md:pb-4">
       <RefreshOnFocus />
       <header className="space-y-3 border-b border-slate-200 pb-3 dark:border-slate-800">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
