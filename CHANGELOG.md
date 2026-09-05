@@ -17,6 +17,20 @@ Cada release tem tag Git `vX.Y.Z` e uma entrada correspondente em [GitHub Releas
 
 ---
 
+## [1.6.1] — 2026-09-04
+
+Manutenção de dependências e segurança do frontend. Sem mudança funcional.
+
+### Segurança
+- **#84 - bump do grupo npm_and_yarn (next, postcss, nanoid)** - Dependabot atualiza em 2 diretórios (raiz e `apps/web`): `next` 16.2.10→16.2.11, `postcss` 8.4.49→8.5.23 e `nanoid` 3.3.16→3.3.18, resolvendo 34 vulnerabilidades (20 high, 14 moderate). ([#84](https://github.com/felixstenian/my-registers/pull/84)).
+- **#78 - configuração do Dependabot** - Adiciona `.github/dependabot.yml` (ecossistema `npm`, grupo `npm_and_yarn`, raiz + `apps/web`). ([#78](https://github.com/felixstenian/my-registers/pull/78)).
+- **#79 - SECURITY.md** - Adiciona política de segurança e canal de relato de vulnerabilidades. ([#79](https://github.com/felixstenian/my-registers/pull/79)).
+
+### Deploy
+Deploy automático via `deploy.yml` ao mergear em `main`; nenhuma operação manual na VPS necessária.
+
+---
+
 ## [1.6.0] — 2026-08-18
 
 Melhoria da navegação mobile. Correção da configuração do setup de testes e2e. Atualização e edição da documentação sobre a feature de workouts.
