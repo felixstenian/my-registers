@@ -91,6 +91,18 @@ Uso pessoal diário. Fluente em pt-BR, familiar com macros e treino. Acessa em d
 - Todas as mensagens ficam em `messages` para sempre. Correção/exclusão de registros **não** apaga mensagens.
 - `GET /chat/messages?limit=50&before=<id>` pagina cronologicamente.
 
+**SP-180** (`must`) — Carga inicial do chat restrita ao dia corrente.
+- **Given** o usuário abre (ou recarrega) `/chat` sem cursor de paginação.
+- **When** `GET /chat/messages?limit=100` (sem `after` nem `before`).
+- **Then** a resposta devolve apenas as mensagens cujo `created_at` pertence ao **dia local corrente** do usuário (`users.timezone`, convertido para UTC no servidor), da mais antiga para a mais recente, limitada ao `limit`.
+- A resposta inclui `has_more_before=true` quando existem mensagens mais antigas que a janela devolvida (dia corrente truncado por `limit`, ou dias anteriores).
+
+**SP-181** (`must`) — Paginação para trás (scroll para o topo do chat).
+- **Given** a última resposta devolveu `has_more_before=true`.
+- **When** o usuário rola o chat até o topo.
+- **Then** o cliente chama `GET /chat/messages?before=<id_mais_antigo>&limit=50`, **sem** filtro de dia (atravessa dias anteriores), e **prepende** o resultado mantendo a posição de scroll.
+- A resposta devolve as mensagens imediatamente anteriores à âncora, da mais antiga para a mais recente, e `has_more_before=false` quando o histórico terminou — o cliente para de buscar.
+
 **SP-13** (`must`) — Mensagem ambígua.
 - Given "hoje foi puxado" (sem info registrável)
 - Then assistente pede esclarecimento; **nenhum** registro é criado.
@@ -748,6 +760,8 @@ Espelham os artigos I-IX da Constituição. Cada um tem teste automatizado obrig
 - **INV-9** — LLM só via `tool_use` (Const. §7).
 - **INV-10** — Toda mutação grava `audit_events` (Const. §11).
 - **INV-11** — Service Worker nunca cacheia respostas de `/api/*`. Dados de negócio (kcal, água, atividade) precisam ser sempre frescos; cache SW dos totais do dia contradiz Art. III §10 (snapshots vêm sempre do DB).
+- **INV-22** — Carga inicial do chat (sem `after`/`before`) retorna apenas mensagens do dia local corrente do usuário; mensagens de dias anteriores só aparecem via `before`.
+- **INV-23** — Paginação por cursor é determinística: ordenação por `(created_at, id)` e âncoras exclusivas garantem que nenhuma mensagem é omitida nem duplicada entre páginas (carga inicial, `after` e `before`).
 
 ---
 
@@ -802,4 +816,5 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-28** — v1.11. SP-154 esclarecido: `/day/[date]` NÃO é read-only universal — quando o dia passado ainda está `status='open'`, o botão "Encerrar dia" aparece pra permitir encerramento retroativo (usuário esqueceu de encerrar). Só edição de records fica exclusiva do chat. Motivador: comportamento anterior `allowClose={false}` bloqueava indevidamente esse fluxo.
 - **2026-07-28** — v1.12. **§3.14 (Bloco 5) reformulado.** SP-140 agora produz card com 3 botões clicáveis por item (Cadastrar manual, Foto do rótulo com promoção acoplada, Descartar). Nova SP-143 (`should`): `POST /chat/messages` aceita `promote_food_item_id` para acoplar upload de rótulo → promoção do item legado numa única viagem. Removidos: `PendingItemsModal`, endpoint `POST /records/food-items/{id}/confirm`, `ConfirmItemButton` do `/day`, intent LLM `confirm_items`, `ConfirmationService`, e SP-24a deprecated. Campo `needs_confirmation` fica no schema mas nunca mais é setado — frontend usa `has_catalog` como único sinal. Motivador: sobreposição semântica confusa entre "confirmar" e "resolver item sem catálogo".
 - **2026-07-27** — v1.8. Nova seção 3.14 "Recuperação de itens sem catálogo" (SP-140..SP-142, todos `should`, pós-MVP): prompt de recuperação na assistant message quando há `no_catalog_hit`, endpoint `POST /nutrient-facts/manual` para cadastro sem foto, promoção opcional de `food_item` legado no mesmo cadastro. Também: limpeza de duplicação em §3.13 (bloco PWA aparecia duas vezes idênticas por artefato de merge).
+- **2026-09-04** — v1.14. Adicionados SP-180 (`must`, carga inicial do chat restrita ao dia corrente + `has_more_before`) e SP-181 (`must`, paginação para trás via `before` ao rolar o chat para o topo, sem filtro de dia — atravessa dias anteriores). Amplia §3.2 (Chat). Novos invariantes INV-22 (carga inicial só do dia corrente) e INV-23 (cursor determinístico `(created_at, id)` sem omissão/duplicação). Resposta de `GET /chat/messages` ganha campo `has_more_before`. Decisão de design em ADR-013 (`research.md`).
 - **2026-08-14** — v1.13. **Renumeração de invariantes de treino + módulo de treino (SP-170..SP-179).** (1) Colisão de numeração: v1.6 (workout) e v1.7 (PWA/SW) definiram ambos INV-11. Como o SW INV-11 já está em produção (CI `verify:sw`, `T-1002`, teste em `verify-sw.mjs`), a faixa de treino foi renumerada: **INV-11→INV-15**, **INV-12→INV-16**, **INV-13→INV-17**. §6 mantém INV-11 = SW. Corrigidos em conjunto: `tasks.md` (Bloco 3), `research.md` (ADR-011), `specs/features/INDEX.md` e docs da feature `workout-session-tracking`. (2) Nova **§3.16** formaliza a expansão do cliente: módulo de treino com `workout_templates` (SP-171 cadastro por texto, SP-172 ativo/inativo), chat dedicado no mesmo pool de `messages` via `messages.via='workout'` (SP-173) — decisão "pool único com filtro" fixada, tela `/workouts` com abas Ativos/Inativos/Histórico (SP-170/SP-177), fluxo guiado com botões e "Ir para o próximo exercício" (SP-178) + cronômetro (SP-179), registro por imagem (SP-174), edição de peso/séries/kcal via chat e `/day` (SP-175), seção de treinos no `/day` (SP-176). Novos invariantes **INV-18..INV-21**. Núcleo §3.13 (SP-120..127, `may`) permanece inalterado.

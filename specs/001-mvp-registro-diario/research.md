@@ -282,8 +282,36 @@ Alternativas descartadas: com motivo objetivo.
 
 ---
 
+## ADR-013 — Paginação do chat: dia corrente na carga inicial + cursor determinístico
+
+**Status:** accepted
+**Data:** 2026-09-04
+
+**Contexto.** `GET /chat/messages` já suporta cursores `after`/`before`/`limit`, mas a carga inicial (sem âncora) devolve "últimas N de todo o histórico", e o `before` nunca é usado no frontend. Em contas com muito histórico, o chat carrega dias antigos desnecessariamente. As perguntas são: (a) como restringir a carga inicial ao dia corrente; (b) como informar ao cliente que há mais mensagens antigas para o scroll-up; (c) como evitar omitir/duplicar mensagens ao transitar entre páginas.
+
+**Decisão.**
+
+1. **Filtro por `created_at` (faixa UTC do dia local), não por `day_log_id`.** `messages.day_log_id` é `nullable` (respostas de `set_profile` e equivalentes são gravadas sem `day_log_id`); filtrar por ele sumiria com essas mensagens. O backend converte o início do dia local (`users.timezone`, via `local_today`) para UTC e filtra `created_at >= since`. O filtro aplica-se **apenas** à carga inicial (sem âncora); `before`/`after` permanecem sem filtro de dia (o `before` precisa atravessar dias anteriores).
+2. **Envelope `has_more_before: bool`** (em vez de `next_before_id`). Um booleano é suficiente para o frontend ligar/desligar o fetch no scroll; o próprio cliente já conhece o ID mais antigo da janela atual para montar o `before`.
+3. **Cursor determinístico por `(created_at, id)`** com âncoras exclusivas nos três modos, e `LIMIT limit+1` para detectar `has_more_before` sem página vazia. Elimina o empate teórico de `created_at` em microsegundos e garante INV-23.
+
+**Consequências.**
+- ✔ Carga inicial leve e previsível: só o dia corrente.
+- ✔ Scroll-up atravessa dias sem mudança de API (mesmo `before`, só passa a ser usado).
+- ✔ Sem migration — só o envelope de resposta muda (campo aditivo `has_more_before`), retrocompatível.
+- ✘ O `since` é computado por request (pequeno custo de `datetime`/`ZoneInfo`, desprezível).
+- ✘ Mensagens criadas entre meia-noite local e a criação do `day_log` do dia continuam aparecendo (filtro por `created_at`), consistente com "mensagens do dia" e não "mensagens do day_log".
+
+**Alternativas descartadas.**
+- **Filtrar por `day_log_id` de hoje.** Escopo semântico mais alinhado ao domínio, mas perde mensagens com `day_log_id=NULL` (set_profile etc.).
+- **`next_before_id` explícito no envelope.** Mais verboso; o ganho (cursor `(created_at,id)` transportado pelo servidor) não compensa, já que o cliente detém o ID mais antigo e a ordenação é fixa.
+- **Page/offset.** Quebra com inserções concorrentes (polling) e não escala versus cursor.
+
+---
+
 ## Histórico
 
 - **2026-07-15** — v1.0. 10 ADRs iniciais registrando decisões da Fase 0 e do plano.
 - **2026-07-26** — v1.1. ADR-011 aceito: registro estruturado de treino agrega ao `log_activity` via consolidação no encerramento (contexto da seção 3.13 da spec).
 - **2026-07-26** — v1.1. ADR-012 aceito: CI/CD com GitHub Actions em dois workflows (validação em PR + deploy SSH em merge para `main`). Escolha registrada; implementação pendente na Fase 10. (ADR-011 é reservado para o PR de workout-tracking; se este PR mergear primeiro haverá um buraco de numeração até ele.)
+- **2026-09-04** — v1.2. ADR-013 aceito: paginação do chat por dia (carga inicial restrita ao dia corrente por `created_at`, envelope `has_more_before`, cursor determinístico `(created_at, id)`). Corresponde à spec v1.14 (SP-180/SP-181, INV-22/23).
