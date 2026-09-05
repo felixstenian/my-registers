@@ -454,6 +454,24 @@ Status: **done**.
 
 ---
 
+## Bloco 8 — Paginação do chat por dia (SP-180..SP-181) — pendente
+
+Meta: a carga inicial do chat (`GET /chat/messages` sem cursor) deixa de devolver "últimas N do histórico" e passa a devolver "últimas N do dia corrente"; o scroll-up liga o cursor `before` (já existente no backend, nunca usado no frontend) para carregar mensagens de dias anteriores. Ver spec §3.2 (SP-180/SP-181), plan.md §9 e ADR-013.
+
+Pré-requisitos: nenhum. Cursor `after`/`before`/`limit` já implementado em `MessageRepository.list_messages`.
+
+- [ ] **T-B801** — `MessageRepository.list_messages` ganha `since` (`datetime` UTC, opcional) e passa a devolver `has_more_before` (usa `LIMIT limit+1` para detectar). Ordenação determinística por `(created_at, id)` e âncoras exclusivas nos três modos (carga inicial, `after`, `before`) — INV-23. `ChatService.list_messages` repassa `since` (início do dia local via `user.timezone`, usando `local_today`) somente quando **não** há `after`/`before`, e propaga `has_more_before`. (M) — SP-180, SP-181, INV-22, INV-23.
+
+- [ ] **T-B802** — `MessagesListResponse` ganha `has_more_before: bool`; `GET /chat/messages` devolve o novo campo. Remover o `print('limit', limit)` leftover em `app/api/routes/chat.py`. (S) — SP-180.
+
+- [ ] **T-B803** — Frontend `chat/page.tsx`: `onScroll` no container rolável (`overflow-y-auto`) detecta topo → `?before=<oldestId>&limit=50` → **prepend** com ancoragem de scroll (restaurar `scrollTop = novoScrollHeight - prevScrollHeight + prevScrollTop`). Novos refs/state `oldestIdRef`, `hasMoreBefore`, `loadingOlder` (guard anti-duplicação); para buscar quando `has_more_before=false`. Ajuste `loadInitial` para registrar `has_more_before` e o ID mais antigo. (L) — SP-181.
+
+- [ ] **T-B804** — Testes: `tests/test_chat.py` — carga inicial restrita ao dia corrente (mensagem de ontem fica fora, INV-22), `has_more_before` true/false, `before` atravessa dias e não duplica (INV-23), `since` filtro no repo. E2E Playwright em `apps/web/e2e/chat.spec.ts`: scroll ao topo carrega histórico. (M) — INV-22, INV-23.
+
+**Gate Bloco 8:** ao abrir `/chat`, só as mensagens de hoje aparecem; rolar para cima carrega dias anteriores sem duplicar/omitir; `has_more_before=false` encerra o carregamento; INV-22/23 verificadas.
+
+---
+
 ## Backlog (pós-MVP, `may`)
 
 - **B-01** — Persistência agregada de `sugars_g`, `added_sugars_g`, `saturated_fat_g`, `trans_fat_g`.
@@ -471,3 +489,4 @@ Status: **done**.
 ## Histórico
 
 - **2026-07-15** — v1.0. Estrutura inicial. Fase 0 marcada como done. Total: 47 tarefas ativas + 9 backlog.
+- **2026-09-04** — v1.1. Adicionado Bloco 8 (SP-180..SP-181, paginação do chat por dia) com T-B801..T-B804. Corresponde à spec v1.14 e plan.md §9.

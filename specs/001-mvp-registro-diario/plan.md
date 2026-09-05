@@ -33,6 +33,7 @@
 | SP-110 a SP-113 | Relatório semanal | §6 (weekly_reports), §10 | `app/services/weekly_report.py` |
 | SP-120 a SP-127 | Treino — núcleo hierárquico | §3.13, ADR-004/ADR-011 | `app/services/workout.py`, `app/models/workout.py`, `app/repositories/workout.py`, `app/services/message_processor.py`, `app/services/intent_dispatcher.py` |
 | SP-170 a SP-179 | Treino — módulo (templates, chat dedicado, `/workouts`, `/day`) | §3.16, ADR-011 | `app/services/workout.py` (módulo), `app/api/routes/workouts.py`, `app/models/workout_templates.py`, `apps/web/src/app/(app)/workouts/*`, `apps/web/src/proxy.ts`, `apps/web/src/app/(app)/day/AuxiliarySections.tsx`, `apps/web/src/app/(app)/day/edit-forms.tsx` |
+| SP-180 a SP-181 | Chat — paginação por dia (carga inicial + scroll-up) | §3.2, ADR-013 | `app/repositories/message.py`, `app/services/chat.py`, `app/api/routes/chat.py`, `app/schemas/chat.py`, `apps/web/src/app/(app)/chat/page.tsx` |
 
 ---
 
@@ -203,7 +204,29 @@ Nada de conteúdo em `spec.md` deve descrever HOW. Nada em `plan.md` deve descre
 
 ---
 
+## 9. Paginação do chat por dia (SP-180..SP-181)
+
+> **Contexto:** hoje a carga inicial (`GET /chat/messages?limit=100`) devolve as N mensagens mais recentes de **todo** o histórico, e o cursor `before` já existe no backend mas nunca é usado no frontend. A v1.14 da spec (SP-180/SP-181) restringe a carga inicial ao dia corrente e liga o `before` ao scroll-up. Decisões de design em ADR-013.
+
+**Ordem de execução:**
+
+| Etapa | Entrega | SPs | Arquivos | Depende de |
+|-------|---------|-----|----------|-----------|
+| P1 — Cursor determinístico | `MessageRepository.list_messages` ganha `since` (datetime UTC) e `has_more_before`; ordenação `(created_at, id)` e âncoras exclusivas (INV-23) | SP-180, SP-181, INV-22, INV-23 | `app/repositories/message.py`, `app/services/chat.py`, `app/schemas/chat.py`, `app/api/routes/chat.py` | — |
+| P2 — Scroll-up no frontend | `chat/page.tsx` detecta topo do scroll → `?before=<oldestId>&limit=50` → prepend com ancoragem de scroll; guard anti-duplicação; para em `has_more_before=false` | SP-181 | `apps/web/src/app/(app)/chat/page.tsx` | P1 |
+
+**Gates de fase (paginação):**
+- SP-180/SP-181 `must` → unit de service + integração ponta-a-ponta (route → service → repo → DB).
+- INV-22/INV-23 → teste de integração com Postgres real, nunca mock.
+- E2E Playwright: scroll ao topo carrega histórico sem duplicar (opcional, adiciona quando a suíte de chat for tocada).
+- Sem PR sem referência a SP-180/SP-181 no body.
+
+**Divergências vs. `app_plan.md`:** a carga inicial de `GET /chat/messages` deixa de ser "últimas N do histórico" e passa a "últimas N do dia corrente" — registrada aqui; sem mudança de schema de BD (só o envelope de resposta ganha `has_more_before`).
+
+---
+
 ## Histórico
 
 - **2026-07-15** — v1.0. Plano inicial. Fase 0 marcada concluída.
 - **2026-08-14** — v1.1. Módulo de treino (SP-120..127 núcleo + SP-170..179 expansão da v1.13 da spec): mapeamento SP→arquivos no mapa §1 e nova seção §8 com ordem de execução (E1..E6) e gates. Corresponde à spec v1.13 (§3.13 inalterado + nova §3.16).
+- **2026-09-04** — v1.2. Paginação do chat por dia (SP-180/SP-181): mapeamento SP→arquivos no mapa §1 e nova seção §9 com ordem de execução (P1..P2) e gates. Corresponde à spec v1.14; decisões em ADR-013.
