@@ -696,6 +696,44 @@ Revive parcialmente a intenção do T-409 original ("DayTable renderiza totals +
 
 ---
 
+### 3.17 Edição total no `/day` e registro retroativo (pós-MVP)
+
+> **Contexto:** o Bloco 7 (edição inline, spec 002, SP-160..169) entregou edição inline, mas dois buracos ficaram: (a) macros de itens do catálogo canônico (TBCA/USDA) são "não editáveis" (SP-35), e (b) registro de dia passado não existe — o chat grava sempre no dia corrente (`local_today`). Esta seção fecha os dois: edição de **qualquer** valor no `/day` e registro em dia **passado aberto**.
+
+**SP-182** (`must`) — Override de macros de item do catálogo canônico (clone por usuário).
+- **Given** um item cujo `catalog_ref_id` aponta para fact `source ∈ {TBCA_2023, USDA_FDC}` (catálogo compartilhado), em dia aberto.
+- **When** o usuário edita valores por 100 g/ml no `/day`.
+- **Then** o backend **não** muta o fact canônico: cria um fact `source='manual'` com `created_by=user_id` clonando os valores atuais, aplica a edição no clone, reponta o `catalog_ref_id` do item para o clone, recomputa os macros do item (Art. II §5) e o snapshot do dia.
+- Edições subsequentes nesse item seguem o caminho normal de fact `manual` (SP-167, INV-14).
+
+**SP-183** (`must`) — Edição de metadados de registro no `/day`.
+- **Given** qualquer registro (comida/água/bebida/atividade) em dia aberto.
+- **When** o usuário edita `detected_name`, `meal_slot` (comida), `occurred_at`, `quantity`/`unit` (comida).
+- **Then** o valor persiste com auditoria (`action='correct'`, Art. III §11) e o snapshot recomputa do zero (Art. III §10).
+- **When** o dia está fechado → nenhum campo editável; backend devolve 409 `conflict_closed_day` (INV-5).
+
+**SP-184** (`must`) — Registro retroativo via chat (data reconhecida).
+- **Given** o usuário envia mensagem com data passada explícita (ex.: "ontem comi X", "no dia 03/09 almocei Y"), e aquele dia não está fechado.
+- **When** o `MessageProcessor` processa a mensagem.
+- **Then** o registro é criado contra o `day_log` daquela data (criando-o via `get_or_create` se não existir), o snapshot daquele dia recomputa e a assistant message confirma a data usada.
+- **When** o dia está `closed` → resposta amigável (`conflict_closed_day`), nada persistido. **When** a data é futura → `validation_error`, nada persistido.
+
+**SP-185** (`must`) — Registro retroativo via formulário em `/day/[data]`.
+- **Given** o usuário abre `/day/[data]` de um dia passado com `status='open'`.
+- **When** usa o formulário de adição da página.
+- **Then** cria comida/água/bebida/atividade naquele dia com recompute + auditoria (mesma semântica do chat, porém valores entram estruturados, sem LLM).
+- Dia fechado ou data futura → formulário ausente (mantém `/day/[data]` read-only, SP-154).
+
+**INV-24** — Fato canônico é imutável por usuário: editar macros de item com fact `TBCA_2023`/`USDA_FDC` sempre produz um fact `manual` clone (`created_by=user`); o row compartilhado do catálogo nunca é modificado por nenhum endpoint.
+**INV-25** — Registro/edição retroativa respeita Art. VIII: dia `closed` → 409 `conflict_closed_day` (chat e `/day`); data futura → `validation_error`. Nunca se cria ou edita registro em dia fechado ou futuro.
+
+**Dependências de dados:**
+- Nenhuma migration obrigatória: o clone reusa `NutrientFact` (`source='manual'`, `created_by` já existem) e o registro retroativo reusa `DayLogRepository.get_or_create(log_date=...)`.
+- O envelope da LLM passa a aceitar `target_date` opcional (`YYYY-MM-DD`) para resolver o `day_log` alvo no registro via chat.
+- PATCHs de `/records/*` estendem os campos editáveis (metadados), e surgem endpoints de criação estruturada (sem LLM) consumidos pelo form de `/day/[data]`.
+
+---
+
 ## 4. Requisitos não-funcionais
 
 ### 4.1 Segurança
@@ -816,5 +854,6 @@ Registrado aqui para não voltar como dúvida durante execução.
 - **2026-07-28** — v1.11. SP-154 esclarecido: `/day/[date]` NÃO é read-only universal — quando o dia passado ainda está `status='open'`, o botão "Encerrar dia" aparece pra permitir encerramento retroativo (usuário esqueceu de encerrar). Só edição de records fica exclusiva do chat. Motivador: comportamento anterior `allowClose={false}` bloqueava indevidamente esse fluxo.
 - **2026-07-28** — v1.12. **§3.14 (Bloco 5) reformulado.** SP-140 agora produz card com 3 botões clicáveis por item (Cadastrar manual, Foto do rótulo com promoção acoplada, Descartar). Nova SP-143 (`should`): `POST /chat/messages` aceita `promote_food_item_id` para acoplar upload de rótulo → promoção do item legado numa única viagem. Removidos: `PendingItemsModal`, endpoint `POST /records/food-items/{id}/confirm`, `ConfirmItemButton` do `/day`, intent LLM `confirm_items`, `ConfirmationService`, e SP-24a deprecated. Campo `needs_confirmation` fica no schema mas nunca mais é setado — frontend usa `has_catalog` como único sinal. Motivador: sobreposição semântica confusa entre "confirmar" e "resolver item sem catálogo".
 - **2026-07-27** — v1.8. Nova seção 3.14 "Recuperação de itens sem catálogo" (SP-140..SP-142, todos `should`, pós-MVP): prompt de recuperação na assistant message quando há `no_catalog_hit`, endpoint `POST /nutrient-facts/manual` para cadastro sem foto, promoção opcional de `food_item` legado no mesmo cadastro. Também: limpeza de duplicação em §3.13 (bloco PWA aparecia duas vezes idênticas por artefato de merge).
+- **2026-09-05** — v1.15. Adicionada §3.17 — **edição total no `/day` + registro retroativo** (SP-182..SP-185). SP-182 (`must`, override de macros de item do catálogo canônico via clone `manual` por usuário — nunca muta o fact compartilhado TBCA/USDA); SP-183 (`must`, edição de metadados `detected_name`/`meal_slot`/`occurred_at`/`quantity`/`unit`); SP-184 (`must`, registro retroativo via chat com data reconhecida); SP-185 (`must`, registro retroativo via formulário em `/day/[data]` aberto). Novos invariantes INV-24 (fato canônico imutável por usuário) e INV-25 (registro retroativo respeita dia fechado/futuro). Decisões de design em ADR-014.
 - **2026-09-04** — v1.14. Adicionados SP-180 (`must`, carga inicial do chat restrita ao dia corrente + `has_more_before`) e SP-181 (`must`, paginação para trás via `before` ao rolar o chat para o topo, sem filtro de dia — atravessa dias anteriores). Amplia §3.2 (Chat). Novos invariantes INV-22 (carga inicial só do dia corrente) e INV-23 (cursor determinístico `(created_at, id)` sem omissão/duplicação). Resposta de `GET /chat/messages` ganha campo `has_more_before`. Decisão de design em ADR-013 (`research.md`).
 - **2026-08-14** — v1.13. **Renumeração de invariantes de treino + módulo de treino (SP-170..SP-179).** (1) Colisão de numeração: v1.6 (workout) e v1.7 (PWA/SW) definiram ambos INV-11. Como o SW INV-11 já está em produção (CI `verify:sw`, `T-1002`, teste em `verify-sw.mjs`), a faixa de treino foi renumerada: **INV-11→INV-15**, **INV-12→INV-16**, **INV-13→INV-17**. §6 mantém INV-11 = SW. Corrigidos em conjunto: `tasks.md` (Bloco 3), `research.md` (ADR-011), `specs/features/INDEX.md` e docs da feature `workout-session-tracking`. (2) Nova **§3.16** formaliza a expansão do cliente: módulo de treino com `workout_templates` (SP-171 cadastro por texto, SP-172 ativo/inativo), chat dedicado no mesmo pool de `messages` via `messages.via='workout'` (SP-173) — decisão "pool único com filtro" fixada, tela `/workouts` com abas Ativos/Inativos/Histórico (SP-170/SP-177), fluxo guiado com botões e "Ir para o próximo exercício" (SP-178) + cronômetro (SP-179), registro por imagem (SP-174), edição de peso/séries/kcal via chat e `/day` (SP-175), seção de treinos no `/day` (SP-176). Novos invariantes **INV-18..INV-21**. Núcleo §3.13 (SP-120..127, `may`) permanece inalterado.

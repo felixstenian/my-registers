@@ -309,9 +309,38 @@ Alternativas descartadas: com motivo objetivo.
 
 ---
 
+## ADR-014 — Edição de catálogo canônico por clone + registro retroativo
+
+**Status:** accepted
+**Data:** 2026-09-05
+
+**Contexto.** Dois buracos pós-Bloco 7. (1) Itens cujo `catalog_ref_id` aponta para fact `TBCA_2023`/`USDA_FDC` têm macros marcadas "não editáveis" (SP-35), porque o fact canônico é **compartilhado** (`created_by=NULL`) — editá-lo in-place corromperia o catálogo para todos os usuários e lookups futuros. O usuário, porém, quer editar **qualquer** valor no `/day`. (2) Registro só existe via chat, e `ChatService.post_user_message` resolve o `day_log` por `local_today(user.timezone)` — não há como registrar "ontem" num dia ainda aberto. As perguntas: como permitir override de macros canônicos sem quebrar isolamento (Art. V §21) nem o catálogo, e como direcionar um registro para um dia passado aberto.
+
+**Decisão.**
+
+1. **Override por clone, nunca in-place.** Ao editar macros de um item cujo fact é `TBCA_2023`/`USDA_FDC`, o backend cria um `NutrientFact` `source='manual'` com `created_by=user_id` clonando os valores atuais do canônico, aplica a edição no clone e reponta o `catalog_ref_id` do item. O row compartilhado do catálogo permanece imutável (INV-24). Edições posteriores seguem o caminho normal de fact `manual` (SP-167, INV-14). `PATCH /nutrient-facts/{id}` continua rejeitando fonte canônica (SP-35) — o clone nasce no path de edição do item, não do fact.
+2. **Registro retroativo por `target_date`.** O envelope da LLM (`schemas/llm.py`) ganha `target_date` opcional (`YYYY-MM-DD`). Quando presente, o `MessageProcessor` resolve o `day_log` alvo via `DayLogRepository.get_or_create(log_date=...)` (cria se ausente) em vez de usar o `day_log` de hoje. Dia fechado → `conflict_closed_day`; data futura → `validation_error`; nada persistido (INV-25). A mesma resolução serve o form de `/day/[data]`, que cria registros estruturados (sem LLM) via endpoints que reusam os services `meal`/`hydration`/`beverage`/`activity`.
+
+**Consequências.**
+- ✔ Catálogo TBCA/USDA intacto; override fica isolado por usuário.
+- ✔ Nenhuma migration obrigatória — `NutrientFact.source='manual'`/`created_by` e `DayLogRepository.get_or_create(log_date)` já existem.
+- ✔ Registro retroativo reaproveita os mesmos services de registro (só muda o `day_log_id` alvo), mantendo recompute/auditoria intactos.
+- ✘ Overrides duplicam fact canônico quando o usuário edita o mesmo item-base várias vezes; mitigável a posteriori com "fact manual reusado por usuário+nome".
+- ✘ `target_date` aumenta a responsabilidade da LLM (extrair a data); mitigação: data só é honrada quando parsível e no passado; senão segue o dia corrente (comportamento atual).
+
+**Alternativas descartadas.**
+- **Editar o fact canônico in-place.** Simples, mas corrompe o catálogo compartilhado e viola isolamento por usuário (Art. V §21).
+- **Override por-item (`food_item` ganha colunas de override).** Evita clone de fact, mas duplica o modelo de macros em dois lugares e foge do padrão existente (`catalog_ref_id` + `NutritionCalculator`).
+- **Registro retroativo só via `/day` (sem chat).** Menos natural para o fluxo "contar pelo chat" que é a interface primária de escrita.
+
+---
+
+---
+
 ## Histórico
 
 - **2026-07-15** — v1.0. 10 ADRs iniciais registrando decisões da Fase 0 e do plano.
 - **2026-07-26** — v1.1. ADR-011 aceito: registro estruturado de treino agrega ao `log_activity` via consolidação no encerramento (contexto da seção 3.13 da spec).
 - **2026-07-26** — v1.1. ADR-012 aceito: CI/CD com GitHub Actions em dois workflows (validação em PR + deploy SSH em merge para `main`). Escolha registrada; implementação pendente na Fase 10. (ADR-011 é reservado para o PR de workout-tracking; se este PR mergear primeiro haverá um buraco de numeração até ele.)
 - **2026-09-04** — v1.2. ADR-013 aceito: paginação do chat por dia (carga inicial restrita ao dia corrente por `created_at`, envelope `has_more_before`, cursor determinístico `(created_at, id)`). Corresponde à spec v1.14 (SP-180/SP-181, INV-22/23).
+- **2026-09-05** — v1.3. ADR-014 aceito: edição de catálogo canônico por clone por usuário (nunca in-place) + registro retroativo via `target_date`. Corresponde à spec v1.15 (§3.17).
