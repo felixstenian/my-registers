@@ -34,6 +34,7 @@
 | SP-120 a SP-127 | Treino — núcleo hierárquico | §3.13, ADR-004/ADR-011 | `app/services/workout.py`, `app/models/workout.py`, `app/repositories/workout.py`, `app/services/message_processor.py`, `app/services/intent_dispatcher.py` |
 | SP-170 a SP-179 | Treino — módulo (templates, chat dedicado, `/workouts`, `/day`) | §3.16, ADR-011 | `app/services/workout.py` (módulo), `app/api/routes/workouts.py`, `app/models/workout_templates.py`, `apps/web/src/app/(app)/workouts/*`, `apps/web/src/proxy.ts`, `apps/web/src/app/(app)/day/AuxiliarySections.tsx`, `apps/web/src/app/(app)/day/edit-forms.tsx` |
 | SP-180 a SP-181 | Chat — paginação por dia (carga inicial + scroll-up) | §3.2, ADR-013 | `app/repositories/message.py`, `app/services/chat.py`, `app/api/routes/chat.py`, `app/schemas/chat.py`, `apps/web/src/app/(app)/chat/page.tsx` |
+| SP-182 a SP-185 | `/day` — edição total + registro retroativo | §3.17, ADR-014 | `app/api/routes/records.py`, `app/api/routes/nutrient_facts.py`, `app/services/nutrient_fact_propagation.py` (clone), `app/services/message_processor.py` (`target_date`), `app/services/{meal,hydration,beverage,activity}.py`, `app/schemas/llm.py`, `apps/web/src/app/(app)/day/*`, `apps/web/src/app/(app)/chat/*` |
 
 ---
 
@@ -225,8 +226,32 @@ Nada de conteúdo em `spec.md` deve descrever HOW. Nada em `plan.md` deve descre
 
 ---
 
+## 10. Edição total no `/day` + registro retroativo (SP-182..SP-185)
+
+> **Contexto:** o Bloco 7 entregou edição inline limitada — macros de itens do catálogo canônico (TBCA/USDA) são "não editáveis" (SP-35) e não há edição de metadados — e o registro só existe via chat, sempre no dia corrente (`local_today`). A v1.15 da spec (SP-182..185) fecha os dois buracos: override de macros canônicos por clone, edição de qualquer campo no `/day` e registro em dia passado aberto (chat e `/day`). Decisões em ADR-014.
+
+**Ordem de execução:**
+
+| Etapa | Entrega | SPs | Arquivos | Depende de |
+|-------|---------|-----|----------|-----------|
+| R1 — Override canônico | Clone de fact `TBCA_2023`/`USDA_FDC` → `manual` (`created_by=user`) ao editar macros no `/day`; nunca muta o fact compartilhado | SP-182, INV-24 | `app/services/nutrient_fact_propagation.py` (ou serviço novo de clone), `app/api/routes/nutrient_facts.py`, `app/api/routes/records.py`, `apps/web/src/app/(app)/day/edit-forms.tsx` | — |
+| R2 — Edição de metadados | PATCH de `detected_name`/`meal_slot`/`occurred_at`/`quantity`/`unit` nos 4 tipos + forms no `/day` | SP-183 | `app/api/routes/records.py`, `app/schemas/*`, `apps/web/src/app/(app)/day/edit-forms.tsx` | — |
+| R3 — Registro retroativo via chat | Envelope da LLM ganha `target_date`; `MessageProcessor` resolve `day_log` por data (reusa `DayLogRepository.get_or_create`) | SP-184 | `app/services/message_processor.py`, `app/services/chat.py`, `app/integrations/anthropic/`, `app/schemas/llm.py` | — |
+| R4 — Registro retroativo via `/day` | Form de adição em `/day/[data]` (dia aberto) com endpoints de criação estruturada (sem LLM) | SP-185 | `app/api/routes/*`, `apps/web/src/app/(app)/day/*` | R1, R2 |
+
+**Gates de fase (edição/registro retroativo):**
+- SP-182..185 `must` → unit de service + integração ponta-a-ponta (route → service → repo → DB).
+- INV-24/INV-25 → integração com Postgres real. INV-24 via teste que edita item TBCA e verifica que o row do catálogo permanece intacto.
+- Dia fechado → 409 `conflict_closed_day`; data futura → `validation_error`; verificados em chat e `/day`.
+- Sem PR sem referência a SP-182..185 no body.
+
+**Divergências vs. `app_plan.md`:** edição de fact canônico deixa de ser proibida (SP-35) — mas via clone por usuário, não mutação in-place. Registro deixa de ser "sempre hoje" e passa a aceitar data passada aberta.
+
+---
+
 ## Histórico
 
 - **2026-07-15** — v1.0. Plano inicial. Fase 0 marcada concluída.
 - **2026-08-14** — v1.1. Módulo de treino (SP-120..127 núcleo + SP-170..179 expansão da v1.13 da spec): mapeamento SP→arquivos no mapa §1 e nova seção §8 com ordem de execução (E1..E6) e gates. Corresponde à spec v1.13 (§3.13 inalterado + nova §3.16).
 - **2026-09-04** — v1.2. Paginação do chat por dia (SP-180/SP-181): mapeamento SP→arquivos no mapa §1 e nova seção §9 com ordem de execução (P1..P2) e gates. Corresponde à spec v1.14; decisões em ADR-013.
+- **2026-09-05** — v1.3. Edição total no `/day` + registro retroativo (SP-182..185): mapeamento SP→arquivos no mapa §1 e nova seção §10 (etapas R1..R4 + gates). Corresponde à spec v1.15 (§3.13 inalterado + nova §3.17). Decisões em ADR-014.
