@@ -44,9 +44,7 @@ async def _login(client: AsyncClient) -> None:
     assert resp.status_code == 204
 
 
-async def _make_food_item(
-    db_session: AsyncSession, admin_user, *, catalog_ref_id=None
-) -> FoodItem:
+async def _make_food_item(db_session: AsyncSession, admin_user, *, catalog_ref_id=None) -> FoodItem:
     local_date = datetime.now(ZoneInfo(admin_user.timezone)).date()
     dl = await DayLogRepository(db_session).get_or_create(
         user_id=admin_user.id, log_date=local_date
@@ -93,10 +91,10 @@ async def test_clone_canonical_fact_preserves_catalog(
 ):
     await _seed(db_session)
     fact = (
-        await db_session.execute(
-            select(NutrientFact).where(NutrientFact.source == "TBCA_2023")
-        )
-    ).scalars().first()
+        (await db_session.execute(select(NutrientFact).where(NutrientFact.source == "TBCA_2023")))
+        .scalars()
+        .first()
+    )
     item = await _make_food_item(db_session, admin_user, catalog_ref_id=fact.id)
     original_kcal = fact.kcal
 
@@ -146,9 +144,7 @@ async def test_patch_food_record_meal_slot(
     record = (await db_session.execute(select(FoodRecord))).scalars().first()
 
     await _login(client)
-    resp = await client.patch(
-        f"/records/food-records/{record.id}", json={"meal_slot": "dinner"}
-    )
+    resp = await client.patch(f"/records/food-records/{record.id}", json={"meal_slot": "dinner"})
     assert resp.status_code == 200
     assert resp.json()["meal_slot"] == "dinner"
 
@@ -156,12 +152,16 @@ async def test_patch_food_record_meal_slot(
     assert record.meal_slot == "dinner"
 
     events = (
-        await db_session.execute(
-            select(AuditEvent).where(
-                AuditEvent.entity_id == record.id, AuditEvent.action == "correct"
+        (
+            await db_session.execute(
+                select(AuditEvent).where(
+                    AuditEvent.entity_id == record.id, AuditEvent.action == "correct"
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(events) == 1
 
 
@@ -190,9 +190,7 @@ def _yesterday(user) -> date:
     return datetime.now(ZoneInfo(user.timezone)).date() - timedelta(days=1)
 
 
-async def test_create_water_retroactive(
-    client: AsyncClient, admin_user, db_session: AsyncSession
-):
+async def test_create_water_retroactive(client: AsyncClient, admin_user, db_session: AsyncSession):
     yday = _yesterday(admin_user)
 
     await _login(client)
@@ -223,9 +221,7 @@ async def test_create_food_closed_day_409(
     client: AsyncClient, admin_user, db_session: AsyncSession
 ):
     yday = _yesterday(admin_user)
-    dl = await DayLogRepository(db_session).get_or_create(
-        user_id=admin_user.id, log_date=yday
-    )
+    dl = await DayLogRepository(db_session).get_or_create(user_id=admin_user.id, log_date=yday)
     dl.status = "closed"
     dl.closed_at = datetime.now(UTC)
     await db_session.commit()
@@ -270,9 +266,7 @@ async def test_chat_registration_retroactive_target_date(
     fake_anthropic.queue(make_llm_result(envelope))
 
     await _login(client)
-    resp = await client.post(
-        "/chat/messages", json={"text": "ontem bebi 300ml de água"}
-    )
+    resp = await client.post("/chat/messages", json={"text": "ontem bebi 300ml de água"})
     assert resp.status_code == 202
 
     record = (await db_session.execute(select(WaterRecord))).scalars().one()
