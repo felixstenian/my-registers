@@ -37,6 +37,14 @@ RECORD_INTENT_INPUT_SCHEMA: dict[str, Any] = {
         "needs_clarification": {"type": "boolean"},
         "clarification_question": {"type": ["string", "null"]},
         "occurred_at_hint": {"type": ["string", "null"]},
+        "target_date": {
+            "type": ["string", "null"],
+            "description": (
+                "Data alvo do registro no passado (ISO 8601 YYYY-MM-DD) quando o "
+                "usuário se refere a um dia anterior (ex.: 'ontem comi X', 'no dia "
+                "03/09 almocei Y'). Deixe null quando o registro é de hoje."
+            ),
+        },
         "meal_slot": {
             "type": ["string", "null"],
             "enum": [

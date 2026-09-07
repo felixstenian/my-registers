@@ -31,6 +31,7 @@ from app.integrations.anthropic.client import AnthropicClient, LLMCallResult
 from app.integrations.nutrition.local_tbca import LocalTBCACatalog
 from app.integrations.storage.minio import MinioStorage
 from app.models import Media, Message, MessageMedia, User
+from app.repositories.day_log import DayLogRepository
 from app.repositories.food import AuditEventRepository
 from app.repositories.message import MessageRepository
 from app.services import message_formatter
@@ -179,6 +180,15 @@ class MessageProcessor:
         if user is None:
             return await self._record_error(user_message, result)
 
+        try:
+            day_log_id = await self._resolve_registration_day_log(
+                user=user, envelope=envelope, default_day_log_id=user_message.day_log_id
+            )
+        except ValidationAppError as exc:
+            return await self._record_clarify(
+                user_message, result, _clarify_from_validation(exc), code=exc.code
+            )
+
         catalog = LocalTBCACatalog(self.session)
         recompute_service = DailyRecomputeService(self.session)
 
@@ -190,11 +200,11 @@ class MessageProcessor:
                     return await self._record_error(user_message, result)
                 meal = await MealService(self.session, catalog).create_from_llm(
                     user=user,
-                    day_log_id=user_message.day_log_id,
+                    day_log_id=day_log_id,
                     message_id=user_message.id,
                     envelope=envelope,
                 )
-                recompute = await recompute_service.recompute(user_message.day_log_id)
+                recompute = await recompute_service.recompute(day_log_id)
                 dispatch_meta["meal"] = {
                     "food_record_id": str(meal.food_record.id),
                     "item_ids": [str(i.id) for i in meal.items],
@@ -208,11 +218,11 @@ class MessageProcessor:
                     return await self._record_error(user_message, result)
                 hydration = await HydrationService(self.session).create_from_llm(
                     user=user,
-                    day_log_id=user_message.day_log_id,
+                    day_log_id=day_log_id,
                     message_id=user_message.id,
                     envelope=envelope,
                 )
-                recompute = await recompute_service.recompute(user_message.day_log_id)
+                recompute = await recompute_service.recompute(day_log_id)
                 dispatch_meta["water"] = {"record_id": str(hydration.record.id)}
                 content = message_formatter.compose_water(
                     hydration, recompute, local_today(user.timezone)
@@ -222,11 +232,11 @@ class MessageProcessor:
                     return await self._record_error(user_message, result)
                 beverage = await BeverageService(self.session, catalog).create_from_llm(
                     user=user,
-                    day_log_id=user_message.day_log_id,
+                    day_log_id=day_log_id,
                     message_id=user_message.id,
                     envelope=envelope,
                 )
-                recompute = await recompute_service.recompute(user_message.day_log_id)
+                recompute = await recompute_service.recompute(day_log_id)
                 dispatch_meta["beverage"] = {
                     "record_id": str(beverage.record.id),
                     "warnings": beverage.warnings,
@@ -240,7 +250,7 @@ class MessageProcessor:
                 try:
                     activity = await ActivityService(self.session).create_from_llm(
                         user=user,
-                        day_log_id=user_message.day_log_id,
+                        day_log_id=day_log_id,
                         message_id=user_message.id,
                         envelope=envelope,
                     )
@@ -253,7 +263,7 @@ class MessageProcessor:
                         'atual em kg. Você pode dizer, por exemplo, "peso 78 kg".',
                         code="weight_kg_required",
                     )
-                recompute = await recompute_service.recompute(user_message.day_log_id)
+                recompute = await recompute_service.recompute(day_log_id)
                 dispatch_meta["activity"] = {
                     "record_id": str(activity.record.id),
                     "warnings": activity.warnings,
@@ -291,6 +301,36 @@ class MessageProcessor:
             tokens_input=result.tokens_input,
             tokens_output=result.tokens_output,
         )
+
+    async def _resolve_registration_day_log(
+        self,
+        *,
+        user: User,
+        envelope: Any,
+        default_day_log_id: uuid.UUID,
+    ) -> uuid.UUID:
+        """Resolve o `day_log` alvo do registro (SP-184, INV-25).
+
+        Sem `target_date`, mantém o dia corrente (day_log da user message).
+        Com `target_date`, resolve/cria o `day_log` daquela data — rejeitando
+        data futura e dia fechado com `ValidationAppError` (virará clarify).
+        """
+        if envelope.target_date is None:
+            return default_day_log_id
+
+        today = local_today(user.timezone)
+        if envelope.target_date > today:
+            raise ValidationAppError("registro em data futura não é permitido", code="future_date")
+
+        day_log = await DayLogRepository(self.session).get_or_create(
+            user_id=user.id, log_date=envelope.target_date
+        )
+        if day_log.status == "closed":
+            raise ValidationAppError(
+                "esse dia já foi encerrado e não pode receber registros",
+                code="retroactive_day_closed",
+            )
+        return day_log.id
 
     async def _handle_set_profile(self, user_message: Message, result: LLMCallResult) -> Message:
         envelope = result.envelope
@@ -1109,6 +1149,13 @@ _CLARIFY_TEMPLATES = {
     "profile_no_change": (
         "Recebi seus dados, mas eles já estão iguais aos que tenho. "
         "Se quiser mudar algo, me passe o valor novo."
+    ),
+    "future_date": (
+        "Não consigo registrar em uma data futura. Você pode me dizer o que "
+        "quer registrar para hoje ou para um dia anterior?"
+    ),
+    "retroactive_day_closed": (
+        "Esse dia já foi encerrado, então não consigo adicionar registros nele."
     ),
 }
 
