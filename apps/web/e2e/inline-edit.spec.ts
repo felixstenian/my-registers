@@ -129,8 +129,12 @@ test('edit activity duration updates kcal after save', async ({ page, queueLlm }
   await seedActivity(page, queueLlm);
   await page.goto('/day');
 
-  // Find the Activity section.
-  await expect(page.getByText('Atividade', { exact: true })).toBeVisible();
+  // Find the Activity section. Nota: getByText({ exact: true }) estoura
+  // strict mode aqui — o <select> de "Tipo" do DailyAddForm tem um
+  // <option>Atividade</option> no DOM além do header da seção.
+  await expect(
+    page.locator('header span.font-semibold', { hasText: 'Atividade' }),
+  ).toBeVisible();
 
   // Expand the activity record details.
   const activitySummary = page.locator('summary').filter({ hasText: 'corrida' });
