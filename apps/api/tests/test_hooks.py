@@ -7,9 +7,12 @@ import pytest
 pytestmark = pytest.mark.asyncio
 
 
-async def test_reset_truncates_business_tables_and_recreates_admin(client, admin_user):
-    # Pré-condição: admin_user fixture já criou o admin. Verifica que /test/reset
-    # apaga e recria — o id novo é != do antigo, provando TRUNCATE + insert.
+async def test_reset_truncates_business_tables_and_keeps_admin_id_stable(client, admin_user):
+    # Contrato: o reset mantém o admin com id ESTÁVEL (upsert por email) —
+    # trocar o id a cada reset violava a FK de requests em voo no E2E
+    # (refresh_tokens/day_logs com user_id antigo → 500 em /auth/login e
+    # /days/today). Senha/perfil continuam sendo resetados e as tabelas de
+    # negócio limpas.
     original_admin_id = str(admin_user.id)
 
     response = await client.post("/test/reset")
@@ -23,7 +26,7 @@ async def test_reset_truncates_business_tables_and_recreates_admin(client, admin
 
     me = await client.get("/auth/me")
     assert me.status_code == 200
-    assert me.json()["id"] != original_admin_id
+    assert me.json()["id"] == original_admin_id
 
 
 async def test_queue_llm_status_reflects_enqueued_counts(client, make_envelope):

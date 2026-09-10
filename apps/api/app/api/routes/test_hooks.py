@@ -28,7 +28,8 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import delete, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session
@@ -36,7 +37,7 @@ from app.core.config import get_settings
 from app.core.rate_limit import reset_login_limiters
 from app.core.security import hash_password
 from app.integrations.anthropic import test_client as fake
-from app.repositories.user import UserRepository
+from app.models import User
 from app.schemas.llm import LLMEnvelope
 
 router = APIRouter(prefix="/test", tags=["test-hooks"])
@@ -46,6 +47,11 @@ router = APIRouter(prefix="/test", tags=["test-hooks"])
 # ON DELETE SET NULL, e o TRUNCATE ignora esse comportamento (cascata ou
 # aborta), o que apagaria o seed TBCA junto com media.
 # nutrient_facts NAO e' listado: e catalogo estatico seeded no boot da api.
+# `users` TAMBEM NAO e' deletado: o admin default passa por upsert com id
+# ESTAVEL (ver reset_state). Recriar o usuario a cada reset trocava o
+# user_id, e uma request em voo do teste anterior (ex.: fetch server-side
+# do Next, que sobrevive ao teardown do browser) inseria refresh_tokens/
+# day_logs com o id antigo -> FK violation 500 em /auth/login e /days/today.
 _DELETE_ORDER = (
     "audit_events",
     "food_items",
@@ -60,7 +66,6 @@ _DELETE_ORDER = (
     "day_logs",
     "media",
     "refresh_tokens",
-    "users",
 )
 
 
@@ -93,10 +98,25 @@ async def reset_state(session: AsyncSession = Depends(get_session)) -> Response:
 
     for table in _DELETE_ORDER:
         await session.execute(text(f"DELETE FROM {table}"))
-    await UserRepository(session).create(
-        email=settings.default_admin_email,
-        password_hash=hash_password(settings.default_admin_password),
-        display_name="Admin",
+    # Defesa: remove usuarios nao-default caso algum teste tenha criado
+    # (hoje nenhum cria, mas preserva a semantica de "reset limpa tudo").
+    await session.execute(delete(User).where(User.email != settings.default_admin_email))
+    # Upsert com id ESTAVEL: reseta senha/perfil SEM trocar o user_id, pra
+    # que requests em voo com cookie antigo continuem resolvendo a FK.
+    admin_profile = {
+        "password_hash": hash_password(settings.default_admin_password),
+        "display_name": "Admin",
+        "timezone": "America/Sao_Paulo",
+        "weight_kg": None,
+        "height_cm": None,
+        "birthdate": None,
+        "sex": None,
+        "is_active": True,
+    }
+    await session.execute(
+        pg_insert(User)
+        .values(email=settings.default_admin_email, **admin_profile)
+        .on_conflict_do_update(index_elements=[User.email], set_=admin_profile)
     )
     # Commit explicito antes de retornar: o Playwright dispara /auth/login
     # imediatamente apos receber 204, e sem esse commit hava race — a
