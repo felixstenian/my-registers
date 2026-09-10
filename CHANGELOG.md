@@ -17,6 +17,30 @@ Cada release tem tag Git `vX.Y.Z` e uma entrada correspondente em [GitHub Releas
 
 ---
 
+## [1.7.0] — 2026-09-09
+
+Bloco 9 — edição total no `/day` e registro retroativo (SP-182..SP-185, INV-24/INV-25). Correções de estabilidade no E2E/CI e bump de segurança em dependência do backend.
+
+### Adicionado
+- **#89 — SP-182..SP-185 — edição total no `/day` + registro retroativo** — Spec §3.17 / plan §10 / ADR-014. SP-182/INV-24: `POST /records/food-items/{id}/clone-fact` clona fact canônico (TBCA/USDA) para `manual` por usuário — override de macros sem nunca mutar o catálogo compartilhado. SP-183: PATCH de metadados (`detected_name`, `meal_slot`, `occurred_at`, `quantity`/`unit`) nos 4 tipos de registro. SP-184: registro retroativo via chat (`LLMEnvelope.target_date`). SP-185/INV-25: `StructuredRegistrationService` + endpoints de criação estruturada (`POST /records/{food,water,beverage,activity}`) + formulário `DailyAddForm` em `/day/[date]` (apenas dias abertos). Frontend: override canônico + edição de nome nos edit-forms. Cobertura em `tests/test_edit_total_retroactive.py` (INV-24, INV-25, SP-182..185). ([#89](https://github.com/felixstenian/my-registers/pull/89)).
+
+### Corrigido
+- **Race do poll do chat com resposta rápida do worker** — Se o worker commitava a assistant antes do `loadInitial()` terminar, o poll (ancorado na última mensagem) nunca a via como nova: `revalidateKey` não bumpava, o typing indicator rodava até o cap de 60s e a barra de totais ficava stale. `performSend` agora bumpa o `revalidateKey` direto quando a última mensagem carregada já é a assistant. (commit `2ca41e0`, via [#89](https://github.com/felixstenian/my-registers/pull/89)).
+- **Flake de auth no E2E — `/test/reset` com admin de id estável** — O reset deletava e recriava o admin com UUID novo a cada teste; requests em voo do teste anterior (fetch server-side do Next, que sobrevive ao teardown do browser) inseriam `refresh_tokens`/`day_logs` com o id antigo → FK violation 500 em `/auth/login` e `/days/today`, derrubando testes aleatórios (redirect loops, `user not active`). O reset agora faz upsert por email (`ON CONFLICT DO UPDATE`), resetando senha/perfil sem trocar o `user_id`. (commit `2ca41e0`, via [#89](https://github.com/felixstenian/my-registers/pull/89)).
+- **E2E: strict-mode nos headers do `/day` + flake do apt do google-chrome no CI** — `getByText('Almoço'/'Atividade', { exact: true })` colidia com `<option>`s do `DailyAddForm` (strict mode violation); locators escopados ao `header span.font-semibold`. CI: o repo `google-chrome` pré-instalado no runner `ubuntu-24.04` falhava com "Hash Sum mismatch" durante o `apt-get update` do `playwright install-deps`; a source é removida antes da instalação (o Playwright instala o próprio Chromium). (commit `11b5bc9`, via [#89](https://github.com/felixstenian/my-registers/pull/89)).
+
+### Segurança
+- **#87 — Dependabot (uv): bump cryptography 49.0.0 → 50.0.0** — Atualização do grupo `uv` em `apps/api`. ([#87](https://github.com/felixstenian/my-registers/pull/87)).
+
+### Documentação
+- **#88 — spec(001): SP-182..SP-185 — edição total no `/day` + registro retroativo** — spec v1.15 (§3.17) + invariantes INV-24 (fato canônico imutável por usuário) e INV-25 (registro retroativo respeita dia fechado/futuro); decisões em ADR-014. ([#88](https://github.com/felixstenian/my-registers/pull/88)).
+- **#85 — spec(001): SP-180 SP-181 — paginação do chat por dia (Bloco 8)** — SDD da paginação do histórico do chat; especificado, ainda não implementado. ([#85](https://github.com/felixstenian/my-registers/pull/85)).
+
+### Deploy
+Deploy automático via `deploy.yml` ao mergear em `main`; nenhuma migration nova nem operação manual na VPS necessária.
+
+---
+
 ## [1.6.1] — 2026-09-04
 
 Manutenção de dependências e segurança do frontend. Sem mudança funcional.
