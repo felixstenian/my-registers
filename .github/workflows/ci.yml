@@ -150,6 +150,17 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
+      # # O runner ubuntu-24.04 vem com o repo `google-chrome` pré-configurado.
+      # # Durante o `apt-get update` que o `playwright install-deps` roda, esse
+      # # repo falha com "Hash Sum mismatch" (o mirror é atualizado no meio da
+      # # checagem). Como o Playwright instala o próprio Chromium, o Chrome de
+      # # sistema é irrelevante — removemos a source flaky antes de instalar.
+      # - name: Remove flaky Google Chrome apt source
+      #   run: |
+      #     sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+      #     sudo rm -rf /var/lib/apt/lists/partial/*
+      #     sudo apt-get update
+
       - name: Install Playwright browsers (with deps)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm --filter web exec playwright install --with-deps chromium

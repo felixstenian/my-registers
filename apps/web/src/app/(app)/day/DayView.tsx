@@ -4,6 +4,7 @@
 
 import { ActivitySection, BeverageSection, HydrationSection } from './AuxiliarySections';
 import { CloseDayButton } from './CloseDayButton';
+import { DailyAddForm } from './DailyAddForm';
 import { DayNavigator } from './DayNavigator';
 import { fmtDateFull, fmtInt, fmtKcal } from './format';
 import { MealSection } from './MealSection';
@@ -57,6 +58,8 @@ export function DayView({
         </div>
         <DayNavigator date={data.date} />
       </header>
+
+      {!dayClosed && <DailyAddForm date={data.date} />}
 
       {isEmpty ? (
         <EmptyState status={data.status} />

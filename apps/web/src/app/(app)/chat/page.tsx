@@ -138,13 +138,13 @@ export default function ChatPage() {
   const lastIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const loadInitial = useCallback(async () => {
+  const loadInitial = useCallback(async (): Promise<Message[] | null> => {
     const result = await api<{ messages: Message[] }>('/chat/messages?limit=100');
-    if (result.ok) {
-      setMessages(result.data.messages);
-      const last = result.data.messages.at(-1);
-      lastIdRef.current = last?.id ?? null;
-    }
+    if (!result.ok) return null;
+    setMessages(result.data.messages);
+    const last = result.data.messages.at(-1);
+    lastIdRef.current = last?.id ?? null;
+    return result.data.messages;
   }, []);
 
   useEffect(() => {
@@ -341,8 +341,17 @@ export default function ChatPage() {
         setFileErrors([]);
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
-      await loadInitial();
-      startPolling();
+      const loaded = await loadInitial();
+      // Race: se o worker respondeu antes do loadInitial terminar, a
+      // assistant já está na lista e o poll (ancorado nela) nunca a veria
+      // como "nova" — revalidateKey não bumpava, a barra de totais ficava
+      // stale e o typing indicator rodava até o cap de 60s. Trata como o
+      // happy path do poll: bumpa a revalidação e não inicia polling.
+      if (loaded?.at(-1)?.role === 'assistant') {
+        setTotalsRevalidateKey((k) => k + 1);
+      } else {
+        startPolling();
+      }
     } finally {
       setSending(false);
     }
@@ -396,7 +405,7 @@ export default function ChatPage() {
   };
 
   return (
-    <main className="mx-auto flex h-[calc(100dvh-49px)] max-w-3xl flex-col gap-2 p-4 pb-[calc(env(safe-area-inset-bottom)+3.5rem)] md:pb-4">
+    <main className="mx-auto flex h-[calc(100dvh-49px)] max-w-3xl flex-col gap-2 p-6 pb-[calc(env(safe-area-inset-bottom)+3.5rem)] md:pb-4">
       <DayTotalsBar
         revalidateKey={totalsRevalidateKey}
         onCloseDayClick={(date) => setClosingDate(date)}

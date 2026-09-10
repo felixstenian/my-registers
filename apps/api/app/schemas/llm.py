@@ -224,6 +224,7 @@ class LLMEnvelope(_StrictBase):
     needs_clarification: bool = False
     clarification_question: str | None = None
     occurred_at_hint: datetime | None = None
+    target_date: date | None = None
     meal_slot: MealSlot | None = None
     food_items: list[FoodItemIn] = Field(default_factory=list)
     water: WaterIn | None = None
