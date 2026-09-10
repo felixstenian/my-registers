@@ -35,6 +35,10 @@ Regras absolutas:
    `intent=correct_record` com `correction.target_hint` descrevendo em linguagem
    natural o item afetado (o backend fará o matching contra registros do dia).
 8. Se disser "remova", "apague", "esqueça", use `intent=delete_record`.
+8a. Se o usuário se referir a um dia ANTERIOR ("ontem comi X", "no dia 03/09",
+    "esqueci de registrar o jantar de ontem"), preencha `target_date` com a data
+    ISO `YYYY-MM-DD` referida. Deixe `null` quando for hoje. Nunca preencha
+    `target_date` com data futura.
 9. Se disser "encerrar dia", "fechar dia", "finalizar hoje", use `intent=close_day`.
 10. Se pedir "resumo da semana", "como foi minha semana", use `intent=weekly_summary`.
 11a. Se o usuário informar dado de perfil corporal — "peso 78 kg", "meço 175 cm",

@@ -41,7 +41,12 @@ function useEditForm() {
     return false;
   }
 
-  return { state, errorMsg, submit };
+  function fail(message: string): void {
+    setState('error');
+    setErrorMsg(message);
+  }
+
+  return { state, errorMsg, submit, fail };
 }
 
 // ---------------------------------------------------------------------------
@@ -50,7 +55,7 @@ function useEditForm() {
 
 import type { FoodItem } from './types';
 
-const EDITABLE_FACT_SOURCES = ['label_ocr', 'manual'] as const;
+const CANONICAL_FACT_SOURCES = ['TBCA_2023', 'USDA_FDC'] as const;
 
 export function EditFoodItemForm({
   item,
@@ -59,7 +64,8 @@ export function EditFoodItemForm({
   item: FoodItem;
   dayClosed: boolean;
 }) {
-  const { state, errorMsg, submit } = useEditForm();
+  const { state, errorMsg, submit, fail } = useEditForm();
+  const [name, setName] = useState(item.detected_name);
   const [grams, setGrams] = useState(item.grams?.toString() ?? '');
   const [ml, setMl] = useState(item.ml?.toString() ?? '');
   const [factKcal, setFactKcal] = useState(item.fact_kcal?.toString() ?? '');
@@ -75,16 +81,17 @@ export function EditFoodItemForm({
     );
   }
 
-  const factEditable =
-    item.catalog_ref_id !== null &&
+  const factIsCanonical =
     item.fact_source !== null &&
-    EDITABLE_FACT_SOURCES.includes(item.fact_source as (typeof EDITABLE_FACT_SOURCES)[number]);
+    CANONICAL_FACT_SOURCES.includes(item.fact_source as (typeof CANONICAL_FACT_SOURCES)[number]);
+  const factEditable = item.catalog_ref_id !== null && item.fact_source !== null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    // Step 1: If per-100g values changed, PATCH the nutrient_fact first
-    // (triggers propagation which recomputes this item's macros).
+    // SP-182/INV-24: se os valores por-100g mudaram, resolve o fact primeiro.
+    // Fact do catálogo canônico (TBCA/USDA) é imutável — clonamos para um fact
+    // `manual` do usuário antes de editar, preservando o catálogo compartilhado.
     if (factEditable && item.catalog_ref_id) {
       const factBody: Record<string, unknown> = {};
       const k = parseFloat(factKcal);
@@ -96,18 +103,30 @@ export function EditFoodItemForm({
       if (!isNaN(c) && c !== item.fact_carbs_g) factBody.carbs_g = c;
       if (!isNaN(f) && f !== item.fact_fat_g) factBody.fat_g = f;
       if (Object.keys(factBody).length > 0) {
-        const ok = await submit(`/nutrient-facts/${item.catalog_ref_id}`, factBody);
+        let factId = item.catalog_ref_id;
+        if (factIsCanonical) {
+          const clone = await api<{ fact_id: string }>(
+            `/records/food-items/${item.id}/clone-fact`,
+            { method: 'POST' },
+          );
+          if (!clone.ok) {
+            fail(clone.error.message);
+            return;
+          }
+          factId = clone.data.fact_id;
+        }
+        const ok = await submit(`/nutrient-facts/${factId}`, factBody);
         if (!ok) return;
       }
     }
 
-    // Step 2: If quantity changed, PATCH the food_item
-    // (recomputes macros from the now-updated fact values).
+    // SP-183: quantidade + nome do item.
     const itemBody: Record<string, unknown> = {};
     const g = parseFloat(grams);
     const m = parseFloat(ml);
     if (!isNaN(g) && g > 0) itemBody.grams = g;
     if (!isNaN(m) && m > 0) itemBody.ml = m;
+    if (name.trim() !== item.detected_name) itemBody.detected_name = name.trim();
     if (Object.keys(itemBody).length > 0) {
       await submit(`/records/food-items/${item.id}`, itemBody);
     }
@@ -116,6 +135,15 @@ export function EditFoodItemForm({
   return (
     <form onSubmit={handleSubmit} className="m-2 space-y-2 flex flex-wrap items-end gap-2">
         <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col text-[11px] text-slate-500 dark:text-slate-400">
+          Nome
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="mt-0.5 w-36 rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+          />
+        </label>
         <label className="flex flex-col text-[11px] text-slate-500 dark:text-slate-400">
           Gramas
           <input
@@ -145,7 +173,7 @@ export function EditFoodItemForm({
       {factEditable && (
         <div className="border-l border-slate-100 pl-2 dark:border-slate-800">
           <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">
-            Valores por 100g (rótulo)
+            Valores por 100g/ml
           </p>
           <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col text-[11px] text-slate-500 dark:text-slate-400">
@@ -212,12 +240,6 @@ export function EditFoodItemForm({
           <span className="text-xs text-red-600 dark:text-red-400">{errorMsg}</span>
         )}
       </div>
-
-      {!factEditable && item.catalog_ref_id !== null && (
-        <p className="text-[10px] italic text-slate-400 dark:text-slate-500">
-          Catálogo canônico macros não editável
-        </p>
-      )}
     </form>
   );
 }
@@ -287,19 +309,32 @@ export function EditBeverageForm({
   dayClosed: boolean;
 }) {
   const { state, errorMsg, submit } = useEditForm();
+  const [name, setName] = useState(record.detected_name);
   const [volume, setVolume] = useState(String(record.volume_ml));
 
   if (dayClosed) return null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    const body: Record<string, unknown> = {};
     const v = parseInt(volume, 10);
-    if (isNaN(v) || v <= 0) return;
-    await submit(`/records/beverage/${record.id}`, { volume_ml: v });
+    if (!isNaN(v) && v > 0) body.volume_ml = v;
+    if (name.trim() !== record.detected_name) body.detected_name = name.trim();
+    if (Object.keys(body).length === 0) return;
+    await submit(`/records/beverage/${record.id}`, body);
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex items-end gap-2 pl-2">
+      <label className="flex flex-col text-[11px] text-slate-500 dark:text-slate-400">
+        Nome
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="mt-0.5 w-32 rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        />
+      </label>
       <label className="flex flex-col text-[11px] text-slate-500 dark:text-slate-400">
         Volume (ml)
         <input
@@ -346,6 +381,7 @@ export function EditActivityForm({
   dayClosed: boolean;
 }) {
   const { state, errorMsg, submit } = useEditForm();
+  const [name, setName] = useState(record.detected_name);
   const [duration, setDuration] = useState(
     record.duration_minutes ? String(record.duration_minutes) : '',
   );
@@ -362,6 +398,7 @@ export function EditActivityForm({
     if (intensity !== record.intensity) body.intensity = intensity;
     const k = parseFloat(kcalBurned);
     if (!isNaN(k) && k >= 0) body.kcal_burned = k;
+    if (name.trim() !== record.detected_name) body.detected_name = name.trim();
     if (Object.keys(body).length === 0) return;
     await submit(`/records/activity/${record.id}`, body);
   }
@@ -371,6 +408,15 @@ export function EditActivityForm({
       onSubmit={handleSubmit}
       className="mt-1 flex flex-wrap items-end gap-2 border-t border-slate-100 px-3 py-2 dark:border-slate-800"
     >
+      <label className="flex flex-col text-[11px] text-slate-500 dark:text-slate-400">
+        Nome
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="mt-0.5 w-32 rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        />
+      </label>
       <label className="flex flex-col text-[11px] text-slate-500 dark:text-slate-400">
         Duração (min)
         <input

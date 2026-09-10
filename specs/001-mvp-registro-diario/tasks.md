@@ -454,6 +454,44 @@ Status: **done**.
 
 ---
 
+## Bloco 8 — Paginação do chat por dia (SP-180..SP-181) — pendente
+
+Meta: a carga inicial do chat (`GET /chat/messages` sem cursor) deixa de devolver "últimas N do histórico" e passa a devolver "últimas N do dia corrente"; o scroll-up liga o cursor `before` (já existente no backend, nunca usado no frontend) para carregar mensagens de dias anteriores. Ver spec §3.2 (SP-180/SP-181), plan.md §9 e ADR-013.
+
+Pré-requisitos: nenhum. Cursor `after`/`before`/`limit` já implementado em `MessageRepository.list_messages`.
+
+- [ ] **T-B801** — `MessageRepository.list_messages` ganha `since` (`datetime` UTC, opcional) e passa a devolver `has_more_before` (usa `LIMIT limit+1` para detectar). Ordenação determinística por `(created_at, id)` e âncoras exclusivas nos três modos (carga inicial, `after`, `before`) — INV-23. `ChatService.list_messages` repassa `since` (início do dia local via `user.timezone`, usando `local_today`) somente quando **não** há `after`/`before`, e propaga `has_more_before`. (M) — SP-180, SP-181, INV-22, INV-23.
+
+- [ ] **T-B802** — `MessagesListResponse` ganha `has_more_before: bool`; `GET /chat/messages` devolve o novo campo. Remover o `print('limit', limit)` leftover em `app/api/routes/chat.py`. (S) — SP-180.
+
+- [ ] **T-B803** — Frontend `chat/page.tsx`: `onScroll` no container rolável (`overflow-y-auto`) detecta topo → `?before=<oldestId>&limit=50` → **prepend** com ancoragem de scroll (restaurar `scrollTop = novoScrollHeight - prevScrollHeight + prevScrollTop`). Novos refs/state `oldestIdRef`, `hasMoreBefore`, `loadingOlder` (guard anti-duplicação); para buscar quando `has_more_before=false`. Ajuste `loadInitial` para registrar `has_more_before` e o ID mais antigo. (L) — SP-181.
+
+- [ ] **T-B804** — Testes: `tests/test_chat.py` — carga inicial restrita ao dia corrente (mensagem de ontem fica fora, INV-22), `has_more_before` true/false, `before` atravessa dias e não duplica (INV-23), `since` filtro no repo. E2E Playwright em `apps/web/e2e/chat.spec.ts`: scroll ao topo carrega histórico. (M) — INV-22, INV-23.
+
+**Gate Bloco 8:** ao abrir `/chat`, só as mensagens de hoje aparecem; rolar para cima carrega dias anteriores sem duplicar/omitir; `has_more_before=false` encerra o carregamento; INV-22/23 verificadas.
+
+---
+
+## Bloco 9 — Edição total no `/day` + registro retroativo (SP-182..SP-185) — pendente
+
+Meta: fechar os dois buracos deixados pelo Bloco 7 — (a) macros de itens do catálogo canônico são "não editáveis" (SP-35), e (b) registro só existe via chat, sempre no dia corrente. Entrega: override de macros canônicos por clone (INV-24), edição de qualquer metadado no `/day`, e registro em dia passado aberto via chat e `/day`. Ver spec §3.17, plan.md §10 e ADR-014.
+
+Pré-requisitos: Bloco 7 (SP-160..169) concluído.
+
+- [ ] **T-B901** — Override canônico (SP-182, INV-24): serviço de clone de `NutrientFact` `TBCA_2023`/`USDA_FDC` → `source='manual'` (`created_by=user`); o path de edição de item com fact canônico cria o clone, aplica a edição, reponta `catalog_ref_id` do item e recomputa — **sem** mutar o fact compartilhado. `PATCH /nutrient-facts/{id}` continua rejeitando fonte canônica (SP-35); o clone é feito pelo path do item. Frontend `EditFoodItemForm` libera os campos por-100g para itens com fact canônico. (M) — SP-182, INV-24.
+
+- [ ] **T-B902** — Edição de metadados (SP-183): estender PATCHs de `/records/{food-items,water,beverage,activity}/{id}` com `detected_name` (todos), `meal_slot`/`occurred_at`/`quantity`/`unit` (comida) e `occurred_at` (água/bebida/atividade); recompute + audit (`action='correct'`). Forms no `/day` espelham os campos. Dia fechado → 409. (M) — SP-183.
+
+- [ ] **T-B903** — Registro retroativo via chat (SP-184): envelope da LLM ganha `target_date` (`YYYY-MM-DD`, opcional); `MessageProcessor` resolve o `day_log` por data via `DayLogRepository.get_or_create` (criando se ausente); dia no passado e aberto → registra naquele dia; dia fechado → resposta amigável `conflict_closed_day`; data futura → `validation_error`. Assistant message confirma a data usada. (L) — SP-184.
+
+- [ ] **T-B904** — Registro retroativo via `/day` (SP-185): form de adição em `/day/[data]` (dia `open`) + endpoints de criação estruturada (sem LLM) que compartilham os services de registro (`meal`/`hydration`/`beverage`/`activity`) já resolvendo `day_log_id` por data; oculto em dia fechado/futuro. (L) — SP-185.
+
+- [ ] **T-B905** — Testes: `tests/test_edit_total_retroactive.py` — SP-182 (clone não muta catálogo, INV-24), SP-183 (metadados, 409 dia fechado), SP-184 (target_date, futuro/fechado rejeitados), SP-185 (criação estruturada). E2E Playwright em `apps/web/e2e/retroactive.spec.ts`. (L) — INV-24, INV-25.
+
+**Gate Bloco 9:** macros de item TBCA editáveis no `/day` sem corromper o catálogo; qualquer metadado editável em dia aberto; registro de dia passado aberto possível via chat e `/day`; dia fechado/futuro sempre rejeitado; INV-24/25 verificadas.
+
+---
+
 ## Backlog (pós-MVP, `may`)
 
 - **B-01** — Persistência agregada de `sugars_g`, `added_sugars_g`, `saturated_fat_g`, `trans_fat_g`.
@@ -471,3 +509,5 @@ Status: **done**.
 ## Histórico
 
 - **2026-07-15** — v1.0. Estrutura inicial. Fase 0 marcada como done. Total: 47 tarefas ativas + 9 backlog.
+- **2026-09-04** — v1.1. Adicionado Bloco 8 (SP-180..SP-181, paginação do chat por dia) com T-B801..T-B804. Corresponde à spec v1.14 e plan.md §9.
+- **2026-09-05** — v1.2. Adicionado Bloco 9 (SP-182..SP-185, edição total no `/day` + registro retroativo) com T-B901..T-B905. Corresponde à spec v1.15 e plan.md §10.
